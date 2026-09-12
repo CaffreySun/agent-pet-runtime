@@ -1,0 +1,6 @@
+{
+  "id": "comet",
+  "displayName": "Comet",
+  "description": "A small round blue companion.",
+  "spritesheetPath": "spritesheet.webp"
+}

@@ -81,10 +81,10 @@ ${CODEX_HOME:-$HOME/.codex}/pets/<pet-name>/
 **但方案遗漏了一件重要的事：Codex 官方约定的安装位置是 `~/.codex/pets/`。** 实测本机该目录已存在且已有 5 个 Pet：
 
 ```
-~/.codex/pets/clippit/         pet.json + spritesheet.webp  (1536x1872)
-~/.codex/pets/Clippy/          pet.json + spritesheet.webp  (1536x1872)
-~/.codex/pets/pet-ben-hill/    pet.json + spritesheet.webp  (1536x2288)  ← V2
-~/.codex/pets/ruixing/         pet.json + spritesheet.webp  (1536x1872)
+~/.codex/pets/pet-one/         pet.json + spritesheet.webp  (1536x1872)
+~/.codex/pets/pet-two/          pet.json + spritesheet.webp  (1536x1872)
+~/.codex/pets/some-v2-pet/    pet.json + spritesheet.webp  (1536x2288)  ← V2
+~/.codex/pets/pet-three/         pet.json + spritesheet.webp  (1536x1872)
 ~/.codex/pets/x-mega-pet/      run/ 目录，无 pet.json       ← 不完整
 ```
 
@@ -94,7 +94,7 @@ ${CODEX_HOME:-$HOME/.codex}/pets/<pet-name>/
 
 ```
 codex    /opt/homebrew/bin/codex                          codex-cli 0.153.4
-claude   /Users/nuc8i7beh/.local/bin/claude               Claude Code 2.1.268
+claude   (via PATH)                                       Claude Code 2.1.268
 grok     /opt/homebrew/bin/grok                           grok 1.0.24 (Grok Build TUI)
 pi       .../node_modules/@earendil-works/pi-coding-agent 0.85.1
 ```
@@ -212,7 +212,7 @@ Runtime managed storage  └── removable
 User source directory    └── never delete automatically
 ```
 
-但没有定义**运行时如何区分这两者**。如果用户从 `~/Downloads/MyPet/` 导入，运行时在 `pets/my-pet/` 建了一份副本，卸载时删副本——这是对的。但如果用户指定 `~/.codex/pets/Clippy/` *本身*为安装位置，就分不清了。
+但没有定义**运行时如何区分这两者**。如果用户从 `~/Downloads/MyPet/` 导入，运行时在 `pets/my-pet/` 建了一份副本，卸载时删副本——这是对的。但如果用户指定 `~/.codex/pets/pet-two/` *本身*为安装位置，就分不清了。
 
 **修正：安装时必须写入 provenance 记录**（见 `ARCHITECTURE.md` §6），至少包含：
 
@@ -247,8 +247,8 @@ XPC 在 §24 出现一次，之后全文再未提及。而 §15.3 明确规定 P
 **实测确认 V2 真实存在**：
 
 ```
-~/.codex/pets/pet-ben-hill/spritesheet.webp   1536x2288
-~/.codex/pets/pet-ben-hill/pet.json           {"spriteVersionNumber": 2, ...}
+~/.codex/pets/some-v2-pet/spritesheet.webp   1536x2288
+~/.codex/pets/some-v2-pet/pet.json           {"spriteVersionNumber": 2, ...}
 ```
 
 `2288 / 208 = 11` 行，与方案描述一致 **[实测]**。
@@ -269,23 +269,23 @@ XPC 在 §24 出现一次，之后全文再未提及。而 §15.3 明确规定 P
 
 实测 5 个真实 manifest，出现了方案未记录的字面字段：
 
-`~/.codex/pets/clippit/pet.json`：
+`~/.codex/pets/pet-one/pet.json`：
 ```json
 {
-  "id": "clippit",
-  "displayName": "Clippy",
+  "id": "pet-one",
+  "displayName": "pet-two",
   "description": "...",
   "spritesheetPath": "spritesheet.webp",
   "kind": "object",                  // ← 方案未记录
   "source": "codex-pets.net",        // ← 方案未记录
-  "sourceId": "clippit"              // ← 方案未记录
+  "sourceId": "pet-one"              // ← 方案未记录
 }
 ```
 
-`~/.codex/pets/pet-ben-hill/pet.json`：
+`~/.codex/pets/some-v2-pet/pet.json`：
 ```json
 {
-  "id": "real-face-pet",             // ← 与目录名 pet-ben-hill 不一致 !
+  "id": "v2-pet",             // ← 与目录名 some-v2-pet 不一致 !
   "displayName": "真实头像宠物",
   "description": "...",
   "spriteVersionNumber": 2,          // ← 方案未记录
@@ -297,7 +297,7 @@ XPC 在 §24 出现一次，之后全文再未提及。而 §15.3 明确规定 P
 
 1. **manifest 的 `id` 与目录名可以不一致。** 方案 §8.5 用 `petID` 作为升级/卸载的主键，但安装来源目录名不等于 `id`。**主键必须是 manifest 的 `id`，目录名仅作展示。**
 2. `kind` / `source` / `sourceId` 是第三方生态（codex-pets.net）的事实字段，解析器**必须宽容忽略未知字段**，而不是 strict decode 失败。
-3. package 里允许有**任意额外文件**（`pet-ben-hill` 里有 `使用说明.txt`）。校验器不能假设目录里只有两个文件。
+3. package 里允许有**任意额外文件**（`some-v2-pet` 里有 `readme.txt`）。校验器不能假设目录里只有两个文件。
 
 ### 2.9 校验器规格缺失——只有"Validate atlas"四个字
 
@@ -486,7 +486,7 @@ v0.1 用丢弃 + App 启动后主动探测当前有哪些 Agent 进程在跑（p
 ```
 pet.json           期望
 spritesheet.webp   期望
-使用说明.txt        实际存在，应允许
+readme.txt        实际存在，应允许
 .DS_Store          实际存在，应忽略
 run/               实际存在（hatch-pet 中间产物），应忽略或提示
 ```

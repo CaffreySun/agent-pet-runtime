@@ -174,7 +174,7 @@ agent-pet-runtime/
 > `000` means up / 12 o'clock, not neutral/front.
 > Neutral/front is the no-vector deadzone and falls back to idle.
 
-**已用真实资产验证**：从本机 `pet-ben-hill`（V2）导出 row 9–10 全部 16 帧，目视确认是连续顺时针的注视姿态——row 9 c0 仰视、c4 正右、row 10 c0 俯视、c7 回到左上。见 `--diagnose --export-frames`。
+**已用真实资产验证**：从本机 `some-v2-pet`（V2）导出 row 9–10 全部 16 帧，目视确认是连续顺时针的注视姿态——row 9 c0 仰视、c4 正右、row 10 c0 俯视、c7 回到左上。见 `--diagnose --export-frames`。
 
 实现：
 
@@ -425,6 +425,20 @@ payload 里的 `background_tasks` 若含 `status: running`，说明任务未完�
 shim 现检测 `GROK_HOOK_NAME` 环境变量（Grok 的 hook runner 注入，Claude Code 自身不设）
 并把 agentID 改判为 `grok`。
 
+### 5.1c Hook 配置热加载 —— 实测结论
+
+**Claude Code 每次派发 hook 时重新读取 `~/.claude/settings.json`，不是启动时读一次。**
+
+实测方法：`SubagentStart` / `SubagentStop` 原先**不在这套 hook 配置里**，
+是在一个已运行数小时的会话存活期间通过 `--configure` 新增的。
+新增后 spawn 一个子 agent，两个事件**在同一进程（ppid 未变）中正常触发**。
+
+**产品含义**：配置完不需要重启 Agent——正在跑的任务不会被中断。
+
+**一个需要注意的边界**：hook 是热加载的，但**已发生的状态不会追溯**。
+引擎里残留的旧状态会一直挂着直到该 session 发出下一个事件。
+UI 因此需要一个显式的 `Clear Activities` 动作。
+
 ### 5.2 Session 关联策略
 
 **hook payload 不含终端窗口标识**（见 `SPEC-REVIEW.md` §3.3）。v0.1 的关联顺序：
@@ -474,13 +488,13 @@ dedupeKey = hash(agentID, eventName, sessionID, payloadEventID)
 ```json
 {
   "schemaVersion": 1,
-  "petID": "clippit",
-  "displayName": "Clippy",
+  "petID": "pet-one",
+  "displayName": "pet-two",
   "compatibilityProfile": "openaiCodexV1",
   "contentHash": "sha256:...",
   "provenance": {
     "kind": "imported",
-    "originalSourcePath": "/Users/x/Downloads/clippit",
+    "originalSourcePath": "/Users/x/Downloads/pet-one",
     "originalSourceRemoved": false,
     "installedAt": "2026-09-12T01:00:00Z",
     "managedByRuntime": true
@@ -578,7 +592,7 @@ enum PetSource: Equatable {
 | 尺寸不匹配任何 profile | 拒绝，显示实际尺寸与期望尺寸 |
 | V2 尺寸但 `spriteVersionNumber` 缺失 | 按尺寸推断为 V2，走上一行逻辑 |
 
-**V2 不得被拒绝**——用户本机已有 V2 资产（`~/.codex/pets/pet-ben-hill/`）。
+**V2 不得被拒绝**——用户本机已有 V2 资产（`~/.codex/pets/some-v2-pet/`）。
 
 ---
 

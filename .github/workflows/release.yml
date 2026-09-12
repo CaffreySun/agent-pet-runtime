@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha256: ${{ steps.package.outputs.sha256 }}
+      url: ${{ steps.package.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # Tags are vX.Y.Z; the bundle wants X.Y.Z.
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"           >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG as $VERSION"
+
+      - name: Test before shipping
+        # A release that fails its own tests is worse than no release.
+        run: swift test --parallel
+
+      - name: Build the app bundle
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: ./Scripts/build-app.sh
+
+      - name: Package
+        id: package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          NAME="AgentPet-${VERSION}.zip"
+          cd build
+          # ditto preserves the bundle's symlinks and metadata; zip(1) does not.
+          ditto -c -k --sequesterRsrc --keepParent AgentPet.app "$NAME"
+          CHECKSUM=$(shasum -a 256 "$NAME" | awk '{print $1}')
+          echo "sha256=$CHECKSUM" >> "$GITHUB_OUTPUT"
+          echo "url=https://github.com/${{ github.repository }}/releases/download/v${VERSION}/${NAME}" >> "$GITHUB_OUTPUT"
+          echo "packaged $NAME"
+          echo "sha256 $CHECKSUM"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          gh release create "$TAG" \
+            "build/AgentPet-${VERSION}.zip" \
+            --title "Agent Pet Runtime ${VERSION}" \
+            --generate-notes \
+            --verify-tag || \
+          gh release upload "$TAG" "build/AgentPet-${VERSION}.zip" --clobber
+
+      - name: Upload the bundle as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentPet-${{ steps.version.outputs.version }}
+          path: build/AgentPet-${{ steps.version.outputs.version }}.zip
+          retention-days: 30
+
+  homebrew:
+    name: Update the Homebrew formula
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Skipped rather than failed when the tap token is absent, so a release
+    # still succeeds for anyone who has not set one up.
+    if: ${{ needs.release.result == 'success' }}
+
+    steps:
+      - name: Check for a tap token
+        id: guard
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; skipping the formula update."
+            echo "           See the release section of the README to enable it."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the tap
+        if: steps.guard.outputs.available == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Rewrite the formula
+        if: steps.guard.outputs.available == 'true'
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          SHA256: ${{ needs.release.outputs.sha256 }}
+          URL: ${{ needs.release.outputs.url }}
+        run: |
+          mkdir -p tap/Formula
+          cat > tap/Formula/agent-pet-runtime.rb <<RUBY
+          class AgentPetRuntime < Formula
+            desc "macOS desktop pet that reacts to what your CLI agents are doing"
+            homepage "https://github.com/${{ github.repository }}"
+            url "${URL}"
+            sha256 "${SHA256}"
+            license "MIT"
+            version "${VERSION}"
+
+            # A prebuilt app bundle, not a source build: the runtime is a GUI
+            # app and a shim, and compiling Swift on every install would be a
+            # poor experience for something you might install on a whim.
+            depends_on :macos
+
+            def install
+              prefix.install "AgentPet.app"
+              # The shim has to be reachable on PATH too: the hook commands the
+              # app writes point at wherever it found the binary.
+              bin.install_symlink prefix/"AgentPet.app/Contents/MacOS/agentpet-hook"
+            end
+
+            def caveats
+              <<~EOS
+                Agent Pet Runtime lives in the menu bar. Launch it with:
+                  open "#{opt_prefix}/AgentPet.app"
+
+                Then connect an agent:
+                  "#{opt_prefix}/AgentPet.app/Contents/MacOS/AgentPet" --configure claude-code
+              EOS
+            end
+
+            test do
+              # The shim must run and must never fail, whatever the state.
+              assert_match version.to_s, shell_output(
+                "#{prefix}/AgentPet.app/Contents/MacOS/agentpet-hook --version"
+              )
+            end
+          end
+          RUBY
+
+          # Strip the heredoc indentation Ruby would otherwise keep.
+          sed -i 's/^          //' tap/Formula/agent-pet-runtime.rb
+
+      - name: Commit and push
+        if: steps.guard.outputs.available == 'true'
+        run: |
+          cd tap
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/agent-pet-runtime.rb
+          if git diff --staged --quiet; then
+            echo "formula already current"
+          else
+            git commit -m "agent-pet-runtime ${VERSION}"
+            git push
+            echo "pushed formula for ${VERSION}"
+          fi

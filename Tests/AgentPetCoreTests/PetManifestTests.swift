@@ -2,8 +2,11 @@ import Foundation
 import Testing
 @testable import AgentPetCore
 
-/// Fixtures are verbatim copies of packages found in `~/.codex/pets/` on the
-/// development machine — including the ones that break naive assumptions.
+/// Fixtures are synthetic, but each reproduces a shape real packages actually
+/// have: a minimal manifest, one carrying extra third-party fields, a V2
+/// package whose id differs from its folder name, and a non-ASCII display
+/// name. They are synthetic so the repository carries no third-party or
+/// personal content.
 private func fixture(_ name: String) throws -> Data {
     let url = Bundle.module.url(
         forResource: "Fixtures/manifests/\(name)",
@@ -97,41 +100,41 @@ struct PetManifestTests {
 @Suite("PetManifest against real packages from ~/.codex/pets")
 struct RealPackageManifestTests {
 
-    @Test("clippit decodes with its extra ecosystem fields")
-    func clippit() throws {
-        let m = try PetManifest.decode(from: fixture("clippit"))
-        #expect(m.id == "clippit")
+    @Test("a manifest with extra ecosystem fields decodes")
+    func ecosystemFields() throws {
+        let m = try PetManifest.decode(from: fixture("ecosystem"))
+        #expect(m.id == "pebble")
         #expect(m.kind == "object")
-        #expect(m.source == "codex-pets.net")
-        #expect(m.sourceId == "clippit")
+        #expect(m.source == "example-pets.test")
+        #expect(m.sourceId == "pebble")
         #expect(m.spriteVersionNumber == nil)
         // No explicit version, so the profile must come from the atlas size.
         #expect(m.declaredProfile == nil)
     }
 
-    @Test("clippy decodes from the minimal form")
-    func clippy() throws {
-        let m = try PetManifest.decode(from: fixture("clippy"))
-        #expect(m.id == "clippy")
+    @Test("the minimal form decodes")
+    func minimalForm() throws {
+        let m = try PetManifest.decode(from: fixture("minimal"))
+        #expect(m.id == "comet")
         #expect(m.kind == nil)
         #expect(m.declaredProfile == nil)
     }
 
-    @Test("ruixing carries a non-ASCII display name intact")
-    func ruixing() throws {
-        let m = try PetManifest.decode(from: fixture("ruixing"))
-        #expect(m.displayName.contains("瑞星"))
+    @Test("a non-ASCII display name survives intact")
+    func unicodeDisplayName() throws {
+        let m = try PetManifest.decode(from: fixture("unicode"))
+        #expect(m.displayName.contains("月亮兔"))
         #expect(m.kind == "animal")
     }
 
-    @Test("v2 package declares its profile explicitly")
-    func benHillV2() throws {
-        let m = try PetManifest.decode(from: fixture("ben-hill-v2"))
+    @Test("a v2 package declares its profile explicitly")
+    func v2Declaration() throws {
+        let m = try PetManifest.decode(from: fixture("v2"))
         #expect(m.spriteVersionNumber == 2)
         #expect(m.declaredProfile == .openAICodexV2)
-        // The manifest id deliberately does not match its directory name
-        // (`pet-ben-hill`). The manifest is authoritative.
-        #expect(m.id == "real-face-pet")
+        // The id deliberately does not match the file it sits in, as happens
+        // with real packages whose folder name differs from the manifest's.
+        #expect(m.id == "lantern-moth")
     }
 }
 
@@ -140,14 +143,14 @@ struct ProfileResolutionTests {
 
     @Test("v1 atlas with no declared version resolves to V1")
     func v1BySize() throws {
-        let m = try PetManifest.decode(from: fixture("clippit"))
+        let m = try PetManifest.decode(from: fixture("ecosystem"))
         let p = try m.resolveProfile(atlasWidth: 1536, atlasHeight: 1872)
         #expect(p == .openAICodexV1)
     }
 
     @Test("v2 atlas with matching declared version resolves to V2")
     func v2ByDeclaration() throws {
-        let m = try PetManifest.decode(from: fixture("ben-hill-v2"))
+        let m = try PetManifest.decode(from: fixture("v2"))
         let p = try m.resolveProfile(atlasWidth: 1536, atlasHeight: 2288)
         #expect(p == .openAICodexV2)
     }
@@ -161,7 +164,7 @@ struct ProfileResolutionTests {
 
     @Test("a declared version contradicting the atlas is a defect, not a guess")
     func contradictionRejected() throws {
-        let m = try PetManifest.decode(from: fixture("ben-hill-v2"))
+        let m = try PetManifest.decode(from: fixture("v2"))
         #expect(throws: PetManifestError.self) {
             try m.resolveProfile(atlasWidth: 1536, atlasHeight: 1872)
         }

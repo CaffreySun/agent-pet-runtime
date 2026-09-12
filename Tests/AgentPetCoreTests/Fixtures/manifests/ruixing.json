@@ -1,9 +1,0 @@
-{
-  "id": "ruixing",
-  "displayName": "Ruixing Lion 瑞星小狮子Kaka",
-  "description": "A custom Codex companion.",
-  "spritesheetPath": "spritesheet.webp",
-  "kind": "animal",
-  "source": "codex-pets.net",
-  "sourceId": "ruixing"
-}

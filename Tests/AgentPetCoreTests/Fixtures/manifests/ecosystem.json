@@ -1,0 +1,9 @@
+{
+  "id": "pebble",
+  "displayName": "Pebble",
+  "description": "A grey stone with unsettlingly large eyes.",
+  "spritesheetPath": "spritesheet.webp",
+  "kind": "object",
+  "source": "example-pets.test",
+  "sourceId": "pebble"
+}

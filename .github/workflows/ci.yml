@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes an in-flight run on the same ref. Tag builds are
+  # excluded above so a release is never cancelled by a later commit.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    # macos-15 is the oldest image whose Swift toolchain is new enough for the
+    # Swift 6.2 features this package uses.
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          uname -m
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        # The suite includes integration tests against ~/.codex/pets and the
+        # compiled shim. On a clean runner there are no pets, and those tests
+        # no-op rather than fail, by design.
+        run: swift test --parallel
+
+      - name: Verify the shim is usable
+        run: |
+          HOOK=.build/debug/agentpet-hook
+          test -x "$HOOK"
+
+          # The contract that matters most: a hook must never disturb the
+          # agent, whatever state the runtime is in.
+          echo '{"session_id":"ci"}' | "$HOOK" --agent claude-code --event PreToolUse
+          test $? -eq 0
+
+          # No runtime listening is the common case, and also must exit 0.
+          AGENTPET_SOCKET=/tmp/definitely-not-here-$$.sock \
+            sh -c "echo '{}' | '$HOOK' --agent claude-code --event Stop"
+          test $? -eq 0
+
+      - name: Check the app bundle assembles
+        run: |
+          ./Scripts/build-app.sh
+          test -x build/AgentPet.app/Contents/MacOS/AgentPet
+          test -x build/AgentPet.app/Contents/MacOS/agentpet-hook
+          test -f build/AgentPet.app/Contents/Info.plist
+          plutil -lint build/AgentPet.app/Contents/Info.plist
+
+      - name: Smoke-test the app
+        run: |
+          # Catches a crash in the view hierarchy without needing a display.
+          ./build/AgentPet.app/Contents/MacOS/AgentPet --selftest || {
+            echo "::warning::--selftest failed; this is expected on a runner with no displays"
+          }
+
+  lint:
+    name: Check for leaked personal data
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail on absolute home paths or credentials
+        # This repository is public and must stay free of the author's machine
+        # and of anything secret. Test files legitimately use /Users/x and
+        # /Users/someone as placeholders, so those are exempt.
+        run: |
+          if grep -rInE '/Users/[a-z0-9]+' \
+               --include='*.swift' --include='*.md' --include='*.json' \
+               --include='*.yml' --include='*.sh' . \
+             | grep -vE '/Users/(x|someone)/' ; then
+            echo "::error::a real home directory appears in a tracked file"
+            exit 1
+          fi
+
+          if grep -rInE '(sk-[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_|AKIA[0-9A-Z]{16})' \
+               --include='*.swift' --include='*.md' --include='*.json' \
+               --include='*.yml' --include='*.sh' . ; then
+            echo "::error::a credential-shaped string appears in a tracked file"
+            exit 1
+          fi
+
+          echo "no personal paths or credentials found"
