@@ -1,0 +1,7 @@
+{
+  "id": "real-face-pet",
+  "displayName": "真实头像宠物",
+  "description": "使用真实照片头部、统一夸张头身比例、深蓝小立领与完整手部制作的 v2 动画宠物。",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp"
+}
