@@ -1,40 +1,48 @@
 # Agent Pet Runtime
 
+**English** · [简体中文](README.zh-CN.md)
+
 A macOS desktop pet that reacts to what your CLI coding agents are doing.
 
-An implementation of the `Agent_Pet_Runtime_v0.1.md` design. The design was
-reviewed against reality before implementation and several parts of it changed;
-see `docs/SPEC-REVIEW.md` for what held up, what did not, and the evidence.
+Claude Code hits a permission prompt and the pet raises a paw. A task finishes
+and it celebrates, then goes back to idling. Move it around and it walks the way
+you drag it. Leave it alone and it looks at your cursor, in sixteen directions.
 
-## Status
+It is not a toy bolted onto a log parser. Agent state is modelled properly, the
+bridge is measured and bounded, and nothing is recorded that should not be.
 
-| Milestone | State |
-|---|---|
-| Core domain, pet loading, validation, activity engine, animation | done |
-| Floating pet renderer | done — renders, drags, remembers position |
-| Agent event bridge (shim + socket) | done — verified against the real binary |
-| Pet Manager (import, preview, upgrade, uninstall) | done |
-| Agent Integrations (detect, configure, remove, test) | done for Claude Code |
-| Activity Center | done |
-| Settings, Launch at Login, diagnostics export | done |
-
-**283 tests.** Seven of them run the compiled `agentpet-hook` binary against a
-live socket rather than an in-process stand-in, because the boundary between
-this app and a real agent *is* the binary.
-
-## Running
-
-```bash
-swift build
-swift run AgentPet
+```
+   Claude Code ─┐
+   Codex       ─┤          spawns          ┌──────────────┐
+   Grok        ─┼──────► agentpet-hook ───►│    socket    │
+   Pi          ─┘          (~5 ms)         └──────┬───────┘
+                                                  │
+                       ┌──────────────────────────▼──────────────────────┐
+                       │  normalize → activity engine → animation → pet  │
+                       └─────────────────────────────────────────────────┘
 ```
 
-Menu bar 🐾 → **Open Pet Manager** for the full window, or use the menu
-directly for pets, animation previews, and settings.
+---
 
-### Wiring up a real agent
+## Install
 
-Nothing is configured to talk to the bridge until you say so. Either:
+Not yet packaged. Build from source:
+
+```bash
+git clone https://github.com/dncore/agent-pet-runtime.git
+cd agent-pet-runtime
+swift build -c release
+./Scripts/build-app.sh          # assembles AgentPet.app
+open build/AgentPet.app
+```
+
+Requires macOS 14+ and Swift 6.2+ (Xcode 26).
+
+---
+
+## Connecting your agents
+
+Nothing is configured until you say so. Either use the menu bar, or:
 
 ```bash
 swift run AgentPet --status                    # what is installed and configured
@@ -42,56 +50,97 @@ swift run AgentPet --configure claude-code     # install the hooks
 swift run AgentPet --unconfigure claude-code   # remove exactly what it wrote
 ```
 
-or use **Agents → Configure** in the window. Both paths run the same code.
+**No restart is required.** Claude Code re-reads `~/.claude/settings.json` on
+every hook dispatch, so hooks added mid-session take effect on the next event.
+Sessions running long jobs are not interrupted. (Verified by adding
+`SubagentStart`/`SubagentStop` to a session that had been running for hours and
+watching them fire.)
 
-Only Claude Code is configurable. Grok's hooks live in TOML and Codex's `notify`
-is an argv array; neither is something the JSON transaction can edit safely, so
-those agents are detected and reported as not configurable rather than
-half-supported.
+Only Claude Code is configurable today. Grok's hooks live in TOML and Codex's
+`notify` is an argv array; neither is something the JSON transaction can edit
+safely, so those agents are detected and reported as *not configurable* rather
+than half-supported.
 
-Configuration is transactional: snapshot, back up, edit in memory, re-check for
-concurrent writes, write atomically, verify, and restore on any failure. Running
-Configure twice changes nothing. Removing deletes only the lines the runtime
-wrote — anything you wrote yourself is untouched.
+### What configuring does
 
-### Self-checks
+It adds hook lines to `~/.claude/settings.json` and nothing else:
 
-```bash
-swift run AgentPet --diagnose                      # what pets are discoverable, and why
-swift run AgentPet --diagnose --export-frames /tmp/frames
-swift run AgentPet --selftest                      # render every state, measure the output
-swift test
-```
+- **Backed up first.** The previous file is copied to the runtime's backup
+  directory before anything is written.
+- **Atomic.** Written to a temporary file and renamed, so a reader sees the old
+  file or the new one, never a half-written one.
+- **Idempotent.** Running Configure twice changes nothing.
+- **Reversible.** Remove Integration deletes only the lines the runtime wrote.
+  Hook lines belonging to other tools — and there are usually several — are
+  left alone.
+- **Concurrency-aware.** Claude Code writes that file itself. If it changes
+  between read and write, the edit is abandoned rather than clobbering it.
 
-`--selftest` renders each agent state through the live view and counts
-non-transparent pixels in the backing store. It exists because `screencapture`
-returns only wallpaper without Screen Recording permission, so a pixel count
-from the view's own buffer is the only dependable evidence that anything is
-being drawn.
+It never touches model settings, credentials, or prompts.
 
-## Layout
+---
 
-```
-Sources/AgentPetCore/          Pure logic. No AppKit, so it is all testable headlessly.
-├── Domain/                    AgentState, AgentEvent, AgentActivity, Confidence
-├── Activity/                  ActivityEngine — priority, aging, focus hold, dwell
-├── Bridge/                    Envelope, framing, server, normalizer, hook setup
-├── Pet/                       Manifest, profiles, validation, decoding, frames
-├── Pets/                      Store: install, upgrade, uninstall, provenance
-├── Integration/               Config transaction, configurators, detection, records
-├── Runtime/                   AnimationResolver
-├── Settings/                  AppConfig
-└── Diagnostics/               Transition log, exportable bundle
+## How agent state is read
 
-Sources/AgentPetApp/           AppKit + SwiftUI: NSPanel pet, manager window, menu bar.
-Sources/agentpet-hook/         The shim agents execute. Must always exit 0.
-Tests/AgentPetCoreTests/       283 tests, fixtures copied verbatim from real packages.
-```
+An agent's state is a small state machine driven by hook events. The mapping is
+the part most implementations get wrong, so it is spelled out here.
 
-## Measured properties
+| Agent says | Pet shows | Why |
+|---|---|---|
+| `PermissionRequest` | **waiting** | The only event meaning *the agent cannot proceed without you* |
+| `PreToolUse` / `PostToolUse` / `UserPromptSubmit` | running | Work in progress |
+| `Stop` | celebrating, then idle | Fires at the end of *every turn*, not the session |
+| `TaskCompleted` | celebrating | An actual task finished |
+| `StopFailure` | failed | A failed turn is not a successful one |
+| `SessionEnd` | *(removed)* | Session over |
 
-**Shim latency.** The shim runs on the agent's critical path, once per tool
-call, so this decides whether the design is viable at all:
+Three details that only show up against a real agent:
+
+**`Notification` is a grab bag.** It carries `permission_prompt`, `idle_prompt`,
+`auth_success`, and `elicitation_dialog`, distinguished only by a field. Treating
+all of it as "waiting for input" leaves the pet permanently asking for attention
+as soon as you have more than one session open. Only `permission_prompt` maps;
+the rest change nothing.
+
+**`Stop` lies when a subagent is running.** It fires whenever the main agent
+yields, which happens while a background subagent is still working. The payload
+lists `background_tasks`; if one is still running, the turn has not finished.
+
+**Grok reads Claude Code's config.** Grok Build scans and trusts
+`~/.claude/settings.json`, so hooks installed there fire on Grok events too. The
+shim checks `GROK_HOOK_NAME` and re-labels them rather than reporting every Grok
+session as Claude Code.
+
+---
+
+## How the pet animates
+
+The published pet contract defines nine standard animation rows plus sixteen
+gaze poses, each with **per-frame timings in milliseconds**. They are not
+uniform: `idle` runs `280, 110, 110, 140, 140, 320` — a breath, with the ends
+held two to three times as long as the middle. A single frame rate cannot
+reproduce that, so the runtime stores a duration per frame.
+
+Playback is layered, first match wins:
+
+| Layer | Driven by |
+|---|---|
+| 1. Dragging | which way you are moving it — `running-left` / `running-right` |
+| 2. A playing gesture | one-shots: `jumping`, `waving` |
+| 3. Agent state | the table above |
+| 4. Gaze | where your pointer is — sixteen poses, 22.5° apart |
+| 5. Idle | the fallback |
+
+Dragging outranks everything: you are holding it. Gaze only applies when the pet
+would otherwise be idle, and falls back while the pointer is too close to give a
+direction — the contract's "no-vector deadzone".
+
+---
+
+## Performance
+
+The shim runs on the agent's critical path, once per tool call, so this is the
+number that decides whether the design is viable at all.
 
 | | P50 | P95 | P99 | max |
 |---|---|---|---|---|
@@ -102,55 +151,82 @@ Budget is P50 < 5 ms, P99 < 25 ms, over 500 samples. Swift with Foundation
 starts in 3.72 ms against C's 2.23 ms; the 1.2 ms buys a JSON envelope that can
 be debugged with `nc -U`.
 
-## Design decisions worth knowing
-
-**The event bridge is not a server the agents connect to.** Codex, Claude Code
-and Grok all deliver hooks by spawning a process; Pi delivers in-process. The
-bridge is a shim the agent executes plus a socket it writes to.
-
 **The shim always exits 0.** Claude Code treats a non-zero hook exit as
-meaningful and will change agent behaviour in response. A pet that alters the
-user's agents would be a far worse bug than a pet that misses an event.
+meaningful and will change agent behaviour in response — a pet that alters your
+agents would be a far worse bug than a pet that misses an event.
 
-**Animation timings are per frame, not a frame rate.** The published contract
-gives explicit milliseconds for every frame and they are not uniform — `idle`
-runs `280, 110, 110, 140, 140, 320`. That is a breath, and a single fps cannot
-reproduce it.
+---
 
-**Only four of the nine standard rows are driven by agent state.** `waving` is
-a greeting for when the pet is clicked, and `running-left`/`running-right` are
-locomotion driven by which way the pet is being dragged. Treating all nine as
-state rows is a category error.
+## Privacy
 
-**V2's extra rows are gaze poses, not spare capacity.** Rows 9 and 10 are
-sixteen clockwise look directions at 22.5° intervals, `000` being straight up.
-Verified against the art: exporting all sixteen poses from a real V2 pet shows
-a continuous clockwise turn. A V1 atlas has nowhere to put a direction, so it
-simply never looks around.
+Local only. Nothing is uploaded, and there is no cloud component.
 
-**Surplus-cell residue is a warning, not an error.** OpenAI's authoring
-validator fails on any stray pixel past a row's frame count, but this renderer
-only samples columns `0..<frameCount`, so those pixels are unreachable and
-cannot affect playback. Measurement backs this: three installed pets are clean,
-while `pet-ben-hill` carries 13,560 stray pixels and still installs.
+The runtime reads session ids, working directories, and event names. It does
+**not** read prompts, model output, or source code — not filtered, simply never
+read. The integration records it writes to disk contain hook commands and
+timestamps, and nothing else.
 
-**Install validates before it commits.** A package is fully copied and checked
-in `staging/` before `pets/` is touched, so a rejected package leaves no trace —
-rollback with nothing to roll back. `managedByRuntime` is the single field
-deciding whether uninstall may delete, which is what makes "never delete the
-user's package" implementable rather than aspirational.
+`--log-events` writes a diagnostic capture, off by default. It keeps only the
+fields diagnosis needs and drops `tool_input`, `tool_response`, and
+`transcript_path` — an allowlist, so a field a future agent build adds cannot
+leak into a log by default. Files are written `0600`.
 
-**`~/.codex/pets/` is read-only.** The Codex toolchain owns that directory.
-Pets found there are offered for import into the runtime's own store and
-nothing ever writes back.
+---
 
-## Not built
+## Development
 
-- **Grok, Codex and Pi configuration.** Detected, not configurable — their
-  config formats need their own configurators.
-- **Codex app-server IPC.** `~/.codex/ipc/ipc.sock` may be a richer event
-  source than the `notify` hook. Unverified.
-- **Window focusing.** Hook payloads carry no terminal identity, so clicking an
-  activity opens its project directory instead of raising a window.
-  `docs/SPEC-REVIEW.md` §3.3 explains why and what the path forward is.
-- **Multi Pet.** One pet on the desktop at a time.
+```bash
+swift build && swift test        # 347 tests
+swift run AgentPet               # run it
+
+swift run AgentPet --diagnose                      # what pets are discoverable, and why
+swift run AgentPet --diagnose --export-frames /tmp/frames
+swift run AgentPet --selftest                      # render every state, measure the output
+```
+
+`--selftest` exists because screenshots are not always available: without Screen
+Recording permission, `screencapture` returns only wallpaper. It draws each
+state through the live view and counts non-transparent pixels in the backing
+store instead, and also asserts the pet is grabbable — a pet that renders
+perfectly but cannot be dragged looks identical to a working one.
+
+```
+Sources/AgentPetCore/     Pure logic. No AppKit, so it is all testable headlessly.
+├── Domain/               AgentState, AgentEvent, AgentActivity, Confidence
+├── Activity/             ActivityEngine — priority, aging, focus hold, dwell
+├── Bridge/               Envelope, framing, server, normalizer, hook setup
+├── Pet/                  Manifest, compatibility profiles, validation, decoding
+├── Pets/                 Store: install, upgrade, uninstall, provenance
+├── Integration/          Config transaction, configurators, detection
+├── Runtime/              AnimationResolver, drag geometry
+├── Settings/             AppConfig
+└── Diagnostics/          Transition log, event capture, exportable bundle
+
+Sources/AgentPetApp/      AppKit + SwiftUI: floating pet, manager window, menu bar
+Sources/agentpet-hook/    The shim agents execute. Must always exit 0.
+```
+
+`docs/SPEC-REVIEW.md` is the design review this was built from — what held up,
+what did not, and the evidence for each. `docs/ARCHITECTURE.md` is the
+corrected specification.
+
+---
+
+## Status
+
+| | |
+|---|---|
+| Core, pet loading, validation, activity engine | done |
+| Floating pet, drag, gaze, position memory | done |
+| Event bridge, verified against the real binary | done |
+| Pet Manager: import, preview, upgrade, uninstall | done |
+| Agent Integrations: detect, configure, remove | Claude Code only |
+| Activity Center, Settings, diagnostics export | done |
+| Grok / Codex / Pi configuration | not built — their formats need their own configurators |
+| Window focusing | opens the project folder; hooks carry no terminal identity |
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).

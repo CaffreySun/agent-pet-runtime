@@ -52,7 +52,7 @@ struct RealPackageIntegrationTests {
             #expect(loaded.definition.profile.atlasWidth == loaded.atlas?.width)
 
             // The manifest's own id is authoritative even when it disagrees
-            // with the directory name — `pet-ben-hill` ships `real-face-pet`.
+            // with the directory name — a folder name may not match the manifest id.
             print("[\(name)] id=\(loaded.definition.id) "
                   + "profile=\(loaded.definition.profile.rawValue) "
                   + "atlas=\(loaded.atlas?.width ?? 0)x\(loaded.atlas?.height ?? 0) "
@@ -87,18 +87,23 @@ struct RealPackageIntegrationTests {
         }
     }
 
-    @Test("the v2 package is accepted rather than rejected")
+    @Test("a v2 package is accepted rather than rejected")
     func v2Accepted() throws {
-        let packages = RealPets.manifests()
-        guard let v2 = packages.first(where: { $0.name == "pet-ben-hill" }) else { return }
+        let loader = PetPackageLoader()
+        // No v2 pet is guaranteed to be installed, so this asserts the loader
+        // accepts one rather than requiring the machine to have one.
+        guard let v2 = RealPets.manifests().first(where: { _, root in
+            (try? loader.load(from: root, decodeAtlas: false))?.definition.profile == .openAICodexV2
+        }) else { return }
 
-        let loaded = try PetPackageLoader().load(from: v2.root)
+        let loaded = try loader.load(from: v2.root)
         #expect(loaded.definition.profile == .openAICodexV2)
         #expect(loaded.isValid, "a v2 pet must load: \(loaded.report.errors.map(\.message))")
         // V2 is fully supported: its extra rows are gaze poses, not spare
         // capacity, so there is nothing partial left to warn about.
         #expect(loaded.definition.profile.hasLookDirections)
         #expect(loaded.atlas?.height == 2288)
+        #expect(loaded.report.warnings.allSatisfy { !$0.message.contains("partially supported") })
     }
 
     @Test("discovery skips the package that has no manifest")

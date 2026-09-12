@@ -1,4 +1,44 @@
+# Swift Package Manager
 .build/
 .swiftpm/
+Package.resolved
 *.xcodeproj
+*.xcworkspace
+
+# Build output
+build/
+dist/
+*.app
+*.dSYM
+
+# macOS
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Local runtime state, if anyone points the app at the source tree
+metadata.json
+bridge.sock
+integrations/
+backups/
+pet-backups/
+staging/
+
+# Event captures. These record what an agent did and are never committed,
+# even though the fields carrying user content are dropped.
+*.jsonl
+events*.json
+capture*.json
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~

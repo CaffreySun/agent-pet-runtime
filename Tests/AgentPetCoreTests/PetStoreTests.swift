@@ -95,13 +95,13 @@ struct PetInstallTests {
     func installBasics() throws {
         let builder = try PetPackageBuilder()
         defer { builder.cleanup() }
-        let source = try builder.makePet("Clippy", displayName: "Clippy")
+        let source = try builder.makePet("Comet", displayName: "Comet")
         let store = try builder.makeStore()
 
         let installed = try store.install(from: source, provenance: .imported)
 
-        #expect(installed.id == "clippy")
-        #expect(installed.metadata.displayName == "Clippy")
+        #expect(installed.id == "comet")
+        #expect(installed.metadata.displayName == "Comet")
         #expect(installed.metadata.provenance.kind == .imported)
         #expect(installed.metadata.provenance.originalSourcePath == source.path)
         #expect(installed.isManagedByRuntime)
@@ -113,7 +113,7 @@ struct PetInstallTests {
         let builder = try PetPackageBuilder()
         defer { builder.cleanup() }
         let store = try builder.makeStore()
-        let installed = try store.install(from: try builder.makePet("Clippy"), provenance: .imported)
+        let installed = try store.install(from: try builder.makePet("Comet"), provenance: .imported)
 
         let metadata = installed.root
             .appendingPathComponent(".agentpet/metadata.json")
@@ -124,7 +124,7 @@ struct PetInstallTests {
     func installIsACopy() throws {
         let builder = try PetPackageBuilder()
         defer { builder.cleanup() }
-        let source = try builder.makePet("Clippy")
+        let source = try builder.makePet("Comet")
         let store = try builder.makeStore()
         let installed = try store.install(from: source, provenance: .imported)
 
@@ -170,7 +170,7 @@ struct PetInstallTests {
         let builder = try PetPackageBuilder()
         defer { builder.cleanup() }
         // Folder says one thing, manifest says another — as in a real package
-        // where `pet-ben-hill/` ships id `real-face-pet`.
+        // where `some-folder/` ships a different id.
         let source = try builder.makePet("some-folder-name", id: "real-id")
         let store = try builder.makeStore()
 
@@ -195,11 +195,11 @@ struct PetInstallTests {
         let builder = try PetPackageBuilder()
         defer { builder.cleanup() }
         let store = try builder.makeStore()
-        try store.install(from: try builder.makePet("Clippy"), provenance: .imported)
+        try store.install(from: try builder.makePet("Comet"), provenance: .imported)
 
         let reopened = PetStore(root: store.root)
         #expect(reopened.installedPets().count == 1)
-        #expect(reopened.installedPets().first?.id == "clippy")
+        #expect(reopened.installedPets().first?.id == "comet")
     }
 }
 
@@ -282,9 +282,9 @@ struct PetUninstallTests {
         let builder = try PetPackageBuilder()
         defer { builder.cleanup() }
         let store = try builder.makeStore()
-        let installed = try store.install(from: try builder.makePet("Clippy"), provenance: .imported)
+        let installed = try store.install(from: try builder.makePet("Comet"), provenance: .imported)
 
-        let outcome = try store.uninstall(petID: "clippy")
+        let outcome = try store.uninstall(petID: "comet")
 
         #expect(outcome.removedFromDisk)
         #expect(!FileManager.default.fileExists(atPath: installed.root.path))
@@ -296,10 +296,10 @@ struct PetUninstallTests {
         let builder = try PetPackageBuilder()
         defer { builder.cleanup() }
         let store = try builder.makeStore()
-        let source = try builder.makePet("Clippy")
+        let source = try builder.makePet("Comet")
 
         try store.install(from: source, provenance: .imported)
-        _ = try store.uninstall(petID: "clippy")
+        _ = try store.uninstall(petID: "comet")
 
         #expect(FileManager.default.fileExists(atPath: source.path),
                 "the user's own copy must never be deleted")
@@ -313,10 +313,10 @@ struct PetUninstallTests {
         let store = try builder.makeStore()
 
         // Install a pet, then rewrite its metadata to look discovered.
-        let installed = try store.install(from: try builder.makePet("Clippy"), provenance: .codexPets)
+        let installed = try store.install(from: try builder.makePet("Comet"), provenance: .codexPets)
         try markUnmanaged(at: installed.root)
 
-        let outcome = try store.uninstall(petID: "clippy")
+        let outcome = try store.uninstall(petID: "comet")
 
         #expect(!outcome.removedFromDisk)
         #expect(FileManager.default.fileExists(atPath: installed.root.path),
@@ -418,11 +418,11 @@ struct PetDiscoveryTests {
         let builder = try PetPackageBuilder()
         defer { builder.cleanup() }
         let store = try builder.makeStore()
-        try store.install(from: try builder.makePet("Clippy"), provenance: .imported)
+        try store.install(from: try builder.makePet("Comet"), provenance: .imported)
 
         let found = store.discoverCodexPets()
         // Depends on the machine's ~/.codex/pets; only assert what we control.
-        #expect(store.installedPets().map(\.id) == ["clippy"])
+        #expect(store.installedPets().map(\.id) == ["comet"])
         _ = found
     }
 }

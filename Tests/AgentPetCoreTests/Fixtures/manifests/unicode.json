@@ -1,0 +1,7 @@
+{
+  "id": "yueliang",
+  "displayName": "月亮兔 Luna",
+  "description": "非 ASCII 显示名，用于验证解码不会损坏多字节字符。",
+  "spritesheetPath": "spritesheet.webp",
+  "kind": "animal"
+}
