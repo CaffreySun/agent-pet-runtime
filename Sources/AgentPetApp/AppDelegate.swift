@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var library: [PetLibrary.Entry] = []
     private var selectedPetID: String?
+    private var model: AgentPetModel?
+    private var managerWindow: MainWindowController?
 
     private static let positionKey = "pet.window.origin"
 
@@ -39,11 +41,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         controller.start()
         startBridge()
+        buildModel()
         rebuildMenu()
 
         if CommandLine.arguments.contains("--selftest") {
             let status = RenderSelfTest.run(controller: controller, view: petView)
             exit(status)
+        }
+
+        // Builds the manager window on launch so a crash in the view hierarchy
+        // shows up in a smoke test rather than the first time a user opens it.
+        if CommandLine.arguments.contains("--open-manager") {
+            openManager()
         }
     }
 
@@ -55,7 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startBridge() {
         bridge.onEvent = { [weak self] event in
-            self?.controller.ingest(event)
+            guard let self else { return }
+            self.controller.ingest(event)
+            self.model?.noteEvent(agentID: event.agentID)
+            self.pushActivities()
+
             if CommandLine.arguments.contains("--verbose") {
                 FileHandle.standardError.write(Data(
                     "[bridge] \(event.agentID) \(event.kind.rawValue) session=\(event.sessionID)\n".utf8
@@ -66,6 +79,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.rebuildMenu()
         }
         bridge.start()
+    }
+
+    private func buildModel() {
+        let model = AgentPetModel(
+            root: BridgeSocketLocation.applicationSupportDirectory,
+            shimPath: shimPath
+        )
+        model.onUsePet = { [weak self] pet in
+            self?.loadPet(at: pet.root, name: pet.metadata.displayName)
+        }
+        model.onTestEvent = { [weak self] event in
+            self?.controller.ingest(event)
+            self?.pushActivities()
+        }
+        self.model = model
+        self.managerWindow = MainWindowController(model: model)
+        pushActivities()
+    }
+
+    /// Hands the manager window the engine's current view of the world.
+    private func pushActivities() {
+        guard let model else { return }
+        let activities = controller.currentActivities
+        let focused = controller.focusedActivity
+        model.updateActivities(activities, focusedID: focused?.id)
+    }
+
+    /// Loads a pet package by path. Shared by the menu and the manager window
+    /// so both go through one code path.
+    private func loadPet(at root: URL, name: String) {
+        do {
+            let loaded = try PetPackageLoader().load(from: root)
+            try controller.load(loaded)
+            controller.loadedPetName = name
+            selectedPetID = loaded.definition.id
+            model?.currentPetID = loaded.definition.id
+            rebuildMenu()
+        } catch {
+            NSLog("Failed to load pet at \(root.path): \(error)")
+        }
+    }
+
+    @objc private func openManager() {
+        model?.refreshAll()
+        managerWindow?.show()
     }
 
     // MARK: - Window
@@ -150,6 +208,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let header = NSMenuItem(title: "Agent Pet Runtime", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+
+        let openItem = NSMenuItem(title: "Open Pet Manager…",
+                                  action: #selector(openManager), keyEquivalent: "o")
+        openItem.target = self
+        menu.addItem(openItem)
         menu.addItem(.separator())
 
         // Pets
@@ -277,14 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Actions
 
     private func select(pet entry: PetLibrary.Entry) {
-        do {
-            let loaded = try PetLibrary.load(entry)
-            try controller.load(loaded)
-            controller.loadedPetName = entry.name
-            selectedPetID = entry.definition.id
-        } catch {
-            NSLog("Failed to load pet \(entry.name): \(error)")
-        }
+        loadPet(at: entry.root, name: entry.name)
     }
 
     @objc private func choosePet(_ sender: NSMenuItem) {

@@ -1,0 +1,136 @@
+import AgentPetCore
+import SwiftUI
+
+/// Agent Integrations — the screen that distinguishes this from a desk toy.
+struct AgentsView: View {
+
+    @ObservedObject var model: AgentPetModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Each agent reports its own status. Configuring writes hook lines to that agent's config file and keeps a backup; removing deletes only the lines the runtime wrote.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(model.agentStatuses) { status in
+                    card(for: status)
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func card(for status: AgentStatus) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Circle()
+                    .fill(indicatorColor(status.health))
+                    .frame(width: 9, height: 9)
+                Text(status.displayName).font(.title3).fontWeight(.semibold)
+                Text(status.health.displayName)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let version = status.detection.version {
+                    Text(version)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                detail("Executable", status.detection.executablePath ?? "not found")
+                detail("Configuration", configSummary(status))
+                detail("Last event", lastEventSummary(status))
+                if let problem = problem(status) {
+                    GridRow {
+                        Text("Status").foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                        Text(problem).foregroundStyle(.orange)
+                    }
+                }
+            }
+            .font(.callout)
+
+            if !status.canConfigure {
+                Text("This agent's configuration format is not one the runtime can edit safely, so it is detected but not configurable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                if status.canConfigure {
+                    Button(status.record.isConfigured ? "Reconfigure" : "Configure") {
+                        model.configureAgent(status)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isBusy)
+                }
+
+                if status.canUninstall {
+                    Button("Test") { model.sendTestEvent(agentID: status.profile.agentID) }
+
+                    Button("Remove Integration", role: .destructive) {
+                        model.removeAgentIntegration(status)
+                    }
+                }
+
+                Spacer()
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func detail(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .gridColumnAlignment(.trailing)
+            Text(value)
+                .textSelection(.enabled)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    private func configSummary(_ status: AgentStatus) -> String {
+        guard status.record.isConfigured else { return "not configured" }
+        let count = status.record.entries.count
+        return "\(count) hook\(count == 1 ? "" : "s") installed"
+    }
+
+    private func lastEventSummary(_ status: AgentStatus) -> String {
+        guard let last = status.lastEventAt else { return "none yet" }
+        let seconds = Int(Date().timeIntervalSince(last))
+        if seconds < 60 { return "\(seconds)s ago" }
+        if seconds < 3600 { return "\(seconds / 60)m ago" }
+        return last.formatted(date: .omitted, time: .shortened)
+    }
+
+    private func problem(_ status: AgentStatus) -> String? {
+        switch status.health {
+        case .disconnected:
+            return "The hooks the runtime wrote are no longer in the config file."
+        case .failed(let message):
+            return message
+        case .degraded where status.record.isConfigured:
+            return "Configured, but no events have arrived recently."
+        default:
+            return nil
+        }
+    }
+
+    private func indicatorColor(_ health: IntegrationHealth) -> Color {
+        switch health {
+        case .connected:    return .green
+        case .degraded:     return .yellow
+        case .disconnected, .failed: return .orange
+        case .detected:     return .blue
+        case .notDetected:  return .secondary.opacity(0.4)
+        }
+    }
+}

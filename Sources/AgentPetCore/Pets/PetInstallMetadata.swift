@@ -1,7 +1,7 @@
 import Foundation
 
 /// Where an installed pet came from, and whether the runtime may delete it.
-public struct PetProvenance: Codable, Sendable, Equatable {
+public struct PetProvenance: Codable, Sendable, Hashable {
 
     public enum Kind: String, Codable, Sendable, Equatable {
         /// Shipped with the app.
@@ -43,7 +43,7 @@ public struct PetProvenance: Codable, Sendable, Equatable {
 /// Stored under `.agentpet/` inside the package rather than beside the
 /// manifest, so the validator's payload rules never see it as an unexpected
 /// file in the user's content.
-public struct PetInstallMetadata: Codable, Sendable, Equatable {
+public struct PetInstallMetadata: Codable, Sendable, Hashable {
     public static let currentSchemaVersion = 1
     public static let directoryName = ".agentpet"
     public static let fileName = "metadata.json"
@@ -80,7 +80,7 @@ public struct PetInstallMetadata: Codable, Sendable, Equatable {
 }
 
 /// An installed pet as the manager sees it.
-public struct InstalledPet: Sendable, Equatable, Identifiable {
+public struct InstalledPet: Sendable, Hashable, Identifiable {
     public let metadata: PetInstallMetadata
     public let definition: PetDefinition
     public let root: URL
