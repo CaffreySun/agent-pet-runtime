@@ -33,7 +33,7 @@ swift build -c release
 open build/AgentPet.app
 ```
 
-需要 macOS 14+ 与 Swift 6.2+（Xcode 26）。
+需要 macOS 14+ 与 Swift 6.1+（Xcode 16.4 或更新）。
 
 ---
 
