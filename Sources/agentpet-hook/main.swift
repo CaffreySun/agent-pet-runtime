@@ -34,7 +34,17 @@ if arguments.contains("--version") {
     exit(0)
 }
 
-guard let agentID = value(of: "--agent"), !agentID.isEmpty else {
+// Grok Build deliberately scans and trusts ~/.claude/settings.json, so the
+// Claude Code hooks installed there also run on Grok's own hook events. Left
+// unguarded they would report every Grok session as a Claude Code one.
+// `GROK_HOOK_NAME` is injected by Grok's hook runner and never set by Claude
+// Code itself, which makes it a reliable tell.
+let declaredAgent = value(of: "--agent") ?? "unknown"
+let agentID = ProcessInfo.processInfo.environment["GROK_HOOK_NAME"] != nil
+    ? "grok"
+    : declaredAgent
+
+guard !agentID.isEmpty else {
     FileHandle.standardError.write(Data("agentpet-hook: --agent is required\n".utf8))
     exit(64)
 }

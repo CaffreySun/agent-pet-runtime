@@ -381,6 +381,50 @@ shim 位于 Agent 的关键路径上，因此这些数字是**决定方案是否
 
 > **注意**：首次调用实测出现过一次 58ms 离群值，发生在 App 刚启动、正在加载并解码 Pet 的瞬间。稳定后（n=500）最大值降到 6.90ms。如果后续观察到周期性尖刺，应检查 App 主线程是否有阻塞工作。
 
+### 5.1b Claude Code 事件映射（依实测修正）
+
+原始映射是**猜的**，且是用户报告 "多个 Claude 运行时宠物卡在等待输入" 的根因。
+
+实测依据：
+- 从本机 `claude` 二进制（2.1.268）提取的**完整事件列表**
+- 实际 hook payload 抓包（`--log-events`，用自己的会话当样本）
+- 同机 `Otty.app` 的成熟实现作交叉验证
+  （`/Applications/Otty.app/Contents/Resources/agent-integration/`）
+
+当前 build 派发 **15 个事件**：
+
+```
+SessionStart  SessionEnd  UserPromptSubmit
+PreToolUse    PostToolUse  PreCompact      PostCompact
+PermissionRequest  Notification  Stop  StopFailure
+SubagentStart  SubagentStop  TaskCompleted  TeammateIdle
+```
+
+修正内容：
+
+| 事件 | 原映射（错） | 现映射 | 依据 |
+|---|---|---|---|
+| `Notification` | `waitingInput`（**永不过期**） | 仅 `permission_prompt` → `waitingApproval`；其余**不改变状态** | `notification_type` 有 4 种取值：`permission_prompt` `idle_prompt` `auth_success` `elicitation_dialog`。把提醒当"等待输入"会让宠物永久卡住 |
+| `PermissionRequest` | 未安装 | `waitingApproval` | 这是**唯一**真正的"被阻塞"信号 |
+| `StopFailure` | 未安装 | `failed` | 否则失败和成功无法区分 |
+| `Stop` | `completed` | `completed`，但**4 秒后沉降为 idle**，且后台任务运行时降级为 `working` | `Stop` 每回合都触发，不是会话结束 |
+| `TaskCompleted` | 未安装 | `completed` | 这才是"任务真的做完了" |
+| `SubagentStart` | 未安装 | `working` | 主 Agent 继续跑 |
+| `completed` 状态 | 永不超时 | 4 秒后 → `idle` | 否则每个回过的会话都永远显示"已完成" |
+
+**根因说明**：`Notification` 是**杂类事件**，`idle_prompt` 只是"Agent 静了一会儿"的提醒。
+把它映射到永不超时的 `waitingInput`，导致只要开过两个会话，宠物就永久显示"等待输入"。
+现在唯一会保持的注意状态是 `waitingApproval`——因为那是 Agent **真的无法继续**。
+
+**`Stop` 的后台任务抑制**：`Stop` 在主 Agent 让出控制权时就触发，而后台子 Agent 可能还在跑。
+payload 里的 `background_tasks` 若含 `status: running`，说明任务未完成，映射降级为 `working`。
+（此技巧来自 Otty 的实现注释，已在本机二进制中确认 `background_tasks` 字段存在。）
+
+**Grok 冲突**：Grok Build 会扫描并信任 `~/.claude/settings.json`，
+因此安装在其中的 Claude hook **也会在 Grok 事件上执行**。
+shim 现检测 `GROK_HOOK_NAME` 环境变量（Grok 的 hook runner 注入，Claude Code 自身不设）
+并把 agentID 改判为 `grok`。
+
 ### 5.2 Session 关联策略
 
 **hook payload 不含终端窗口标识**（见 `SPEC-REVIEW.md` §3.3）。v0.1 的关联顺序：

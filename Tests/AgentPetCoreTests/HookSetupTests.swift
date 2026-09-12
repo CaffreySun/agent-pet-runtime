@@ -62,20 +62,19 @@ struct HookSetupTests {
         }
     }
 
-    @Test("every generated event is one the normalizer understands")
-    func eventsAreNormalizable() throws {
-        // A hook that fires but maps to nothing would be a silent no-op.
-        let normalizer = EventNormalizer(profiles: AgentProfiles.all)
+    @Test("no hook is installed for an event the normalizer has never heard of")
+    func installedEventsAreKnown() throws {
+        // Not every installed event produces a state change for every payload
+        // — `Notification` only does when it carries a permission prompt. What
+        // must hold is that a hook is never installed for an event no rule
+        // mentions at all, which would be a process launch per event for
+        // nothing.
+        let profile = try #require(AgentProfiles.profile(for: "claude-code"))
+        let known = Set(profile.rules.flatMap(\.matches))
+
         for event in HookSetup.claudeCodeEvents {
-            let envelope = BridgeEnvelope(
-                agentID: "claude-code",
-                eventName: event,
-                receivedAt: Date(),
-                proc: BridgeProcessInfo(pid: 1, ppid: 2, tty: nil),
-                rawPayload: Data()
-            )
-            #expect(!normalizer.normalize(envelope).isEmpty,
-                    "\(event) generates a hook but normalizes to nothing")
+            #expect(known.contains(event),
+                    "\(event) is hooked but no rule mentions it")
         }
     }
 

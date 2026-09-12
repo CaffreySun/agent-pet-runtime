@@ -8,17 +8,24 @@ public enum HookSetup {
 
     /// Claude Code hook events worth forwarding.
     ///
-    /// Not every event Claude Code offers is here. `PreCompact` and
-    /// `SubagentStop` are omitted from the generated block because the former
-    /// changes nothing the pet shows and the latter is already covered by the
-    /// `working` state it would report.
+    /// This is every event the installed build dispatches that can change what
+    /// the pet shows. `PermissionRequest` and `StopFailure` matter most: the
+    /// first is the only true "blocked on you" signal, and without the second a
+    /// failed turn is indistinguishable from a finished one.
     public static let claudeCodeEvents = [
         "SessionStart",
         "UserPromptSubmit",
         "PreToolUse",
         "PostToolUse",
+        "PermissionRequest",
         "Notification",
         "Stop",
+        "StopFailure",
+        "SubagentStart",
+        "SubagentStop",
+        "TaskCompleted",
+        "PreCompact",
+        "PostCompact",
         "SessionEnd",
     ]
 
