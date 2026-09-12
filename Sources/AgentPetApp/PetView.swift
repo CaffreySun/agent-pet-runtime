@@ -13,21 +13,39 @@ final class PetView: NSView {
 
     /// Set by the controller so a drag can move the window rather than the view.
     var onDrag: ((NSPoint) -> Void)?
+    /// Called once a drag finishes, so the position can be persisted then
+    /// rather than only at quit — a crash would otherwise lose it.
+    var onDragEnded: (() -> Void)?
 
-    private var dragOrigin: NSPoint?
+    /// Distance from the window's origin to the mouse when the drag began,
+    /// in screen coordinates.
+    private var grabOffset: NSPoint?
+    private var didMove = false
 
     override var isOpaque: Bool { false }
     override var acceptsFirstResponder: Bool { true }
 
-    /// The window is click-through until the pointer is actually over the pet,
-    /// so the panel never steals clicks meant for whatever is behind it.
+    /// **Required, and the reason the pet could not be dragged.**
+    ///
+    /// The app runs as an accessory, so it is essentially never the active
+    /// application. AppKit's default is to deliver the first click in an
+    /// inactive window to the window itself for activation and *not* to the
+    /// view — which is exactly right for most windows and completely wrong for
+    /// a desktop pet, which the user clicks precisely because they are working
+    /// somewhere else.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// The window is click-through except over the pet itself, so it never
+    /// steals clicks meant for whatever is behind it.
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // Before the first frame arrives there is nothing to grab, so the
+        // window passes clicks straight through.
         guard let image else { return nil }
         let drawn = Self.fittedRect(
             imageSize: CGSize(width: image.width, height: image.height),
             in: bounds
         )
-        // Allow a small margin so the pet is not fiddly to grab.
+        // A small margin so the pet is not fiddly to grab.
         return drawn.insetBy(dx: -4, dy: -4).contains(point) ? self : nil
     }
 
@@ -39,10 +57,6 @@ final class PetView: NSView {
 
     /// What is currently set to be drawn. Read by the render self-test.
     var currentImage: CGImage? { image }
-
-    /// Set to have the view report what it draws. Off by default: this fires
-    /// sixty times a second.
-    static var isLoggingFrames = false
 
     override func draw(_ dirtyRect: NSRect) {
         guard let image, let context = NSGraphicsContext.current?.cgContext else { return }
@@ -66,6 +80,10 @@ final class PetView: NSView {
         context.restoreGState()
     }
 
+    /// Set to have the view report what it draws. Off by default: this fires
+    /// sixty times a second.
+    static var isLoggingFrames = false
+
     /// Aspect-fit the cell inside the view without distorting it. Cells are
     /// 192x208, so a view of a different shape must letterbox rather than
     /// stretch the pet.
@@ -83,23 +101,29 @@ final class PetView: NSView {
 
     // MARK: - Dragging
 
+    // The arithmetic lives in `WindowDrag`, where it is pure and tested. In
+    // particular it uses screen coordinates: the window's own coordinate
+    // system moves with the window, so differencing it during a drag feeds
+    // each move back into the next calculation.
+
     override func mouseDown(with event: NSEvent) {
-        dragOrigin = event.locationInWindow
+        guard let window else { return }
+        grabOffset = WindowDrag.grabOffset(
+            mouse: NSEvent.mouseLocation,
+            windowOrigin: window.frame.origin
+        )
+        didMove = false
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let dragOrigin else { return }
-        onDrag?(NSPoint(
-            x: event.locationInWindow.x - dragOrigin.x,
-            y: event.locationInWindow.y - dragOrigin.y
-        ))
+        guard let grabOffset else { return }
+        didMove = true
+        onDrag?(WindowDrag.origin(mouse: NSEvent.mouseLocation, grabOffset: grabOffset))
     }
 
     override func mouseUp(with event: NSEvent) {
-        if dragOrigin == nil {
-            // A click with no movement is a request for attention, not a drag.
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        dragOrigin = nil
+        grabOffset = nil
+        if didMove { onDragEnded?() }
+        didMove = false
     }
 }
