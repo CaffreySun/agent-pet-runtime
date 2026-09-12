@@ -11,16 +11,37 @@ evidence for each.
 
 | Milestone | State |
 |---|---|
-| Core domain, pet loading, validation, activity engine, animation | **done** — 143 tests |
+| Core domain, pet loading, validation, activity engine, animation | **done** |
 | Floating pet renderer (`NSPanel`) | **done** — renders, drags, remembers position |
-| Agent event bridge (`agentpet-hook` + socket) | not started |
-| Pet Manager UI | not started |
-| Agent Integrations UI | not started |
+| Agent event bridge (`agentpet-hook` + socket) | **done** — real shim, real socket |
+| Agent Integrations UI (detect, one-click configure, rollback) | not started |
+| Pet Manager UI (install, upgrade, uninstall, provenance) | not started |
 
-The desktop pet currently animates from an in-process activity engine. Real
-agent events reach it once the bridge lands; until then the menu bar has a
-**Simulate Agent Event** submenu that feeds synthetic events through the same
-engine, which is also the "Test Integration" path the design calls for.
+199 tests, including seven that run the compiled `agentpet-hook` binary against
+a live socket rather than an in-process stand-in.
+
+### Wiring up a real agent
+
+The bridge is live, but nothing is configured to talk to it yet — the app
+deliberately does not edit agent config until its backup/rollback transaction
+exists. Menu bar → **Event Bridge → Copy Hook Setup…** puts a ready-to-paste
+Claude Code hook block on the clipboard; paste it into
+`~/.claude/settings.json` and restart Claude Code.
+
+Until then, **Simulate Agent Event** feeds synthetic events through the exact
+same path a real hook takes.
+
+### Measured shim latency
+
+The shim runs on the agent's critical path, once per tool call, so this is the
+number that decides whether the design is viable:
+
+| | P50 | P95 | P99 | max |
+|---|---|---|---|---|
+| Runtime running | **4.33 ms** | 6.27 ms | 6.59 ms | 6.90 ms |
+| Runtime not running | 3.81 ms | 5.62 ms | 6.51 ms | 6.53 ms |
+
+Budget is P50 < 5 ms, P99 < 25 ms, measured over 500 samples.
 
 ## Running
 
