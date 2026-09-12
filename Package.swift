@@ -1,4 +1,6 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.1
+// 6.1, not 6.2: nothing here needs 6.2, and GitHub's macos-15 runners ship 6.1.
+// Raising this floor would break CI on the default runner image.
 import PackageDescription
 
 let package = Package(
