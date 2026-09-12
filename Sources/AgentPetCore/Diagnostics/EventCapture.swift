@@ -1,0 +1,122 @@
+import Foundation
+
+/// Records what an agent actually sent, for diagnosing why the pet reacted
+/// wrongly.
+///
+/// Off unless explicitly enabled, and deliberately lossy. A Claude Code hook
+/// payload carries far more than the state machine needs: alongside
+/// `tool_name` it carries `tool_input` and `tool_response`, which are the
+/// arguments an agent passed and whatever came back — command text, file
+/// contents, and command output.
+///
+/// This project's own rules say prompts, model output, and source code are
+/// never recorded. A capture that dumped whole payloads would break that
+/// promise for the sake of convenience, so unknown keys are dropped rather
+/// than copied and a future agent field cannot leak into a log by default.
+public enum EventCapture {
+
+    /// Payload keys a capture record may contain.
+    ///
+    /// Each is here because some diagnosis needs it. Anything whose value is
+    /// user content is not, however useful it might be for debugging.
+    public static let capturableKeys: Set<String> = [
+        "session_id",       // opaque id; tells concurrent sessions apart
+        "hook_event_name",
+        "tool_name",        // "Bash", "Read" — a label, not content
+        "notification_type",
+        "permission_mode",
+        "cwd",
+        "background_tasks",
+        "error",
+    ]
+
+    /// Sentinels explaining an omission, so a reader is not left guessing
+    /// whether a field was absent or removed.
+    static let omittedKeysField = "_omitted_keys"
+    static let unparsedField = "_unparsed_bytes"
+
+    /// Reduces a payload to the keys above.
+    ///
+    /// `background_tasks` is flattened to type and status: the array otherwise
+    /// carries each task's own prompt and output.
+    public static func sanitizedPayload(_ data: Data) -> [String: Any] {
+        guard !data.isEmpty,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            // Not JSON, or empty. Record only the size — a payload that could
+            // not be parsed is exactly the case where dumping it would be
+            // tempting and is exactly the case not to.
+            return [unparsedField: data.count]
+        }
+
+        var kept: [String: Any] = [:]
+        for key in capturableKeys {
+            guard let value = object[key] else { continue }
+
+            if key == "background_tasks", let tasks = value as? [[String: Any]] {
+                kept[key] = tasks.map { task in
+                    ["type": task["type"] as? String ?? "?",
+                     "status": task["status"] as? String ?? "?"]
+                }
+            } else if let nested = value as? [String: Any] {
+                // A dictionary whose contents we have not reasoned about could
+                // hold anything; keep only its key names.
+                kept[key] = nested.keys.sorted()
+            } else {
+                kept[key] = value
+            }
+        }
+
+        let dropped = Set(object.keys).subtracting(capturableKeys)
+        if !dropped.isEmpty {
+            kept[omittedKeysField] = dropped.sorted()
+        }
+        return kept
+    }
+
+    /// One record for an event, safe to write to disk.
+    public static func record(for envelope: BridgeEnvelope) -> [String: Any] {
+        [
+            "agentID": envelope.agentID,
+            "eventName": envelope.eventName,
+            "receivedAt": ISO8601DateFormatter().string(from: envelope.receivedAt),
+            "ppid": Int(envelope.proc?.ppid ?? 0),
+            "tty": envelope.proc?.tty ?? "",
+            "payload": sanitizedPayload(envelope.rawPayload),
+        ]
+    }
+
+    /// Appends one JSON line, creating the file owner-only.
+    ///
+    /// An event log records what the user's agents were doing, so it is not
+    /// something other accounts on the machine should be able to read. The
+    /// default umask would leave it world-readable, and a file that predates
+    /// this rule is tightened on every append.
+    public static func append(_ record: [String: Any], to url: URL) {
+        guard let data = try? JSONSerialization.data(withJSONObject: record),
+              let line = String(data: data, encoding: .utf8)
+        else { return }
+
+        append(Data((line + "\n").utf8), to: url)
+    }
+
+    public static func append(_ data: Data, to url: URL) {
+        let fileManager = FileManager.default
+
+        if !fileManager.fileExists(atPath: url.path) {
+            fileManager.createFile(
+                atPath: url.path,
+                contents: data,
+                attributes: [.posixPermissions: 0o600]
+            )
+            return
+        }
+
+        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: data)
+    }
+}
