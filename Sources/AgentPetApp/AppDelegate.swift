@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var petView: PetView!
     private let controller = PetController()
 
+    private let bridge = BridgeCoordinator()
+
     private var statusItem: NSStatusItem?
     private var library: [PetLibrary.Entry] = []
     private var selectedPetID: String?
@@ -36,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         controller.start()
+        startBridge()
         rebuildMenu()
 
         if CommandLine.arguments.contains("--selftest") {
@@ -46,7 +49,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         controller.stop()
+        bridge.stop()
         savePosition()
+    }
+
+    private func startBridge() {
+        bridge.onEvent = { [weak self] event in
+            self?.controller.ingest(event)
+            if CommandLine.arguments.contains("--verbose") {
+                FileHandle.standardError.write(Data(
+                    "[bridge] \(event.agentID) \(event.kind.rawValue) session=\(event.sessionID)\n".utf8
+                ))
+            }
+        }
+        bridge.onStatusChange = { [weak self] in
+            self?.rebuildMenu()
+        }
+        bridge.start()
     }
 
     // MARK: - Window
@@ -68,7 +87,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView = petView
         window.orderFrontRegardless()
 
-        PetView.isLoggingFrames = CommandLine.arguments.contains("--verbose")
+        // Draw logging is its own flag: it fires sixty times a second and
+        // would bury every other diagnostic.
+        PetView.isLoggingFrames = CommandLine.arguments.contains("--verbose-draw")
         if CommandLine.arguments.contains("--verbose") {
             let frame = window.frame
             let onScreen = NSScreen.screens.contains { $0.frame.intersects(frame) }
@@ -182,6 +203,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         simulateItem.submenu = simulateMenu
         menu.addItem(simulateItem)
 
+        // Bridge status — the first thing to look at when the pet is not
+        // reacting to a real agent.
+        let bridgeItem = NSMenuItem(title: "Event Bridge", action: nil, keyEquivalent: "")
+        let bridgeMenu = NSMenu()
+
+        let state = NSMenuItem(
+            title: bridge.status.isListening ? "● Listening" : "○ Not listening",
+            action: nil, keyEquivalent: ""
+        )
+        state.isEnabled = false
+        bridgeMenu.addItem(state)
+
+        let socket = NSMenuItem(title: "  \(bridge.status.socketPath)", action: nil, keyEquivalent: "")
+        socket.isEnabled = false
+        bridgeMenu.addItem(socket)
+
+        let received = NSMenuItem(
+            title: "  \(bridge.status.receivedCount) event(s) received",
+            action: nil, keyEquivalent: ""
+        )
+        received.isEnabled = false
+        bridgeMenu.addItem(received)
+
+        if let error = bridge.status.error {
+            let failure = NSMenuItem(title: "  ⚠︎ \(error)", action: nil, keyEquivalent: "")
+            failure.isEnabled = false
+            bridgeMenu.addItem(failure)
+        }
+
+        if !bridge.recent.isEmpty {
+            bridgeMenu.addItem(.separator())
+            for recent in bridge.recent.prefix(8) {
+                let kind = recent.kind?.rawValue ?? "(unmapped)"
+                let item = NSMenuItem(
+                    title: "  \(recent.agentID) · \(recent.eventName) → \(kind)",
+                    action: nil, keyEquivalent: ""
+                )
+                item.isEnabled = false
+                bridgeMenu.addItem(item)
+            }
+        }
+
+        bridgeMenu.addItem(.separator())
+        let copySetup = NSMenuItem(title: "Copy Hook Setup…", action: #selector(copyHookSetup), keyEquivalent: "")
+        copySetup.target = self
+        bridgeMenu.addItem(copySetup)
+
+        bridgeItem.submenu = bridgeMenu
+        menu.addItem(bridgeItem)
+
         menu.addItem(.separator())
 
         let activityItem = NSMenuItem(title: activitySummary(), action: nil, keyEquivalent: "")
@@ -248,5 +319,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func clearActivities() {
         controller.resetActivities()
         rebuildMenu()
+    }
+
+    /// The shim ships beside the app executable, so the running binary's own
+    /// location is the reliable way to find it.
+    private var shimPath: String {
+        let executable = URL(fileURLWithPath: CommandLine.arguments[0])
+            .resolvingSymlinksInPath()
+        let sibling = executable.deletingLastPathComponent()
+            .appendingPathComponent("agentpet-hook")
+        return FileManager.default.isExecutableFile(atPath: sibling.path)
+            ? sibling.path
+            : "/path/to/agentpet-hook"
+    }
+
+    /// Writes a ready-to-paste Claude Code hook block to the clipboard.
+    ///
+    /// Deliberately a copy rather than an automatic edit. The runtime holds
+    /// itself to backup → modify → validate → rollback before touching
+    /// anyone's agent config, and that transaction is not built yet. Handing
+    /// the user the exact block is honest about what has been proven.
+    @objc private func copyHookSetup() {
+        let json = HookSetup.claudeCodeJSON(shimPath: shimPath)
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(json, forType: .string)
+
+        let alert = NSAlert()
+        alert.messageText = "Claude Code hook configuration copied"
+        alert.informativeText = """
+            Paste the "hooks" block into ~/.claude/settings.json, then restart \
+            Claude Code.
+
+            Shim: \(shimPath)
+
+            Back up that file first — the runtime does not yet have its \
+            backup/rollback transaction, so this is a manual edit.
+            """
+        alert.alertStyle = .informational
+        alert.runModal()
     }
 }
