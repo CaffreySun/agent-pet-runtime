@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "AgentPetCore", targets: ["AgentPetCore"]),
         .executable(name: "AgentPet", targets: ["AgentPetApp"]),
+        .executable(name: "agentpet-hook", targets: ["agentpet-hook"]),
     ],
     targets: [
         // Pure logic. Must not import AppKit — keeps the whole core testable headlessly.
@@ -14,6 +15,12 @@ let package = Package(
 
         .executableTarget(
             name: "AgentPetApp",
+            dependencies: ["AgentPetCore"]
+        ),
+
+        // Invoked by agents as a hook. Must stay fast and must always exit 0.
+        .executableTarget(
+            name: "agentpet-hook",
             dependencies: ["AgentPetCore"]
         ),
 
