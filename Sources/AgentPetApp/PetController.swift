@@ -63,6 +63,11 @@ final class PetController {
 
     var currentActivities: [AgentActivity] { engine.allActivities() }
 
+    /// The session the pet is currently showing.
+    var focusedActivity: AgentActivity? {
+        forcedState != nil ? nil : engine.currentFocus()
+    }
+
     /// Plays a one-shot track over the current state — used by the preview menu
     /// and by the integration test button.
     func playGesture(named name: String) {

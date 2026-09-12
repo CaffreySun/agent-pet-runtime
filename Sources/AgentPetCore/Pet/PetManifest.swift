@@ -13,7 +13,7 @@ public enum PetManifestError: Error, Equatable, Sendable {
 /// friends) already emits `kind`, `source`, `sourceId`, `spriteVersionNumber`
 /// and no doubt more. Unknown keys are ignored rather than rejected, and only
 /// `id` / `displayName` / `spritesheetPath` are actually required.
-public struct PetManifest: Codable, Sendable, Equatable {
+public struct PetManifest: Codable, Sendable, Hashable {
     public let id: String
     public let displayName: String
     public let description: String?

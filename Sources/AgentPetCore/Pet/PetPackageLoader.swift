@@ -1,7 +1,7 @@
 import Foundation
 
 /// A pet package that has been parsed and validated enough to name.
-public struct PetDefinition: Sendable, Equatable {
+public struct PetDefinition: Sendable, Hashable {
     public let manifest: PetManifest
     public let profile: CompatibilityProfile
     public let root: URL
