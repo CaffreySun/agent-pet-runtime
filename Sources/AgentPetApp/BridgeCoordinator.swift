@@ -46,33 +46,17 @@ final class BridgeCoordinator {
 
     private let normalizer = EventNormalizer(profiles: AgentProfiles.all)
 
-    /// Writes every raw envelope to a file, so what an agent actually sends can
-    /// be read back instead of inferred. Enabled with `--log-events <path>`.
+    /// Writes a record of every event to a file so what an agent actually
+    /// sends can be read back instead of inferred. Enabled with
+    /// `--log-events <path>`; off by default.
     var captureURL: URL?
 
     private func capture(_ envelope: BridgeEnvelope) {
         guard let captureURL else { return }
-        let record: [String: Any] = [
-            "agentID": envelope.agentID,
-            "eventName": envelope.eventName,
-            "receivedAt": ISO8601DateFormatter().string(from: envelope.receivedAt),
-            "ppid": Int(envelope.proc?.ppid ?? 0),
-            "tty": envelope.proc?.tty ?? "",
-            "payload": envelope.payloadUTF8 ?? "<binary>",
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: record),
-              let line = String(data: data, encoding: .utf8)
-        else { return }
-
-        let text = line + "\n"
-        if let handle = try? FileHandle(forWritingTo: captureURL) {
-            handle.seekToEndOfFile()
-            handle.write(Data(text.utf8))
-            try? handle.close()
-        } else {
-            try? Data(text.utf8).write(to: captureURL)
-        }
+        EventCapture.append(EventCapture.record(for: envelope), to: captureURL)
     }
+
+    // MARK: - Lifecycle
 
     func start() {
         guard server == nil else { return }

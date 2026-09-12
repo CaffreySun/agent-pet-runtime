@@ -98,7 +98,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let index = CommandLine.arguments.firstIndex(of: "--log-events"),
            index + 1 < CommandLine.arguments.count {
-            bridge.captureURL = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+            let url = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+            bridge.captureURL = url
+            FileHandle.standardError.write(Data("""
+                [pet] writing an event log to \(url.path)
+                [pet] it records which events arrived and what state they mapped to, not \
+                what the agent was doing: tool arguments, tool output, and prompts are \
+                dropped. Written owner-only (0600). Delete it when done.
+
+                """.utf8))
         }
         bridge.start()
     }
