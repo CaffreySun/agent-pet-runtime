@@ -22,6 +22,11 @@ final class BridgeCoordinator {
     private(set) var status = Status()
     private var server: BridgeServer?
 
+    /// Frames that arrived but could not be understood. Surfaced in
+    /// diagnostics rather than thrown, since one agent's bad frame must not
+    /// affect the others.
+    var malformedFrameCount: Int { server?.malformedFrameCount ?? 0 }
+
     /// Called on the main actor for every normalized event.
     var onEvent: ((AgentEvent) -> Void)?
     var onStatusChange: (() -> Void)?

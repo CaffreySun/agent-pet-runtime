@@ -93,6 +93,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.ingest(event)
             self?.pushActivities()
         }
+        model.bridgeSummary = { [weak self] in
+            guard let bridge = self?.bridge else {
+                return DiagnosticsBundle.BridgeSummary(
+                    isListening: false, socketPath: "", eventsReceived: 0, malformedFrames: 0
+                )
+            }
+            return DiagnosticsBundle.BridgeSummary(
+                isListening: bridge.status.isListening,
+                socketPath: bridge.status.socketPath,
+                eventsReceived: bridge.status.receivedCount,
+                malformedFrames: bridge.malformedFrameCount
+            )
+        }
         self.model = model
         self.managerWindow = MainWindowController(model: model)
         pushActivities()

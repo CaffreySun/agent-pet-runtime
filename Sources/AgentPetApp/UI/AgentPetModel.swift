@@ -22,6 +22,11 @@ final class AgentPetModel: ObservableObject {
     /// Which pet the desktop is currently showing, so the list can mark it.
     @Published var currentPetID: String?
 
+    /// Persisted user settings.
+    @Published var config: AppConfig {
+        didSet { if config != oldValue { saveConfig() } }
+    }
+
     struct AvailablePet: Identifiable {
         let id: String
         let name: String
@@ -37,6 +42,8 @@ final class AgentPetModel: ObservableObject {
     let shimPath: String
 
     private let onActivitiesChanged: ([AgentActivity], String?) -> Void
+    private let configStore: AppConfigStore
+    let transitionLog: TransitionLog
 
     init(
         root: URL,
@@ -53,7 +60,18 @@ final class AgentPetModel: ObservableObject {
             detector: AgentDetector(specifications: []),
             evaluator: IntegrationHealthEvaluator()
         )
+        self.configStore = AppConfigStore(
+            url: root.appendingPathComponent("config.json")
+        )
+        self.config = configStore.load()
+        self.transitionLog = TransitionLog(
+            limit: max(1, configStore.load().diagnostics.transitionHistoryLimit)
+        )
         self.onActivitiesChanged = onActivitiesChanged
+    }
+
+    func saveConfig() {
+        try? configStore.save(config)
     }
 
     // MARK: - Refresh
@@ -96,6 +114,50 @@ final class AgentPetModel: ObservableObject {
     func updateActivities(_ activities: [AgentActivity], focusedID: String?) {
         self.activities = activities
         self.focusedActivityID = focusedID
+        if config.diagnostics.loggingEnabled {
+            for activity in activities { transitionLog.record(activity) }
+        }
+    }
+
+    // MARK: - Diagnostics
+
+    func exportDiagnostics(to url: URL) {
+        run("Exported diagnostics") {
+            let bundle = DiagnosticsBundle(
+                app: DiagnosticsBundle.currentAppInfo(),
+                bridge: bridgeSummary(),
+                pets: petStore.installedPets().map {
+                    DiagnosticsBundle.PetSummary(
+                        id: $0.id,
+                        displayName: $0.metadata.displayName,
+                        profile: $0.metadata.compatibilityProfile,
+                        compatibilityWarningCount: 0
+                    )
+                },
+                agents: agentStatuses.map {
+                    DiagnosticsBundle.AgentSummary(
+                        agentID: $0.profile.agentID,
+                        detected: $0.detection.isDetected,
+                        executablePath: $0.detection.executablePath,
+                        version: $0.detection.version,
+                        integrationStatus: $0.record.status.rawValue,
+                        health: $0.health.displayName,
+                        hookCount: $0.record.entries.count,
+                        lastEventAt: $0.lastEventAt
+                    )
+                },
+                transitions: transitionLog.transitions
+            )
+            try bundle.json().write(to: url, options: .atomic)
+            statusMessage = "Diagnostics written to \(url.lastPathComponent)"
+        }
+    }
+
+    /// Filled in by the app once the bridge is running.
+    var bridgeSummary: () -> DiagnosticsBundle.BridgeSummary = {
+        DiagnosticsBundle.BridgeSummary(
+            isListening: false, socketPath: "", eventsReceived: 0, malformedFrames: 0
+        )
     }
 
     func noteEvent(agentID: String) {
