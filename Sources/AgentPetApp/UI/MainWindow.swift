@@ -8,6 +8,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     case activity = "Activity"
     case pets = "Pets"
     case agents = "Agents"
+    case settings = "Settings"
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
         case .activity: return "waveform.path.ecg"
         case .pets:     return "pawprint"
         case .agents:   return "cpu"
+        case .settings: return "gearshape"
         }
     }
 }
@@ -51,6 +53,7 @@ struct MainWindowView: View {
         case .activity: ActivityView(model: model)
         case .pets:     PetsView(model: model)
         case .agents:   AgentsView(model: model)
+        case .settings: SettingsView(model: model)
         }
     }
 
