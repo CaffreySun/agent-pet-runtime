@@ -1,6 +1,9 @@
 import Foundation
 
 /// Maps one of an agent's hook event names onto a normalized kind.
+///
+/// Rules are evaluated in order and the first that applies wins, so a general
+/// rule can be followed by narrower ones that override it.
 public struct NormalizationRule: Codable, Sendable, Equatable {
     /// Hook event names this rule matches, e.g. `["PreToolUse", "PostToolUse"]`.
     public let matches: [String]
@@ -12,18 +15,37 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
     /// Top-level payload key holding the working directory.
     public let workingDirectoryField: String?
 
+    /// Only applies when the payload's `notification_type` equals this.
+    ///
+    /// Claude Code reports several unrelated things through one `Notification`
+    /// event, distinguished only by this field. Treating "a permission prompt"
+    /// and "you have been idle a while" as the same state would leave the pet
+    /// permanently asking for attention.
+    public let whenNotificationType: String?
+
+    /// Skips the rule when the payload lists a still-running background task.
+    ///
+    /// Claude Code fires `Stop` when the main agent yields, which happens while
+    /// a background subagent is still working. Reporting that as a finished
+    /// turn would make the pet announce completion in the middle of the job.
+    public let suppressedByRunningBackgroundTask: Bool
+
     public init(
         matches: [String],
         kind: AgentEventKind,
         summaryField: String? = nil,
         sessionIDField: String? = nil,
-        workingDirectoryField: String? = nil
+        workingDirectoryField: String? = nil,
+        whenNotificationType: String? = nil,
+        suppressedByRunningBackgroundTask: Bool = false
     ) {
         self.matches = matches
         self.kind = kind
         self.summaryField = summaryField
         self.sessionIDField = sessionIDField
         self.workingDirectoryField = workingDirectoryField
+        self.whenNotificationType = whenNotificationType
+        self.suppressedByRunningBackgroundTask = suppressedByRunningBackgroundTask
     }
 }
 
@@ -63,6 +85,25 @@ public enum NormalizationError: Error, Equatable, Sendable {
     case notJSON
 }
 
+public extension NormalizationRule {
+    /// Whether this rule is the right one for an event, given its payload.
+    func applies(to eventName: String, payload: [String: Any]) -> Bool {
+        guard matches.contains(eventName) else { return false }
+
+        if let required = whenNotificationType {
+            let actual = payload["notification_type"] as? String
+            guard actual == required else { return false }
+        }
+
+        if suppressedByRunningBackgroundTask,
+           EventNormalizer.hasRunningBackgroundTask(payload) {
+            return false
+        }
+
+        return true
+    }
+}
+
 /// Turns a `BridgeEnvelope` into zero or more `AgentEvent`s.
 public struct EventNormalizer: Sendable {
     private let profiles: [String: AgentProfile]
@@ -80,11 +121,14 @@ public struct EventNormalizer: Sendable {
     /// crashing over — a newer agent version may simply have added an event.
     public func normalize(_ envelope: BridgeEnvelope) -> [AgentEvent] {
         guard let profile = profiles[envelope.agentID] else { return [] }
-        guard let rule = profile.rules.first(where: { $0.matches.contains(envelope.eventName) }) else {
+
+        let payload = Self.parseObject(envelope.rawPayload)
+        guard let rule = profile.rules.first(where: {
+            $0.applies(to: envelope.eventName, payload: payload)
+        }) else {
             return []
         }
 
-        let payload = Self.parseObject(envelope.rawPayload)
         let sessionID = Self.string(payload, rule.sessionIDField)
             ?? Self.fallbackSessionID(for: envelope, profile: profile)
         let summary = Self.string(payload, rule.summaryField)
@@ -108,6 +152,18 @@ public struct EventNormalizer: Sendable {
             projectPath: cwd.map { URL(fileURLWithPath: $0) },
             focusTarget: focus
         )]
+    }
+
+    /// Whether the payload lists a background task that has not finished.
+    ///
+    /// Claude Code's `Stop` fires whenever the main agent yields, which it does
+    /// while a background subagent is still working. Without this check every
+    /// long job is announced as complete the moment the agent first pauses.
+    static func hasRunningBackgroundTask(_ payload: [String: Any]) -> Bool {
+        guard let tasks = payload["background_tasks"] as? [[String: Any]] else { return false }
+        return tasks.contains { task in
+            (task["status"] as? String)?.lowercased() == "running"
+        }
     }
 
     /// What to call a session when the payload does not name one.

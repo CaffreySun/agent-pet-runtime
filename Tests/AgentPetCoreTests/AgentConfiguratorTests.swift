@@ -387,21 +387,17 @@ struct AgentIntegrationRegistryTests {
         }
     }
 
-    @Test("the claude-code configurator installs the events the normalizer understands")
-    func eventsAreNormalizable() throws {
+    @Test("the configurator only installs events the normalizer knows about")
+    func installedEventsAreKnown() throws {
         let profile = try #require(
             AgentIntegrationRegistry.profile(for: "claude-code", transaction: transaction)
         )
         let configurator = try #require(profile.configurator as? JSONHookConfigurator)
+        let normalization = try #require(AgentProfiles.profile(for: "claude-code"))
+        let known = Set(normalization.rules.flatMap(\.matches))
 
-        let normalizer = EventNormalizer(profiles: AgentProfiles.all)
         for event in configurator.events {
-            let envelope = BridgeEnvelope(
-                agentID: "claude-code", eventName: event, receivedAt: now,
-                proc: BridgeProcessInfo(pid: 1, ppid: 2, tty: nil), rawPayload: Data()
-            )
-            #expect(!normalizer.normalize(envelope).isEmpty,
-                    "installing a hook for \(event) that normalizes to nothing would be a silent no-op")
+            #expect(known.contains(event), "\(event) is installed but unknown to the normalizer")
         }
     }
 }

@@ -210,9 +210,12 @@ struct StaleTimeoutTests {
         #expect(state.staleSuccessor == nil)
     }
 
-    @Test("completed is not driven by silence — it is driven by the dwell timer")
-    func completedIsDwellDriven() {
-        #expect(AgentState.completed.staleTimeout == nil)
+    @Test("completed settles rather than sticking forever")
+    func completedSettles() {
+        // Claude Code fires Stop at the end of every turn. A state that never
+        // expires would leave every session reading "completed" indefinitely.
+        #expect(AgentState.completed.staleTimeout == 4)
+        #expect(AgentState.completed.staleSuccessor == .idle)
     }
 
     @Test("a stale timeout always has a successor and vice versa", arguments: AgentState.allCases)

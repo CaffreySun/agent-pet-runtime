@@ -100,10 +100,13 @@ public extension AgentState {
         case .unknown:          return 60
         case .waitingApproval:  return 300
         case .failed:           return 600
+        // A finished turn is news, not a condition. Claude Code fires `Stop`
+        // at the end of every turn, so without this the activity list would
+        // read "completed" forever for every session that had ever answered.
+        case .completed:        return 4
         case .waitingInput:     return nil
         case .idle:             return nil
         case .paused:           return nil
-        case .completed:        return nil  // driven by completionDwell, not silence
         }
     }
 
@@ -114,7 +117,8 @@ public extension AgentState {
         case .unknown:          return .idle
         case .waitingApproval:  return .unknown
         case .failed:           return .idle
-        case .waitingInput, .idle, .paused, .completed: return nil
+        case .completed:        return .idle
+        case .waitingInput, .idle, .paused: return nil
         }
     }
 }

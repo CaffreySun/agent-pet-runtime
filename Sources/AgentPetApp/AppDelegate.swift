@@ -96,6 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridge.onStatusChange = { [weak self] in
             self?.rebuildMenu()
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--log-events"),
+           index + 1 < CommandLine.arguments.count {
+            bridge.captureURL = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+        }
         bridge.start()
     }
 

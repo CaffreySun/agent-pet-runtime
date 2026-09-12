@@ -199,7 +199,7 @@ struct BridgeEndToEndTests {
 
         try runShim(socket: socket, agent: "claude-code", event: "PreToolUse",
                     payload: #"{"session_id":"a","cwd":"/tmp/p"}"#)
-        try runShim(socket: socket, agent: "claude-code", event: "Notification",
+        try runShim(socket: socket, agent: "claude-code", event: "PermissionRequest",
                     payload: #"{"session_id":"a","cwd":"/tmp/p"}"#)
         try runShim(socket: socket, agent: "claude-code", event: "Stop",
                     payload: #"{"session_id":"a","cwd":"/tmp/p"}"#)
@@ -217,7 +217,7 @@ struct BridgeEndToEndTests {
         }
 
         #expect(observed.contains(.running))
-        #expect(observed.contains(.waitingInput))
+        #expect(observed.contains(.waitingApproval))
         #expect(observed.contains(.completed))
     }
 

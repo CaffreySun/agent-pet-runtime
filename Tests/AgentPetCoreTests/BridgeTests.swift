@@ -122,7 +122,11 @@ struct ClaudeCodeNormalizationTests {
         ("UserPromptSubmit", .working),
         ("PreToolUse", .working),
         ("PostToolUse", .working),
-        ("Notification", .waitingInput),
+        ("PermissionRequest", .waitingApproval),
+        ("StopFailure", .failed),
+        ("SubagentStart", .working),
+        ("TaskCompleted", .completed),
+        ("PostCompact", .working),
         ("Stop", .completed),
         ("SubagentStop", .working),
         ("PreCompact", .working),
@@ -137,7 +141,59 @@ struct ClaudeCodeNormalizationTests {
     @Test("a subagent finishing is not the session finishing")
     func subagentStopIsNotCompletion() {
         let events = normalizer.normalize(envelope(event: "SubagentStop"))
-        #expect(events.first?.kind != .completed)
+        #expect(events.first?.kind == .working)
+    }
+
+    @Test("permission requests are the only sticky attention state")
+    func permissionRequestIsTheApprovalSignal() {
+        let request = normalizer.normalize(envelope(event: "PermissionRequest"))
+        #expect(request.first?.kind == .waitingApproval)
+
+        // The same signal arrives through Notification on some builds.
+        let notified = normalizer.normalize(envelope(
+            event: "Notification",
+            payload: #"{"session_id":"s","cwd":"/tmp","notification_type":"permission_prompt"}"#
+        ))
+        #expect(notified.first?.kind == .waitingApproval)
+    }
+
+    @Test("an informational notification changes nothing")
+    func idleNotificationIsIgnored() {
+        // Reporting this as "waiting for input" is what left the pet asking for
+        // attention forever once more than one session was open.
+        for kind in ["idle_prompt", "auth_success", "elicitation_dialog"] {
+            let events = normalizer.normalize(envelope(
+                event: "Notification",
+                payload: #"{"session_id":"s","cwd":"/tmp","notification_type":"\#(kind)"}"#
+            ))
+            #expect(events.isEmpty, "notification_type \(kind) should not change state")
+        }
+    }
+
+    @Test("a bare Notification with no type changes nothing")
+    func untypedNotificationIgnored() {
+        #expect(normalizer.normalize(envelope(event: "Notification", payload: "{}")).isEmpty)
+    }
+
+    @Test("a Stop while a background subagent runs means still working")
+    func stopWithBackgroundTaskIsNotCompletion() {
+        let running = """
+        {"session_id":"s","cwd":"/tmp",
+         "background_tasks":[{"type":"subagent","status":"running"}]}
+        """
+        let events = normalizer.normalize(envelope(event: "Stop", payload: running))
+        #expect(events.first?.kind == .working,
+                "announcing completion mid-job is worse than saying nothing")
+    }
+
+    @Test("a Stop with no running background task is a finished turn")
+    func stopWithoutBackgroundTaskCompletes() {
+        let finished = """
+        {"session_id":"s","cwd":"/tmp",
+         "background_tasks":[{"type":"subagent","status":"completed"}]}
+        """
+        #expect(normalizer.normalize(envelope(event: "Stop", payload: finished)).first?.kind == .completed)
+        #expect(normalizer.normalize(envelope(event: "Stop", payload: "{}")).first?.kind == .completed)
     }
 
     @Test("session id and working directory are extracted")
@@ -237,8 +293,8 @@ struct NormalizationRobustnessTests {
 
     @Test("Grok shares Claude Code's hook vocabulary")
     func grokProfile() throws {
-        let events = normalizer.normalize(envelope(agent: "grok", event: "Notification"))
-        #expect(events.first?.kind == .waitingInput)
+        let events = normalizer.normalize(envelope(agent: "grok", event: "PermissionRequest"))
+        #expect(events.first?.kind == .waitingApproval)
     }
 
     @Test("process observation is reported at lower confidence than a hook")
@@ -270,14 +326,21 @@ struct NormalizationRobustnessTests {
         let clock = ManualActivityClock(epoch)
         let engine = ActivityEngine(clock: clock)
 
+        // Checked immediately: `completed` now settles after four seconds, so
+        // advancing the clock first would see the settled state rather than the
+        // transition under test.
         for (event, expected) in [("PreToolUse", AgentState.running),
-                                  ("Notification", AgentState.waitingInput),
+                                  ("PermissionRequest", AgentState.waitingApproval),
                                   ("Stop", AgentState.completed)] {
             for agentEvent in normalizer.normalize(envelope(event: event)) {
                 engine.ingest(agentEvent)
             }
             #expect(engine.currentFocus()?.state == expected, "after \(event)")
-            clock.advance(by: 10)
+            clock.advance(by: 1)
         }
+
+        // And the celebration does not stick.
+        clock.advance(by: 10)
+        #expect(engine.currentFocus()?.state == .idle, "a finished turn should settle to idle")
     }
 }
