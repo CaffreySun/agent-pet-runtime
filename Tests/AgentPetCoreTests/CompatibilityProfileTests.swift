@@ -77,23 +77,30 @@ struct AnimationTrackTests {
         }
     }
 
-    @Test("V2 keeps V1's nine rows unchanged as a prefix")
+    @Test("V2 keeps V1's nine rows identical as a prefix")
     func v2ExtendsV1() {
         let v1 = CompatibilityProfile.openAICodexV1
         let v2 = CompatibilityProfile.openAICodexV2
         for row in 0..<v1.rows {
             #expect(v2.track(atRow: row)?.name == v1.track(atRow: row)?.name)
             #expect(v2.track(atRow: row)?.frameCount == v1.track(atRow: row)?.frameCount)
+            // Timings must match too — a V1 and a V2 pet of the same character
+            // should not animate at different speeds.
+            #expect(v2.track(atRow: row)?.frameDurations == v1.track(atRow: row)?.frameDurations)
         }
     }
 
-    @Test("reserved V2 rows demand no content")
-    func reservedRowsAreEmpty() {
+    @Test("V2's look rows are used, not spare capacity")
+    func lookRowsAreUsed() {
         let v2 = CompatibilityProfile.openAICodexV2
-        #expect(v2.track(atRow: 9)?.frameCount == 0)
-        #expect(v2.track(atRow: 10)?.frameCount == 0)
-        #expect(!v2.requiredRows.contains(9))
-        #expect(!v2.requiredRows.contains(10))
+        // Rows 9 and 10 are the sixteen gaze poses, so all eight columns of
+        // each are used and none may be required to stay clear.
+        #expect(v2.track(atRow: 9)?.frameCount == 8)
+        #expect(v2.track(atRow: 10)?.frameCount == 8)
+        #expect(v2.requiredRows.contains(9))
+        #expect(v2.requiredRows.contains(10))
+        #expect(!v2.rowsRequiringCleanSurplus.contains(9))
+        #expect(!v2.rowsRequiringCleanSurplus.contains(10))
     }
 
     @Test("every V1 row is a required row")
@@ -102,10 +109,10 @@ struct AnimationTrackTests {
         #expect(v1.requiredRows == Array(0..<9))
     }
 
-    @Test("track duration is frames / fps")
+    @Test("track duration is the sum of its per-frame timings")
     func duration() {
         let idle = CompatibilityProfile.openAICodexV1.track(named: "idle")
-        #expect(idle?.duration == 6.0 / 8.0)
+        #expect(abs((idle?.duration ?? 0) - 1.10) < 0.0001)
     }
 }
 
@@ -125,7 +132,7 @@ struct StateToTrackTests {
         (.running, "running"),
         (.waitingInput, "waiting"),
         (.waitingApproval, "waiting"),
-        (.completed, "waving"),
+        (.completed, "jumping"),
         (.failed, "failed"),
         (.paused, "idle"),
         (.unknown, "idle"),

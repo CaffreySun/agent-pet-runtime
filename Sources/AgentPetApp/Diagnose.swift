@@ -87,34 +87,46 @@ enum Diagnose {
         return 0
     }
 
-    /// Writes each track's first frame to disk. The quickest way to tell a
-    /// rendering bug from a sprite-decoding bug.
+    /// Writes every track's frames to disk, one folder per pet.
+    ///
+    /// The quickest way to tell a rendering bug from a sprite-decoding bug,
+    /// and the only way to see what a row actually contains — including the
+    /// gaze rows, whose meaning is a matter of interpreting the art.
     private static func exportFrames(
         to directory: String,
         loader: PetPackageLoader,
         entries: [PetLibrary.Entry]
     ) {
-        guard let entry = entries.first else { return }
         let out = URL(fileURLWithPath: directory)
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 
-        do {
-            let loaded = try loader.load(from: entry.root)
-            guard let atlas = loaded.atlas else { return }
-            let frames = try SpriteFrames(bitmap: atlas, profile: loaded.definition.profile)
+        for entry in entries {
+            do {
+                let loaded = try loader.load(from: entry.root)
+                guard let atlas = loaded.atlas else { continue }
+                let frames = try SpriteFrames(bitmap: atlas, profile: loaded.definition.profile)
 
-            for (name, images) in frames.frames.sorted(by: { $0.key < $1.key }) {
-                guard let image = images.first else { continue }
-                let url = out.appendingPathComponent("\(name).png")
-                guard let dest = CGImageDestinationCreateWithURL(
-                    url as CFURL, "public.png" as CFString, 1, nil
-                ) else { continue }
-                CGImageDestinationAddImage(dest, image, nil)
-                CGImageDestinationFinalize(dest)
-                print("  exported \(name).png  \(image.width)x\(image.height)")
+                let petDirectory = out.appendingPathComponent(entry.definition.id)
+                try? FileManager.default.createDirectory(
+                    at: petDirectory, withIntermediateDirectories: true
+                )
+
+                var exported = 0
+                for (name, images) in frames.frames.sorted(by: { $0.key < $1.key }) {
+                    for (index, image) in images.enumerated() {
+                        let url = petDirectory.appendingPathComponent("\(name)-c\(index).png")
+                        guard let dest = CGImageDestinationCreateWithURL(
+                            url as CFURL, "public.png" as CFString, 1, nil
+                        ) else { continue }
+                        CGImageDestinationAddImage(dest, image, nil)
+                        CGImageDestinationFinalize(dest)
+                        exported += 1
+                    }
+                }
+                print("  \(entry.definition.id): \(exported) frames -> \(petDirectory.path)")
+            } catch {
+                print("  \(entry.name) export failed: \(error)")
             }
-        } catch {
-            print("  export failed: \(error)")
         }
     }
 

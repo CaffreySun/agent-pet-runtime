@@ -2,11 +2,10 @@ import Foundation
 
 /// Which published atlas contract a pet package conforms to.
 ///
-/// V1 is the documented OpenAI/Codex baseline. V2 exists in the wild
-/// (`spriteVersionNumber: 2`, 1536x2288, 8x11) and must load rather than be
-/// rejected — users already have such pets installed. V1's nine rows are a
-/// prefix of V2's eleven, so V2 degrades cleanly: rows 0-8 play, rows 9-10
-/// are reserved.
+/// V2 is the *primary* format — the toolchain hatches every new pet as
+/// `1536x2288`, and its own reference calls the V1 atlas "an intermediate
+/// assembly artifact only". V1 remains fully supported because packages in the
+/// wild use it, but it is the legacy shape, not the baseline.
 public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
     case openAICodexV1
     case openAICodexV2
@@ -27,41 +26,98 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
 
     public var displayName: String {
         switch self {
-        case .openAICodexV1: return "OpenAI Codex V1"
-        case .openAICodexV2: return "OpenAI Codex V2"
+        case .openAICodexV1: return "Codex V1"
+        case .openAICodexV2: return "Codex V2"
         }
     }
 
-    /// Whether every atlas row is driven by this runtime today.
-    /// V2 carries two rows whose meaning is not yet confirmed.
-    public var isFullySupported: Bool { self == .openAICodexV1 }
+    /// V2 adds the sixteen gaze poses; everything else is identical.
+    public var hasLookDirections: Bool { self == .openAICodexV2 }
 
-    /// Resolve a profile from an atlas pixel size.
+    /// Rows 9 and 10 carry look poses, so they are used — unlike the surplus
+    /// columns of a short row, which must stay clear.
+    public var lookRows: [Int] { hasLookDirections ? [9, 10] : [] }
+
     public static func matching(width: Int, height: Int) -> CompatibilityProfile? {
         allCases.first { $0.atlasWidth == width && $0.atlasHeight == height }
     }
 
-    /// Tracks by atlas row index.
+    // MARK: - Tracks
+
+    /// The nine standard rows, with the contract's own per-frame timings.
+    ///
+    /// Every value below is copied from the published animation-row table. The
+    /// final frame of most rows is held longer, which is what gives a gesture a
+    /// beat to land on rather than ending abruptly.
     public var tracks: [AnimationTrack] {
         var all: [AnimationTrack] = [
-            AnimationTrack(name: "idle",          row: 0, frameCount: 6, fps: 8,  loop: .loop),
-            AnimationTrack(name: "running-right", row: 1, frameCount: 8, fps: 12, loop: .loop),
-            AnimationTrack(name: "running-left",  row: 2, frameCount: 8, fps: 12, loop: .loop),
-            AnimationTrack(name: "waving",        row: 3, frameCount: 4, fps: 8,  loop: .once),
-            AnimationTrack(name: "jumping",       row: 4, frameCount: 5, fps: 12, loop: .once),
-            AnimationTrack(name: "failed",        row: 5, frameCount: 8, fps: 10, loop: .loop),
-            AnimationTrack(name: "waiting",       row: 6, frameCount: 6, fps: 6,  loop: .loop),
-            AnimationTrack(name: "running",       row: 7, frameCount: 6, fps: 12, loop: .loop),
-            AnimationTrack(name: "review",        row: 8, frameCount: 6, fps: 8,  loop: .loop),
+            // 280, 110, 110, 140, 140, 320 — the middle frames are quick and
+            // the ends are held, which is a breath, not an even cycle.
+            AnimationTrack(
+                name: "idle", row: 0,
+                frameDurations: [0.280, 0.110, 0.110, 0.140, 0.140, 0.320],
+                loop: .loop, kind: .state
+            ),
+            AnimationTrack(
+                name: "running-right", row: 1, frameCount: 8,
+                frameDuration: 0.120, finalFrameDuration: 0.220,
+                loop: .loop, kind: .locomotion
+            ),
+            AnimationTrack(
+                name: "running-left", row: 2, frameCount: 8,
+                frameDuration: 0.120, finalFrameDuration: 0.220,
+                loop: .loop, kind: .locomotion
+            ),
+            AnimationTrack(
+                name: "waving", row: 3, frameCount: 4,
+                frameDuration: 0.140, finalFrameDuration: 0.280,
+                loop: .once, kind: .gesture
+            ),
+            AnimationTrack(
+                name: "jumping", row: 4, frameCount: 5,
+                frameDuration: 0.140, finalFrameDuration: 0.280,
+                loop: .once, kind: .gesture
+            ),
+            // `failed` is a reaction, so it plays through and settles rather
+            // than cycling forever.
+            AnimationTrack(
+                name: "failed", row: 5, frameCount: 8,
+                frameDuration: 0.140, finalFrameDuration: 0.240,
+                loop: .once, kind: .state
+            ),
+            AnimationTrack(
+                name: "waiting", row: 6, frameCount: 6,
+                frameDuration: 0.150, finalFrameDuration: 0.260,
+                loop: .loop, kind: .state
+            ),
+            // Active task work, not foot-running — despite the name.
+            AnimationTrack(
+                name: "running", row: 7, frameCount: 6,
+                frameDuration: 0.120, finalFrameDuration: 0.220,
+                loop: .loop, kind: .state
+            ),
+            AnimationTrack(
+                name: "review", row: 8, frameCount: 6,
+                frameDuration: 0.150, finalFrameDuration: 0.280,
+                loop: .loop, kind: .state
+            ),
         ]
-        if self == .openAICodexV2 {
-            // Rows 9 and 10 exist in the V2 geometry but their animation
-            // contract is unconfirmed. Declared with zero frames so the
-            // validator never expects content in them and the resolver never
-            // selects them.
-            all.append(AnimationTrack(name: "reserved-9",  row: 9,  frameCount: 0, fps: 8, loop: .loop))
-            all.append(AnimationTrack(name: "reserved-10", row: 10, frameCount: 0, fps: 8, loop: .loop))
+
+        if hasLookDirections {
+            // A gaze pose is selected by angle, never by elapsed time, so the
+            // durations here exist only so the geometry stays uniform.
+            all.append(AnimationTrack(
+                name: "look-a", row: 9, frameCount: 8,
+                frameDuration: 0.1, finalFrameDuration: 0.1,
+                loop: .staticPose, kind: .look
+            ))
+            all.append(AnimationTrack(
+                name: "look-b", row: 10, frameCount: 8,
+                frameDuration: 0.1, finalFrameDuration: 0.1,
+                loop: .staticPose, kind: .look
+            ))
         }
+
         return all
     }
 
@@ -73,19 +129,19 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
         tracks.first { $0.row == row }
     }
 
-    /// Rows the validator requires content in. Reserved rows are exempt.
+    /// Rows the validator requires content in. Every standard row, plus the
+    /// look rows when the profile has them; all sixteen gaze poses are used.
     public var requiredRows: [Int] {
         tracks.filter { $0.frameCount > 0 }.map(\.row)
     }
 
-    public var kind: (Int) -> TrackKind {
-        { row in
-            switch row {
-            case 0, 5, 6, 7: return .state
-            case 3, 4, 8:    return .gesture
-            case 1, 2:       return .locomotion
-            default:         return .reserved
-            }
-        }
+    /// Rows whose surplus cells must be transparent.
+    ///
+    /// The look rows are excluded: all eight of their columns are used, so
+    /// there is no surplus to leave clear.
+    public var rowsRequiringCleanSurplus: [Int] {
+        tracks
+            .filter { $0.kind != .look && $0.frameCount > 0 }
+            .map(\.row)
     }
 }

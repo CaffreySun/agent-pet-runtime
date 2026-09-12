@@ -1,144 +1,444 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import AgentPetCore
 
 private let resolver = AnimationResolver()
 private let v1 = CompatibilityProfile.openAICodexV1
+private let v2 = CompatibilityProfile.openAICodexV2
 
-private func track(_ name: String) -> AnimationTrack {
-    v1.track(named: name)!
+private func track(_ name: String, _ profile: CompatibilityProfile = .openAICodexV1) -> AnimationTrack {
+    profile.track(named: name)!
 }
 
-@Suite("Frame timing")
-struct FrameTimingTests {
+@Suite("Contract frame timings")
+struct ContractTimingTests {
 
-    @Test("elapsed zero shows the first frame")
-    func firstFrame() {
-        let frame = resolver.frame(for: track("idle"), elapsed: 0)
-        #expect(frame.column == 0)
-        #expect(frame.row == 0)
-        #expect(!frame.isFinished)
+    /// Every value here is copied from the published animation-row table.
+    /// The point of the table is that timings are *not* uniform, so a single
+    /// frame rate cannot reproduce any of these rows.
+    @Test("idle holds its ends and quickens its middle")
+    func idleTimings() {
+        let idle = track("idle")
+        #expect(idle.frameDurations == [0.280, 0.110, 0.110, 0.140, 0.140, 0.320])
+        // The first and last frames are held far longer than the middle ones.
+        #expect(idle.frameDurations.first! > idle.frameDurations[1] * 2)
+        #expect(idle.frameDurations.last! > idle.frameDurations[3] * 2)
     }
 
-    @Test("the frame advances at the track's fps")
-    func advancesAtFPS() {
-        let idle = track("idle")   // 6 frames at 8 fps -> 125ms each
-        #expect(resolver.frame(for: idle, elapsed: 0.124).column == 0)
-        #expect(resolver.frame(for: idle, elapsed: 0.125).column == 1)
-        #expect(resolver.frame(for: idle, elapsed: 0.250).column == 2)
+    @Test("row durations match the published table")
+    func rowDurations() {
+        let expected: [(name: String, frames: Int, total: TimeInterval)] = [
+            ("running-right", 8, 7 * 0.120 + 0.220),
+            ("running-left",  8, 7 * 0.120 + 0.220),
+            ("waving",        4, 3 * 0.140 + 0.280),
+            ("jumping",       5, 4 * 0.140 + 0.280),
+            ("failed",        8, 7 * 0.140 + 0.240),
+            ("waiting",       6, 5 * 0.150 + 0.260),
+            ("running",       6, 5 * 0.120 + 0.220),
+            ("review",        6, 5 * 0.150 + 0.280),
+        ]
+        for entry in expected {
+            let track = track(entry.name)
+            #expect(track.frameCount == entry.frames, "\(entry.name) frame count")
+            #expect(abs(track.duration - entry.total) < 0.0001,
+                    "\(entry.name) duration was \(track.duration), expected \(entry.total)")
+        }
     }
 
-    @Test("a looping track wraps at its frame count")
+    @Test("every standard row holds its final frame longer than a middle one")
+    func finalFrameHeld() {
+        for name in ["running-right", "running-left", "waving", "jumping",
+                     "failed", "waiting", "running", "review"] {
+            let track = track(name)
+            #expect(track.frameDurations.last! > track.frameDurations[0],
+                    "\(name) does not hold its final frame")
+        }
+    }
+
+    @Test("a uniform frame rate could not express idle")
+    func uniformFPSWouldBeWrong() {
+        let idle = track("idle")
+        // At an average rate every frame would be ~183ms; the real track spans
+        // 110ms to 320ms, so the pet would breathe visibly wrong.
+        let average = idle.duration / Double(idle.frameCount)
+        #expect(idle.frameDurations.min()! < average * 0.7)
+        #expect(idle.frameDurations.max()! > average * 1.6)
+    }
+}
+
+@Suite("Frame advance")
+struct FrameAdvanceTests {
+
+    @Test("a frame is held for its own duration, not a shared one")
+    func perFrameDurations() {
+        let idle = track("idle")   // 280, 110, 110, 140, 140, 320
+        #expect(idle.frameIndex(at: 0).index == 0)
+        #expect(idle.frameIndex(at: 0.279).index == 0)
+        #expect(idle.frameIndex(at: 0.280).index == 1)
+        #expect(idle.frameIndex(at: 0.389).index == 1)
+        #expect(idle.frameIndex(at: 0.390).index == 2)
+        #expect(idle.frameIndex(at: 0.500).index == 3)
+    }
+
+    @Test("the final frame is held for its own longer duration")
+    func finalFrameHold() {
+        let idle = track("idle")
+        let beforeLast = idle.duration - idle.frameDurations.last!
+        #expect(idle.frameIndex(at: beforeLast).index == 5)
+        #expect(idle.frameIndex(at: idle.duration - 0.001).index == 5)
+    }
+
+    @Test("a looping track wraps")
     func loopingWraps() {
-        let idle = track("idle")   // 6 frames
-        #expect(resolver.frame(for: idle, elapsed: idle.duration).column == 0)
-        #expect(resolver.frame(for: idle, elapsed: idle.duration + 0.125).column == 1)
-        #expect(resolver.frame(for: idle, elapsed: idle.duration * 100).column == 0)
+        let idle = track("idle")
+        #expect(idle.frameIndex(at: idle.duration).index == 0)
+        #expect(idle.frameIndex(at: idle.duration * 50).index == 0)
+        #expect(!idle.frameIndex(at: idle.duration * 50).finished)
     }
 
-    @Test("a one-shot track holds its last frame and reports finished")
+    @Test("a one-shot holds its last frame and reports finished")
     func oneShotHolds() {
-        let waving = track("waving")   // 4 frames at 8 fps -> 0.5s
-        #expect(resolver.frame(for: waving, elapsed: 0.49).column == 3)
-        #expect(!resolver.frame(for: waving, elapsed: 0.49).isFinished)
+        let waving = track("waving")
+        #expect(!waving.frameIndex(at: waving.duration - 0.001).finished)
 
-        let done = resolver.frame(for: waving, elapsed: 0.5)
-        #expect(done.column == 3)
-        #expect(done.isFinished)
+        let done = waving.frameIndex(at: waving.duration)
+        #expect(done.index == waving.frameCount - 1)
+        #expect(done.finished)
 
-        let later = resolver.frame(for: waving, elapsed: 10)
-        #expect(later.column == 3, "a finished one-shot must not wrap back to frame 0")
-        #expect(later.isFinished)
+        let muchLater = waving.frameIndex(at: 100)
+        #expect(muchLater.index == waving.frameCount - 1, "a finished one-shot must not wrap")
+        #expect(muchLater.finished)
+    }
+
+    @Test("a static pose never advances, however long it is held")
+    func staticPose() {
+        let look = track("look-a", v2)
+        #expect(look.loop == .staticPose)
+        for elapsed in [0.0, 1.0, 1000.0] {
+            #expect(look.frameIndex(at: elapsed).index == 0)
+            #expect(!look.frameIndex(at: elapsed).finished)
+        }
     }
 
     @Test("negative elapsed is treated as the first frame")
     func negativeElapsed() {
-        let frame = resolver.frame(for: track("running"), elapsed: -1)
-        #expect(frame.column == 0)
+        #expect(track("idle").frameIndex(at: -5).index == 0)
+    }
+}
+
+@Suite("Look directions")
+struct LookDirectionTests {
+
+    @Test("straight up is the first pose, not a neutral front view")
+    func upIsFirst() {
+        // The contract is explicit: 000 means up / 12 o'clock, and forward is
+        // the no-vector deadzone rather than a pose.
+        #expect(LookDirection.cell(forAngle: 0) == (9, 0))
     }
 
-    @Test("a track with no frames resolves to a finished first cell")
-    func emptyTrack() {
-        let reserved = CompatibilityProfile.openAICodexV2.track(named: "reserved-9")!
-        let frame = resolver.frame(for: reserved, elapsed: 5)
-        #expect(frame.column == 0)
-        #expect(frame.isFinished)
+    @Test("the sixteen poses run clockwise from up")
+    func sixteenPoses() {
+        // Written as a table rather than sixteen parameterised cases: the
+        // type checker gives up on an argument list that wide.
+        let expected: [(angle: Double, row: Int, column: Int)] = [
+            (0, 9, 0), (22.5, 9, 1), (45, 9, 2), (67.5, 9, 3),
+            (90, 9, 4), (112.5, 9, 5), (135, 9, 6), (157.5, 9, 7),
+            (180, 10, 0), (202.5, 10, 1), (225, 10, 2), (247.5, 10, 3),
+            (270, 10, 4), (292.5, 10, 5), (315, 10, 6), (337.5, 10, 7),
+        ]
+        for entry in expected {
+            let cell = LookDirection.cell(forAngle: entry.angle)
+            #expect(cell == (entry.row, entry.column),
+                    "\(entry.angle)° gave \(cell), expected (\(entry.row), \(entry.column))")
+        }
+
+        // And the whole circle is covered exactly once.
+        let sectors = Set((0..<16).map { LookDirection.cell(forAngle: Double($0) * 22.5).row * 8
+            + LookDirection.cell(forAngle: Double($0) * 22.5).column })
+        #expect(sectors.count == 16)
     }
 
-    @Test("the frame never leaves the row's usable columns")
-    func staysInBounds() {
-        for track in v1.tracks {
-            for step in stride(from: 0.0, through: 5.0, by: 0.037) {
-                let frame = resolver.frame(for: track, elapsed: step)
-                #expect(frame.column >= 0)
-                #expect(frame.column < track.frameCount,
-                        "\(track.name) produced column \(frame.column) at t=\(step)")
-            }
+    @Test("right is 90 degrees, which is the positive x axis")
+    func rightIsNinety() {
+        let angle = LookDirection.angle(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 100, y: 0))
+        #expect(abs(angle - 90) < 0.001)
+        #expect(LookDirection.cell(forAngle: angle) == (9, 4))
+    }
+
+    @Test("up is 0 degrees even though screen y grows downward")
+    func upIsZero() {
+        let angle = LookDirection.angle(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: -100))
+        #expect(abs(angle) < 0.001)
+    }
+
+    @Test("down is 180 degrees and lives in the second look row")
+    func downIsOneEighty() {
+        let angle = LookDirection.angle(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: 100))
+        #expect(abs(angle - 180) < 0.001)
+        #expect(LookDirection.cell(forAngle: angle) == (10, 0))
+    }
+
+    @Test("angles wrap rather than going out of range", arguments: [
+        -22.5, 360.0, 720.0, -360.0, 382.5,
+    ])
+    func wrapping(angle: Double) {
+        let cell = LookDirection.cell(forAngle: angle)
+        #expect(cell.row == 9 || cell.row == 10)
+        #expect(cell.column >= 0 && cell.column < 8)
+    }
+
+    @Test("a pose is centred in its sector, so slight jitter does not flicker")
+    func sectorCentring() {
+        // Pointing a hair either side of 45 degrees must not jump two poses.
+        #expect(LookDirection.cell(forAngle: 40) == LookDirection.cell(forAngle: 45))
+        #expect(LookDirection.cell(forAngle: 50) == LookDirection.cell(forAngle: 45))
+    }
+
+    @Test("V1 has no gaze rows and V2 does")
+    func profileSupport() {
+        #expect(!v1.hasLookDirections)
+        #expect(v1.lookRows.isEmpty)
+        #expect(v2.hasLookDirections)
+        #expect(v2.lookRows == [9, 10])
+        #expect(v2.track(atRow: 9)?.kind == .look)
+        #expect(v2.track(atRow: 10)?.kind == .look)
+    }
+}
+
+@Suite("Presentation layering")
+struct PresentationLayerTests {
+
+    private func situation(
+        state: AgentState = .idle,
+        stateElapsed: TimeInterval = 0,
+        drag: PetSituation.Drag? = nil,
+        gesture: PetSituation.Gesture? = nil,
+        look: Double? = nil
+    ) -> PetSituation {
+        PetSituation(
+            agentState: state, agentStateElapsed: stateElapsed,
+            drag: drag, gesture: gesture, lookAngle: look
+        )
+    }
+
+    @Test("with nothing happening the pet is idle")
+    func idleByDefault() {
+        let frame = resolver.resolve(situation(), profile: v1)
+        #expect(frame?.trackName == "idle")
+        #expect(frame?.row == 0)
+    }
+
+    @Test("an agent state selects its own row")
+    func stateSelectsRow() {
+        #expect(resolver.resolve(situation(state: .running), profile: v1)?.row == 7)
+        #expect(resolver.resolve(situation(state: .waitingInput), profile: v1)?.row == 6)
+        #expect(resolver.resolve(situation(state: .failed), profile: v1)?.row == 5)
+        #expect(resolver.resolve(situation(state: .completed), profile: v1)?.row == 4)
+    }
+
+    @Test("dragging picks the locomotion row for the direction")
+    func dragLocomotion() {
+        let right = resolver.resolve(
+            situation(drag: .init(direction: .right, elapsed: 0.1)), profile: v1
+        )
+        #expect(right?.trackName == "running-right")
+        #expect(right?.row == 1)
+
+        let left = resolver.resolve(
+            situation(drag: .init(direction: .left, elapsed: 0.1)), profile: v1
+        )
+        #expect(left?.trackName == "running-left")
+        #expect(left?.row == 2)
+    }
+
+    @Test("dragging outranks everything, because the user has the pet in hand")
+    func dragOutranksAll() {
+        let frame = resolver.resolve(
+            situation(
+                state: .waitingInput,
+                drag: .init(direction: .right, elapsed: 0.05),
+                gesture: .init(trackName: "jumping", elapsed: 0.05),
+                look: 90
+            ),
+            profile: v2
+        )
+        #expect(frame?.trackName == "running-right")
+    }
+
+    @Test("dragging overrides a blocking agent state")
+    func dragOverridesWaiting() {
+        // The agent may be waiting, but the user is physically moving the pet.
+        let frame = resolver.resolve(
+            situation(state: .waitingInput, drag: .init(direction: .left, elapsed: 0.05)),
+            profile: v1
+        )
+        #expect(frame?.trackName == "running-left")
+    }
+
+    @Test("a gesture plays over the agent state until it finishes")
+    func gestureOverridesState() {
+        let waving = track("waving")
+        let during = resolver.resolve(
+            situation(state: .running, gesture: .init(trackName: "waving", elapsed: 0.1)),
+            profile: v1
+        )
+        #expect(during?.trackName == "waving")
+
+        let after = resolver.resolve(
+            situation(state: .running, gesture: .init(trackName: "waving", elapsed: waving.duration + 1)),
+            profile: v1
+        )
+        #expect(after?.trackName == "running", "a finished gesture must yield to the state")
+    }
+
+    @Test("gaze is used only when the pet would otherwise be idle")
+    func gazeOnlyWhenIdle() {
+        let gazing = resolver.resolve(situation(look: 90), profile: v2)
+        #expect(gazing?.row == 9)
+        #expect(gazing?.column == 4)
+
+        // A working agent is more important than where the pointer is.
+        let working = resolver.resolve(situation(state: .running, look: 90), profile: v2)
+        #expect(working?.trackName == "running")
+    }
+
+    @Test("a V1 pet ignores gaze, having nowhere to put it")
+    func v1IgnoresGaze() {
+        let frame = resolver.resolve(situation(look: 90), profile: v1)
+        #expect(frame?.trackName == "idle")
+    }
+
+    @Test("with no gaze angle the pet falls back to idle")
+    func deadzoneFallsBack() {
+        // This is the contract's "no-vector deadzone".
+        let frame = resolver.resolve(situation(look: nil), profile: v2)
+        #expect(frame?.trackName == "idle")
+    }
+
+    @Test("completion celebrates once and then settles to idle")
+    func completionSettles() {
+        let jumping = track("jumping")
+
+        let during = resolver.resolve(
+            situation(state: .completed, stateElapsed: 0.1), profile: v1
+        )
+        #expect(during?.trackName == "jumping")
+
+        let after = resolver.resolve(
+            situation(state: .completed, stateElapsed: jumping.duration + 0.5), profile: v1
+        )
+        #expect(after?.trackName == "idle", "the pet must not celebrate forever")
+    }
+
+    @Test("failure plays through and then settles rather than looping a grimace")
+    func failureSettles() {
+        let failed = track("failed")
+        let during = resolver.resolve(situation(state: .failed, stateElapsed: 0.2), profile: v1)
+        #expect(during?.trackName == "failed")
+
+        let after = resolver.resolve(
+            situation(state: .failed, stateElapsed: failed.duration + 0.5), profile: v1
+        )
+        #expect(after?.trackName == "idle")
+    }
+
+    @Test("running and waiting loop for as long as they last")
+    func steadyStatesLoop() {
+        for state in [AgentState.running, .waitingInput, .waitingApproval] {
+            let after = resolver.resolve(situation(state: state, stateElapsed: 60), profile: v1)
+            #expect(after?.trackName == state.animationTrackName,
+                    "\(state) should still be animating after a minute")
+            #expect(after?.isFinished == false)
         }
     }
 
-    @Test("the reported row matches the track's row")
-    func rowMatchesTrack() {
-        for track in v1.tracks {
-            #expect(resolver.frame(for: track, elapsed: 0.3).row == track.row)
-            #expect(resolver.frame(for: track, elapsed: 0.3).trackName == track.name)
+    @Test("every state resolves to a playable frame in both profiles")
+    func everyStatePlayable() {
+        for profile in CompatibilityProfile.allCases {
+            for state in AgentState.allCases {
+                let frame = resolver.resolve(situation(state: state), profile: profile)
+                let track = profile.track(named: state.animationTrackName)!
+                #expect(frame != nil, "\(state) unresolvable in \(profile.rawValue)")
+                #expect(frame!.column < track.frameCount)
+            }
         }
     }
 }
 
-@Suite("Presentation resolution")
-struct PresentationResolutionTests {
+@Suite("Drag direction")
+struct DragDirectionTests {
 
-    @Test("a plain state resolves to that state's track")
-    func stateOnly() {
-        let frame = resolver.resolve(state: .running, profile: v1, stateElapsed: 0.3, gesture: nil)
-        #expect(frame?.trackName == "running")
-        #expect(frame?.row == 7)
+    @Test("horizontal movement picks its direction")
+    func horizontal() {
+        #expect(HorizontalDirection.from(dx: 10, dy: 0, previous: nil) == .right)
+        #expect(HorizontalDirection.from(dx: -10, dy: 0, previous: nil) == .left)
     }
 
-    @Test("an unfinished gesture takes precedence over the state track")
-    func gestureWins() {
-        let frame = resolver.resolve(
-            state: .idle, profile: v1, stateElapsed: 0,
-            gesture: (track("jumping"), 0.0)
-        )
-        #expect(frame?.trackName == "jumping")
+    @Test("a mostly vertical drag keeps the direction it had")
+    func verticalKeepsPrevious() {
+        // The atlas has no row for travelling straight up, and flipping the
+        // pet as the cursor wobbles would look like a glitch.
+        #expect(HorizontalDirection.from(dx: 1, dy: 50, previous: .left) == .left)
+        #expect(HorizontalDirection.from(dx: -1, dy: 50, previous: .right) == .right)
     }
 
-    @Test("a finished gesture yields back to the state track")
-    func gestureYieldsBack() {
-        let waving = track("waving")
-        let frame = resolver.resolve(
-            state: .running, profile: v1, stateElapsed: 0.5,
-            gesture: (waving, waving.duration + 1)
-        )
-        #expect(frame?.trackName == "running", "a finished gesture must not stick")
+    @Test("no movement keeps the previous direction")
+    func noMovement() {
+        #expect(HorizontalDirection.from(dx: 0, dy: 0, previous: .left) == .left)
+        #expect(HorizontalDirection.from(dx: 0, dy: 0, previous: nil) == nil)
     }
 
-    @Test("a completed session settles to idle once its wave is over")
-    func completedSettles() {
-        let waving = track("waving")
-        let settled = resolver.settledState(after: waving, from: .completed)
-        #expect(settled == .idle)
-        #expect(resolver.resolve(state: settled, profile: v1, stateElapsed: 0, gesture: nil)?.trackName == "idle")
+    @Test("direction maps to the right atlas row")
+    func trackNames() {
+        #expect(HorizontalDirection.left.trackName == "running-left")
+        #expect(HorizontalDirection.right.trackName == "running-right")
+        #expect(track("running-left", v2).row == 2)
+        #expect(track("running-right", v2).row == 1)
     }
 
-    @Test("other states keep their own track after a gesture")
-    func othersUnchanged() {
-        let jumping = track("jumping")
-        #expect(resolver.settledState(after: jumping, from: .running) == .running)
-        #expect(resolver.settledState(after: jumping, from: .failed) == .failed)
-    }
-
-    @Test("every agent state resolves to a playable frame in both profiles")
-    func everyStatePlayable() {
+    @Test("locomotion rows exist in both profiles")
+    func bothProfiles() {
         for profile in CompatibilityProfile.allCases {
-            for state in AgentState.allCases {
-                let frame = resolver.resolve(state: state, profile: profile, stateElapsed: 0.2, gesture: nil)
-                #expect(frame != nil, "\(state) unresolvable in \(profile.rawValue)")
-                let track = profile.track(named: state.animationTrackName)!
-                #expect(frame!.column < track.frameCount)
-            }
+            #expect(profile.track(named: "running-left") != nil)
+            #expect(profile.track(named: "running-right") != nil)
+        }
+    }
+}
+
+@Suite("State to track mapping")
+struct StateTrackMappingTests {
+
+    @Test("each state maps to the documented row", arguments: [
+        (AgentState.idle, "idle", 0),
+        (.running, "running", 7),
+        (.waitingInput, "waiting", 6),
+        (.waitingApproval, "waiting", 6),
+        (.completed, "jumping", 4),
+        (.failed, "failed", 5),
+        (.paused, "idle", 0),
+        (.unknown, "idle", 0),
+    ])
+    func mapping(state: AgentState, name: String, row: Int) {
+        #expect(state.animationTrackName == name)
+        #expect(v1.track(named: name)?.row == row)
+    }
+
+    @Test("no agent state selects a locomotion or gaze row")
+    func nonStateRowsAreNotSelected() {
+        for state in AgentState.allCases {
+            let track = v1.track(named: state.animationTrackName)
+            #expect(track?.kind == .state || track?.kind == .gesture,
+                    "\(state) selected a \(track?.kind.rawValue ?? "?") row")
+        }
+    }
+
+    @Test("waving is a reaction to the user, not to the agent")
+    func wavingIsNotAState() {
+        // `waving` is "a greeting or attention gesture" — nothing the agent
+        // does selects it; clicking the pet does.
+        for state in AgentState.allCases {
+            #expect(state.animationTrackName != "waving")
         }
     }
 }

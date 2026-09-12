@@ -112,13 +112,21 @@ bridge is a shim the agent executes plus a socket it writes to.
 meaningful and will change agent behaviour in response. A pet that alters the
 user's agents would be a far worse bug than a pet that misses an event.
 
-**Only four of the nine atlas rows are driven by agent state.** `waving`,
-`jumping` and `review` are gesture tracks; `running-left`/`running-right` are
-locomotion. Treating all nine as state rows is a category error.
+**Animation timings are per frame, not a frame rate.** The published contract
+gives explicit milliseconds for every frame and they are not uniform — `idle`
+runs `280, 110, 110, 140, 140, 320`. That is a breath, and a single fps cannot
+reproduce it.
 
-**V2 atlases load rather than being rejected.** `spriteVersionNumber: 2`
-(1536×2288) exists in the wild — including in a pet already installed on this
-machine. Rows 0–8 play; rows 9–10 are reserved.
+**Only four of the nine standard rows are driven by agent state.** `waving` is
+a greeting for when the pet is clicked, and `running-left`/`running-right` are
+locomotion driven by which way the pet is being dragged. Treating all nine as
+state rows is a category error.
+
+**V2's extra rows are gaze poses, not spare capacity.** Rows 9 and 10 are
+sixteen clockwise look directions at 22.5° intervals, `000` being straight up.
+Verified against the art: exporting all sixteen poses from a real V2 pet shows
+a continuous clockwise turn. A V1 atlas has nowhere to put a direction, so it
+simply never looks around.
 
 **Surplus-cell residue is a warning, not an error.** OpenAI's authoring
 validator fails on any stray pixel past a row's frame count, but this renderer

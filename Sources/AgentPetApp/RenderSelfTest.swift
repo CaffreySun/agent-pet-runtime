@@ -103,10 +103,96 @@ enum RenderSelfTest {
         print("  \(rendersByTrack.count) distinct tracks rendered from \(states.count) states")
 
         failures += checkDraggable(view: view)
+        failures += checkBehaviourLayers(controller: controller, view: view)
 
         print("")
         print(failures == 0 ? "PASS" : "FAIL (\(failures) problem(s))")
         return failures == 0 ? 0 : 1
+    }
+
+    /// Checks the layers above the agent state — locomotion and gaze — which
+    /// the state sweep above never exercises.
+    private static func checkBehaviourLayers(controller: PetController, view: PetView) -> Int {
+        print("")
+        print("Behaviour layers")
+        var failures = 0
+
+        // Dragging must take over from whatever the agent is doing.
+        controller.previewState(.waitingInput)
+        let waitingBefore = view.currentImage
+        controller.beginDrag()
+        controller.updateDrag(dx: 12, dy: 0)
+        let draggedRight = view.currentImage
+        if draggedRight != nil, draggedRight !== waitingBefore {
+            print("  ✓ dragging replaces the agent state with locomotion")
+        } else {
+            print("  ✗ dragging did not change the animation")
+            failures += 1
+        }
+
+        controller.updateDrag(dx: -12, dy: 0)
+        if view.currentImage !== draggedRight {
+            print("  ✓ reversing the drag switches direction")
+        } else {
+            print("  ✗ the pet did not turn around when dragged the other way")
+            failures += 1
+        }
+
+        controller.endDrag()
+        controller.clearPreview()
+        if view.currentImage !== draggedRight {
+            print("  ✓ releasing returns the pet to its own animation")
+        } else {
+            print("  ✗ the pet stayed in locomotion after the drag ended")
+            failures += 1
+        }
+
+        // Gaze only exists in a V2 atlas. A V1 pet has nowhere to put a
+        // direction, so "no effect" is the correct result rather than a fault.
+        guard let profile = controller.loadedProfile else {
+            controller.clearPreview()
+            return failures
+        }
+        guard profile.hasLookDirections else {
+            print("  – gaze skipped: \(profile.displayName) has no look rows "
+                  + "(a V2 pet is needed)")
+            controller.clearPreview()
+            return failures
+        }
+
+        controller.previewState(.idle)
+        let idleFrame = view.currentImage
+        controller.aimGaze(at: 90)   // straight right
+        if view.currentImage != nil, view.currentImage !== idleFrame {
+            print("  ✓ an idle pet turns to look toward the pointer")
+        } else {
+            print("  ✗ gaze had no effect on a \(profile.displayName) pet")
+            failures += 1
+        }
+
+        controller.aimGaze(at: nil)
+        if view.currentImage !== idleFrame {
+            print("  ✓ with no direction the pet falls back to idle")
+        } else {
+            print("  ✗ the deadzone did not fall back to idle")
+            failures += 1
+        }
+
+        // Gaze must not outrank an agent that is actually doing something.
+        controller.aimGaze(at: 90)
+        controller.previewState(.running)
+        let working = view.currentImage
+        controller.previewState(.idle)
+        if view.currentImage !== working {
+            print("  ✓ a working agent outranks where the pointer is")
+        } else {
+            print("  ✗ gaze overrode an active agent state")
+            failures += 1
+        }
+
+        controller.aimGaze(at: nil)
+        controller.clearPreview()
+        return failures
     }
 
     /// Verifies the view will actually receive the click that starts a drag.

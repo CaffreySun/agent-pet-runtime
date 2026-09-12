@@ -104,60 +104,124 @@ agent-pet-runtime/
 
 ---
 
-## 3. 动画轨道模型（修正 §9.1 / §12.1）
+## 3. 动画轨道模型（依官方契约修正）
 
-### 3.1 轨道不是状态的同义词
+> 本节在拿到官方契约全文后**重写过**。此前基于猜测的版本有四处错误，见 §3.5。
 
-原方案隐含「9 个 atlas 行 ↔ 9 个 Agent 状态」。**错的。**
+契约来源（本机即有一份，随 ChatGPT.app 分发）：
+`/Applications/ChatGPT.app/Contents/Resources/skills/skills/.curated/hatch-pet/references/`
 
-实测的 9 行中，只有 **4 行**由 `AgentState` 驱动。其余 5 行由别的输入驱动：
+- `codex-pet-contract.md`
+- `animation-rows.md`
+
+### 3.1 播放参数是逐帧毫秒，不是帧率
+
+原方案只给了每行**帧数**，据此实现是错的。契约给出**每一帧的毫秒时长**，且**不均匀**：
+
+| 行 | 帧时长 |
+|---|---|
+| 0 `idle` | **280, 110, 110, 140, 140, 320 ms** |
+| 1 `running-right` | 120 ×7，末帧 220 |
+| 2 `running-left` | 120 ×7，末帧 220 |
+| 3 `waving` | 140 ×3，末帧 280 |
+| 4 `jumping` | 140 ×4，末帧 280 |
+| 5 `failed` | 140 ×7，末帧 240 |
+| 6 `waiting` | 150 ×5，末帧 260 |
+| 7 `running` | 120 ×5，末帧 220 |
+| 8 `review` | 150 ×5，末帧 280 |
+| 9–10 | 注视方向，见 §3.4 |
+
+`idle` 首末帧是中间帧的 2–3 倍长——那是**呼吸**，不是匀速循环。用单一 fps 无法表达，近似会走形。
+
+因此 `AnimationTrack` 持有 `frameDurations: [TimeInterval]`，**没有 fps 字段**。
+
+### 3.2 轨道分类与驱动源
 
 | 类别 | 行 | 驱动源 |
 |---|---|---|
-| **State track** | 0 `idle`, 5 `failed`, 6 `waiting`, 7 `running` | `AgentState` |
-| **Gesture track** | 3 `waving`, 4 `jumping`, 8 `review` | 瞬时事件（完成 / 会话开始 / review 模式） |
-| **Locomotion track** | 1 `running-right`, 2 `running-left` | 位移方向（拖动 / 移动），与 Agent 无关 |
+| **State** | 0 `idle`, 5 `failed`, 6 `waiting`, 7 `running` | `AgentState` |
+| **Gesture** | 3 `waving`, 4 `jumping` | 瞬时事件 / 用户点击 |
+| **Locomotion** | 1 `running-right`, 2 `running-left` | **拖动方向** |
+| **Look** | 9, 10（仅 V2） | **指针方位角** |
 
-### 3.2 状态 → 轨道映射表（**这是原方案缺失的核心产物**）
+`review`（row 8）是 state 轨，但 v0.1 没有映射到它的 Agent 状态——Codex 的 review 模式尚未在 hook 中暴露。
 
-| `AgentState` | `AnimationTrack` | row | 帧数 | fps | 播放 | 备注 |
-|---|---|---|---|---|---|---|
-| `idle` | `.idle` | 0 | 6 | 8 | loop | |
-| `running` | `.running` | 7 | 6 | 12 | loop | 默认用 row 7，不用方向行 |
-| `waitingInput` | `.waiting` | 6 | 6 | 6 | loop | |
-| `waitingApproval` | `.waiting` | 6 | 6 | 6 | loop | 与上一行同轨，靠 UI 徽标区分 |
-| `completed` | `.waving` | 3 | 4 | 8 | once→idle | 手势轨 |
-| `failed` | `.failed` | 5 | 8 | 10 | loop | |
-| `paused` | `.idle` | 0 | 6 | 8 | loop | |
-| `unknown` | `.idle` | 0 | 6 | 8 | loop | |
+### 3.3 状态 → 轨道映射表
 
-**瞬时轨道**（由事件触发，不由状态触发）：
+契约只说明每行**是什么**，没有规定哪个状态选它。下表是本 runtime 对契约语义的解读，每条都注明依据：
 
-| 事件 | `AnimationTrack` | row | 帧数 | fps | 播放 |
-|---|---|---|---|---|---|
-| session 建立 | `.jumping` | 4 | 5 | 12 | once→状态轨 |
-| 完成（保留手势） | `.waving` | 3 | 4 | 8 | once→idle |
+| `AgentState` | row | 播放 | 依据 |
+|---|---|---|---|
+| `idle` | 0 | loop | "calm, low-distraction breathing/blinking loop" |
+| `running` | 7 | loop | "active task work or processing, **not literal foot-running**" |
+| `waitingInput` | 6 | loop | "expectant asking pose for approval, help, or user input" |
+| `waitingApproval` | 6 | loop | 同上——atlas 只有一个 waiting 姿态 |
+| `completed` | 4 `jumping` | **once → idle** | "anticipation, lift, peak, descent, and settle"——唯一适合表达"做好了"的行 |
+| `failed` | 5 | **once → idle** | "readable error, sad, or deflated reaction" |
+| `paused` / `unknown` | 0 | loop | 无可展示信息 |
 
-**未驱动轨道**（v0.1 保留但不由 Agent 触发）：
+**`waving`（row 3）不由任何 AgentState 选择。** 契约说它是 "greeting or attention gesture"——那是对**用户**的反应，不是对 Agent 的。本 runtime 用它作为**点击宠物时的问候动作**。
 
-| 轨道 | row | 状态 |
+`completed` 与 `failed` 都是 one-shot：播完落到下面的层，而不是冻结在最后一帧。否则任务失败后你会得到一个永远哭丧着脸的宠物。
+
+### 3.4 注视方向（V2 row 9–10）——原方案标为 [未验证] 的问题
+
+契约明确：
+
+> Rows `9-10`: 16 clockwise look directions.
+> Row `9`: `000`, `022.5`, `045`, `067.5`, `090`, `112.5`, `135`, `157.5` degrees.
+> Row `10`: `180`, `202.5`, `225`, `247.5`, `270`, `292.5`, `315`, `337.5` degrees.
+> `000` means up / 12 o'clock, not neutral/front.
+> Neutral/front is the no-vector deadzone and falls back to idle.
+
+**已用真实资产验证**：从本机 `pet-ben-hill`（V2）导出 row 9–10 全部 16 帧，目视确认是连续顺时针的注视姿态——row 9 c0 仰视、c4 正右、row 10 c0 俯视、c7 回到左上。见 `--diagnose --export-frames`。
+
+实现：
+
+```
+sector = floor(((angle + 11.25) mod 360) / 22.5) mod 16
+row    = sector < 8 ? 9 : 10
+column = sector mod 8
+```
+
+半扇区偏移让每个姿态落在扇区中心，指针在 45° 附近抖动时不会来回跳两个姿态。
+
+"Neutral/front 是 deadzone" 的含义是：**没有方向向量时无法确定角度**，回落到 idle。本实现取指针到宠物中心距离小于 28pt 为 deadzone。
+
+### 3.5 此前版本的四处错误
+
+| # | 曾经的写法 | 实际 |
 |---|---|---|
-| `.runningRight` | 1 | v0.2 由拖动方向驱动 |
-| `.runningLeft` | 2 | v0.2 由拖动方向驱动 |
-| `.review` | 8 | **保留**。Codex 有 `codex review` 子命令，v0.2 可引入 `reviewing` 状态 |
+| 1 | 每行一个 fps（8/12/10…） | 逐帧毫秒，且首末帧显著更长 |
+| 2 | V2 row 9–10 = "reserved，不播放" | 16 个注视姿态，全部使用 |
+| 3 | `completed` → `waving` | → `jumping`；`waving` 是点击问候 |
+| 4 | `running-right/left` = "v0.2 由拖动驱动" | v0.1 就由拖动方向驱动 |
+| 5 | V2 "部分兼容"，发 warning | V2 完全支持；V1 才是"中间产物" |
 
-> **`review` 的处置需要决策**：v0.1 不驱动它，意味着 8 帧 × 6 列 = 48 个单元格被浪费。
-> 两个选项：(a) 接受浪费，等 v0.2；(b) v0.1 就加 `AgentState.reviewing` 并映射 Codex 的 review 事件。
-> **默认选 (a)**，因为 (b) 需要先确认 Codex 是否在 hook 里暴露 review 模式。
+契约原文甚至更强硬：
 
-### 3.3 播放参数为什么必须显式定义
+> The 8x9 `1536x1872` atlas is an intermediate assembly artifact only. Never package it as a newly hatched pet.
 
-原 contract 只给了**每行帧数**，没给**帧率与循环语义**。缺这两项时：
+即 **V2 才是主格式，V1 是遗留**。本 runtime 两者都支持，但 V1 不再被当作基线。
 
-- `waving`（4 帧）该循环还是播一次？播一次后停在哪一帧？
-- `completed` 状态的 Pet 如果循环 waving，用户会看到一个无限挥手的宠物。
+### 3.6 播放层级
 
-§3.2 表中的数值是**设计建议，不是官方契约**。它们应当作为 `CompatibilityProfile` 内可覆盖的常量，便于调参而不改代码。
+`AnimationResolver` 按此顺序决定画面，**先命中者胜**：
+
+```
+1. 拖动中        → running-left / running-right   （用户手上拿着它）
+2. 手势播放中    → waving / jumping               （one-shot，播完下沉）
+3. Agent 状态    → 见 §3.3                        （inactive 状态跳过）
+4. 注视方向      → row 9/10                       （仅 V2，仅在有角度时）
+5. idle
+```
+
+两条容易写错的规则：
+
+- **inactive 状态必须跳过而不是返回**。`idle` 是兜底，不是"有话说"的状态。若在第 3 层就返回 idle 轨道，决策提前结束，注视永远轮不到——宠物会永远直视前方。
+- **one-shot 播完必须下沉**。只对 `failed` 下沉、对 `completed` 不下沉，会让庆祝动作永久冻结（这个 bug 在实现时真实出现过，被测试抓住）。
+
+拖动的方向判定：横向位移取符号；**竖向拖动保持原方向**——atlas 没有"向上走"的行，光标一抖就翻转会像故障。
 
 ---
 

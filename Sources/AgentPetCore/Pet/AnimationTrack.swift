@@ -1,68 +1,147 @@
 import Foundation
 
 public enum LoopMode: String, Codable, Sendable {
-    /// Repeat indefinitely while the track is active.
+    /// Repeat while the track is active.
     case loop
-    /// Play through once, then hand control back to the state track.
+    /// Play through once, then hand control back.
     case once
+    /// Not animated: one pose, chosen by direction rather than by time.
+    case staticPose
+}
+
+/// What drives a track.
+public enum TrackKind: String, Codable, Sendable, CaseIterable {
+    /// Driven by `AgentState` — what the agent is doing.
+    case state
+    /// A one-shot gesture triggered by an event.
+    case gesture
+    /// Locomotion, driven by the pet moving on screen.
+    case locomotion
+    /// A gaze pose, driven by where the pointer is.
+    case look
 }
 
 /// One animation row in a sprite atlas.
 ///
-/// Frame count is part of the published OpenAI/Codex contract; fps and loop
-/// mode are *not* — they are design values this runtime chooses, so they live
-/// in the compatibility profile and can be retuned without touching the
-/// geometry contract.
+/// Durations are **per frame**, not a frame rate. The published contract gives
+/// explicit millisecond timings for every frame, and they are not uniform:
+/// `idle` runs `280, 110, 110, 140, 140, 320`, holding its first and last
+/// frames nearly three times as long as its middle ones. A single fps cannot
+/// express that, and approximating it makes the pet breathe wrong.
 public struct AnimationTrack: Hashable, Sendable {
     public let name: String
     public let row: Int
-    public let frameCount: Int
-    public let fps: Double
+    /// How long each frame is shown, in order.
+    public let frameDurations: [TimeInterval]
     public let loop: LoopMode
+    public let kind: TrackKind
 
-    public init(name: String, row: Int, frameCount: Int, fps: Double, loop: LoopMode) {
+    public init(
+        name: String,
+        row: Int,
+        frameDurations: [TimeInterval],
+        loop: LoopMode,
+        kind: TrackKind
+    ) {
         self.name = name
         self.row = row
-        self.frameCount = frameCount
-        self.fps = fps
+        self.frameDurations = frameDurations
         self.loop = loop
+        self.kind = kind
     }
 
-    /// Wall-clock duration of one pass through the row.
-    public var duration: TimeInterval {
-        Double(frameCount) / fps
+    /// Convenience for the contract's common shape: every frame the same
+    /// duration except the last, which is held longer.
+    public init(
+        name: String,
+        row: Int,
+        frameCount: Int,
+        frameDuration: TimeInterval,
+        finalFrameDuration: TimeInterval,
+        loop: LoopMode,
+        kind: TrackKind
+    ) {
+        let middle = Array(repeating: frameDuration, count: max(0, frameCount - 1))
+        self.init(
+            name: name,
+            row: row,
+            frameDurations: middle + [finalFrameDuration],
+            loop: loop,
+            kind: kind
+        )
     }
-}
 
-/// Which kind of input drives a track.
-///
-/// The original spec implicitly treated all nine atlas rows as agent-state
-/// rows. They are not: only four of them track `AgentState`.
-public enum TrackKind: Sendable {
-    /// Driven by `AgentState`.
-    case state
-    /// Triggered by a transient event; plays once then yields.
-    case gesture
-    /// Driven by on-screen movement, independent of any agent.
-    case locomotion
-    /// Present in the atlas but not driven in v0.1.
-    case reserved
-}
+    public var frameCount: Int { frameDurations.count }
 
-public extension AgentState {
-    /// The atlas row this state maps to.
+    /// One full pass through the row.
+    public var duration: TimeInterval { frameDurations.reduce(0, +) }
+
+    /// Which frame is showing `elapsed` seconds in.
     ///
-    /// `waitingInput` and `waitingApproval` deliberately share one row — the
-    /// atlas has only one `waiting` track. The distinction is surfaced in the
-    /// UI badge, not the animation.
-    var animationTrackName: String {
-        switch self {
-        case .idle, .paused, .unknown: return "idle"
-        case .running:                 return "running"
-        case .waitingInput,
-             .waitingApproval:         return "waiting"
-        case .completed:               return "waving"
-        case .failed:                  return "failed"
+    /// Returns the frame index and whether a one-shot has run past its end.
+    public func frameIndex(at elapsed: TimeInterval) -> (index: Int, finished: Bool) {
+        guard !frameDurations.isEmpty else { return (0, true) }
+
+        let total = duration
+        guard total > 0 else { return (0, loop == .loop ? false : true) }
+
+        var offset = max(0, elapsed)
+
+        switch loop {
+        case .staticPose:
+            return (0, false)
+        case .once:
+            guard offset < total else { return (frameCount - 1, true) }
+        case .loop:
+            // Wrap first so a very long elapsed does not walk the array.
+            offset = offset.truncatingRemainder(dividingBy: total)
         }
+
+        var accumulated: TimeInterval = 0
+        for (index, frameDuration) in frameDurations.enumerated() {
+            accumulated += frameDuration
+            if offset < accumulated { return (index, false) }
+        }
+        return (frameCount - 1, loop == .once)
+    }
+}
+
+/// One of the sixteen clockwise gaze poses in a V2 atlas.
+///
+/// Rows 9 and 10 are not spare capacity: together they form a continuous
+/// sixteen-step look loop at 22.5° intervals. `000` is straight up, not
+/// forward — the pet always faces the viewer, and these rows only turn its
+/// gaze.
+public enum LookDirection {
+
+    public static let sectorCount = 16
+    public static let sectorSize = 360.0 / Double(sectorCount)
+
+    /// Which atlas cell shows a gaze at this angle.
+    ///
+    /// `angle` is clockwise from up, matching the contract's own labelling.
+    /// The half-sector offset puts each pose at the centre of its sector, so
+    /// pointing straight up selects `000` rather than straddling two poses.
+    public static func cell(forAngle angle: Double) -> (row: Int, column: Int) {
+        let normalized = angle.truncatingRemainder(dividingBy: 360)
+        let positive = normalized < 0 ? normalized + 360 : normalized
+        let sector = Int(((positive + sectorSize / 2) / sectorSize).rounded(.down)) % sectorCount
+        return cell(forSector: sector)
+    }
+
+    public static func cell(forSector sector: Int) -> (row: Int, column: Int) {
+        let clamped = ((sector % sectorCount) + sectorCount) % sectorCount
+        return (row: clamped < 8 ? 9 : 10, column: clamped % 8)
+    }
+
+    /// Angle from `origin` to `target` in screen coordinates, clockwise from up.
+    ///
+    /// Screen y grows downward, so up is `-y`.
+    public static func angle(from origin: CGPoint, to target: CGPoint) -> Double {
+        let dx = target.x - origin.x
+        let dy = target.y - origin.y
+        let radians = atan2(dx, -dy)
+        let degrees = radians * 180 / .pi
+        return degrees < 0 ? degrees + 360 : degrees
     }
 }

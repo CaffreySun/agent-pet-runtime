@@ -13,6 +13,10 @@ final class PetView: NSView {
 
     /// Set by the controller so a drag can move the window rather than the view.
     var onDrag: ((NSPoint) -> Void)?
+    /// Fires when the pet is picked up, so it can switch to locomotion.
+    var onDragBegan: (() -> Void)?
+    /// A click that was not a drag — the pet's cue to greet.
+    var onClick: (() -> Void)?
     /// Called once a drag finishes, so the position can be persisted then
     /// rather than only at quit — a crash would otherwise lose it.
     var onDragEnded: (() -> Void)?
@@ -117,13 +121,22 @@ final class PetView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         guard let grabOffset else { return }
-        didMove = true
+        if !didMove {
+            didMove = true
+            // Announced on the first movement, not on mouse-down, so a click
+            // that never moves is a greeting rather than a zero-length drag.
+            onDragBegan?()
+        }
         onDrag?(WindowDrag.origin(mouse: NSEvent.mouseLocation, grabOffset: grabOffset))
     }
 
     override func mouseUp(with event: NSEvent) {
         grabOffset = nil
-        if didMove { onDragEnded?() }
+        if didMove {
+            onDragEnded?()
+        } else {
+            onClick?()
+        }
         didMove = false
     }
 }

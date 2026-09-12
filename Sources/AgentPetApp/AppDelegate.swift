@@ -33,8 +33,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         library = PetLibrary.discover()
-        if let first = library.first {
-            select(pet: first)
+
+        // `--pet <id>` picks a specific one, which is how the self-test can be
+        // pointed at a V2 pet to exercise the gaze rows.
+        var chosen = library.first
+        if let index = CommandLine.arguments.firstIndex(of: "--pet"),
+           index + 1 < CommandLine.arguments.count {
+            let wanted = CommandLine.arguments[index + 1].lowercased()
+            chosen = library.first {
+                $0.definition.id.lowercased() == wanted
+                    || $0.root.lastPathComponent.lowercased() == wanted
+            } ?? library.first
+            if chosen == nil || chosen?.definition.id.lowercased() != wanted {
+                FileHandle.standardError.write(Data(
+                    "[pet] no pet matching '\(wanted)'; using the first available\n".utf8
+                ))
+            }
+        }
+
+        if let chosen {
+            select(pet: chosen)
         } else {
             presentNoPets()
         }
@@ -148,8 +166,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         petView = PetView(frame: NSRect(origin: .zero, size: size))
         petView.autoresizingMask = [.width, .height]
+        petView.onDragBegan = { [weak self] in
+            self?.controller.beginDrag()
+        }
         petView.onDrag = { [weak self] origin in
             guard let self, let window = self.window else { return }
+
+            let previous = window.frame.origin
+            self.controller.updateDrag(dx: origin.x - previous.x, dy: origin.y - previous.y)
+
             // Keep at least a grabbable corner on some display. A pet dragged
             // fully off-screen has no dock icon and no window list entry, so
             // there would be no way to get it back.
@@ -162,7 +187,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         petView.onDragEnded = { [weak self] in
+            self?.controller.endDrag()
             self?.savePosition()
+        }
+        petView.onClick = { [weak self] in
+            self?.controller.greet()
+        }
+
+        // Lets the pet aim its gaze at the pointer.
+        controller.petCenterProvider = { [weak self] in
+            guard let window = self?.window else { return nil }
+            let frame = window.frame
+            return CGPoint(x: frame.midX, y: frame.midY)
         }
         window.contentView = petView
         window.orderFrontRegardless()

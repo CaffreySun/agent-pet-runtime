@@ -50,7 +50,7 @@ public struct SpriteFrames: Sendable {
 
     public var isEmpty: Bool { frames.values.allSatisfy(\.isEmpty) }
 
-    static func makeCGImage(from bitmap: RGBAAtlasBitmap) -> CGImage? {
+    public static func makeCGImage(from bitmap: RGBAAtlasBitmap) -> CGImage? {
         let bytesPerRow = bitmap.width * 4
         guard let provider = CGDataProvider(data: Data(bitmap.pixels) as CFData) else { return nil }
 
