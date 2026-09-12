@@ -132,8 +132,8 @@ struct AtlasValidatorTests {
         #expect(report.errors.contains { $0.message.contains("row 0 (idle)") })
     }
 
-    @Test("leftover pixels in an unused cell are an error — they bleed into shorter rows")
-    func dirtyUnusedCell() throws {
+    @Test("leftover pixels in an unused cell warn rather than fail the install")
+    func dirtyUnusedCellWarns() throws {
         let profile = CompatibilityProfile.openAICodexV1
         var bitmap = validAtlas(profile)
         let atlas = SpriteAtlas(profile: profile)
@@ -141,18 +141,42 @@ struct AtlasValidatorTests {
         bitmap.fill(try atlas.rect(row: 3, column: 5))
 
         let report = validator.validate(bitmap, profile: profile)
-        #expect(!report.isValid)
-        #expect(report.errors.contains { $0.message.contains("waving") && $0.message.contains("column 5") })
+        // This renderer samples columns 0..<frameCount only, so the stray
+        // pixels are unreachable. Report them; do not refuse the pet.
+        #expect(report.isValid)
+        #expect(report.errors.isEmpty)
+        #expect(report.warnings.contains {
+            $0.message.contains("waving") && $0.message.contains("column 5")
+        })
     }
 
-    @Test("a nearly-transparent leftover is tolerated as residue")
-    func faintResidueTolerated() throws {
+    @Test("any non-zero alpha in an unused cell is detected, however faint")
+    func faintResidueStillDetected() throws {
         let profile = CompatibilityProfile.openAICodexV1
         var bitmap = validAtlas(profile)
         let atlas = SpriteAtlas(profile: profile)
-        bitmap.fill(try atlas.rect(row: 3, column: 5), rgba: (10, 10, 10, 3))
+        bitmap.fill(try atlas.rect(row: 3, column: 5), rgba: (10, 10, 10, 1))
 
-        #expect(validator.validate(bitmap, profile: profile).isValid)
+        let report = validator.validate(bitmap, profile: profile)
+        #expect(report.isValid)
+        #expect(report.warnings.contains { $0.message.contains("unused column 5") })
+    }
+
+    @Test("a sparse used cell warns but does not fail")
+    func sparseUsedCellWarns() throws {
+        let profile = CompatibilityProfile.openAICodexV1
+        var bitmap = validAtlas(profile)
+        let atlas = SpriteAtlas(profile: profile)
+        // Leave ten pixels where a whole pose should be.
+        bitmap.fill(try atlas.rect(row: 0, column: 1), rgba: (0, 0, 0, 0))
+        bitmap.fill(CellRect(
+            x: 1 * profile.cellWidth, y: 0,
+            width: 10, height: 1
+        ))
+
+        let report = validator.validate(bitmap, profile: profile)
+        #expect(report.isValid)
+        #expect(report.warnings.contains { $0.message.contains("only 10 visible pixels") })
     }
 
     @Test("a fully transparent atlas fails on every required cell")
