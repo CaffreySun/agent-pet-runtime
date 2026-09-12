@@ -23,7 +23,11 @@ public struct LoadedPetPackage: Sendable {
 public enum PetPackageError: Error, Equatable, Sendable {
     case notADirectory(String)
     case manifestNotFound(String)
+    /// The manifest is present but unusable. Distinct from `manifestNotFound`
+    /// so a malformed id is not reported as a missing file.
+    case manifestInvalid(String, detail: String)
     case spritesheetNotFound(String)
+    case atlasUnreadable(String)
 }
 
 /// Reads a pet package from a directory.
@@ -75,7 +79,7 @@ public struct PetPackageLoader: Sendable {
         } catch {
             report.add("manifest", .error, "\(error)")
             // Nothing downstream can run without an id and a sprite path.
-            throw PetPackageError.manifestNotFound(root.lastPathComponent)
+            throw PetPackageError.manifestInvalid(root.lastPathComponent, detail: "\(error)")
         }
 
         // 3. Path safety for the declared spritesheet.
@@ -98,7 +102,7 @@ public struct PetPackageLoader: Sendable {
             metadata = try AtlasImageDecoder.metadata(at: spritesheetURL)
         } catch {
             report.add("atlas", .error, "\(error)")
-            throw PetPackageError.spritesheetNotFound(manifest.spritesheetPath)
+            throw PetPackageError.atlasUnreadable(manifest.spritesheetPath)
         }
 
         let profile: CompatibilityProfile
@@ -106,7 +110,7 @@ public struct PetPackageLoader: Sendable {
             profile = try manifest.resolveProfile(atlasWidth: metadata.width, atlasHeight: metadata.height)
         } catch {
             report.add("manifest", .error, "\(error)")
-            throw PetPackageError.spritesheetNotFound(manifest.spritesheetPath)
+            throw PetPackageError.atlasUnreadable(manifest.spritesheetPath)
         }
 
         let definition = PetDefinition(
