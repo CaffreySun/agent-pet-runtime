@@ -102,8 +102,62 @@ enum RenderSelfTest {
         print("")
         print("  \(rendersByTrack.count) distinct tracks rendered from \(states.count) states")
 
+        failures += checkDraggable(view: view)
+
         print("")
         print(failures == 0 ? "PASS" : "FAIL (\(failures) problem(s))")
         return failures == 0 ? 0 : 1
+    }
+
+    /// Verifies the view will actually receive the click that starts a drag.
+    ///
+    /// Worth checking mechanically: the pet renders perfectly whether or not
+    /// this works, and the failure mode is silent — a pet that animates but
+    /// cannot be moved reads as a broken app with no visible cause.
+    private static func checkDraggable(view: PetView) -> Int {
+        print("")
+        print("Drag readiness")
+        var failures = 0
+
+        // An accessory app is essentially never active, so without this the
+        // first click would be spent activating and never reach the view.
+        if view.acceptsFirstMouse(for: nil) {
+            print("  ✓ acceptsFirstMouse — a click from another app reaches the pet")
+        } else {
+            print("  ✗ acceptsFirstMouse is false — the first click would be swallowed")
+            failures += 1
+        }
+
+        // The centre of the view must be grabbable.
+        let centre = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
+        if view.hitTest(centre) === view {
+            print("  ✓ hitTest returns the pet at its centre")
+        } else {
+            print("  ✗ hitTest does not return the pet at its centre — it cannot be grabbed")
+            failures += 1
+        }
+
+        // …and just outside it must pass clicks through, or the pet would
+        // steal clicks meant for whatever is behind it.
+        let outside = NSPoint(x: view.bounds.maxX + 20, y: view.bounds.midY)
+        if view.hitTest(outside) == nil {
+            print("  ✓ clicks outside the pet pass through to what is behind it")
+        } else {
+            print("  ✗ the pet captures clicks outside its own bounds")
+            failures += 1
+        }
+
+        // Grab geometry must survive a round trip.
+        let origin = CGPoint(x: 800, y: 300)
+        let grab = WindowDrag.grabOffset(mouse: CGPoint(x: 850, y: 380), windowOrigin: origin)
+        let returned = WindowDrag.origin(mouse: CGPoint(x: 850, y: 380), grabOffset: grab)
+        if returned == origin {
+            print("  ✓ drag geometry returns the window to its start")
+        } else {
+            print("  ✗ drag geometry drifts: \(origin) -> \(returned)")
+            failures += 1
+        }
+
+        return failures
     }
 }

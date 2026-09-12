@@ -148,12 +148,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         petView = PetView(frame: NSRect(origin: .zero, size: size))
         petView.autoresizingMask = [.width, .height]
-        petView.onDrag = { [weak self] delta in
+        petView.onDrag = { [weak self] origin in
             guard let self, let window = self.window else { return }
-            var frame = window.frame
-            frame.origin.x += delta.x
-            frame.origin.y += delta.y
-            window.setFrame(frame, display: true)
+            // Keep at least a grabbable corner on some display. A pet dragged
+            // fully off-screen has no dock icon and no window list entry, so
+            // there would be no way to get it back.
+            window.setFrameOrigin(
+                WindowDrag.clamped(
+                    origin: origin,
+                    size: window.frame.size,
+                    into: NSScreen.screens.map(\.visibleFrame)
+                )
+            )
+        }
+        petView.onDragEnded = { [weak self] in
+            self?.savePosition()
         }
         window.contentView = petView
         window.orderFrontRegardless()
@@ -182,12 +191,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let saved = UserDefaults.standard.string(forKey: Self.positionKey) else { return nil }
         let parts = saved.split(separator: ",").compactMap { Double($0) }
         guard parts.count == 2 else { return nil }
+
         let point = NSPoint(x: parts[0], y: parts[1])
         // A pet restored onto a monitor that is no longer attached would be
-        // invisible and unreachable.
-        guard NSScreen.screens.contains(where: { $0.visibleFrame.intersects(
-            NSRect(origin: point, size: PetWindow.defaultSize)
-        ) }) else { return nil }
+        // invisible and unreachable, and has to be brought back rather than
+        // trusted.
+        guard WindowDrag.isReachable(
+            origin: point,
+            size: PetWindow.defaultSize,
+            screens: NSScreen.screens.map(\.visibleFrame)
+        ) else { return nil }
+
         return point
     }
 
