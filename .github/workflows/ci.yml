@@ -88,18 +88,27 @@ jobs:
         # and of anything secret. Test files legitimately use /Users/x and
         # /Users/someone as placeholders, so those are exempt.
         run: |
-          if grep -rInE '/Users/[a-z0-9]+' \
-               --include='*.swift' --include='*.md' --include='*.json' \
-               --include='*.yml' --include='*.sh' . \
-             | grep -vE '/Users/(x|someone)/' ; then
+          # The workflow files are excluded because they contain the patterns
+          # being searched for, and would otherwise match themselves.
+          scan() {
+            grep -rInE "$1" \
+              --include='*.swift' --include='*.md' --include='*.json' \
+              --include='*.sh' --include='*.rb' \
+              --exclude-dir='.git' --exclude-dir='.build' \
+              --exclude-dir='.github' . || true
+          }
+
+          hits=$(scan '/Users/[a-z0-9]+' | grep -vE '/Users/(x|someone)/' || true)
+          if [ -n "$hits" ]; then
             echo "::error::a real home directory appears in a tracked file"
+            echo "$hits"
             exit 1
           fi
 
-          if grep -rInE '(sk-[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_|AKIA[0-9A-Z]{16})' \
-               --include='*.swift' --include='*.md' --include='*.json' \
-               --include='*.yml' --include='*.sh' . ; then
+          hits=$(scan '(sk-[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})' || true)
+          if [ -n "$hits" ]; then
             echo "::error::a credential-shaped string appears in a tracked file"
+            echo "$hits"
             exit 1
           fi
 
