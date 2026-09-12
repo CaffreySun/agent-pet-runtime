@@ -17,6 +17,13 @@ final class PetView: NSView {
     var onDragBegan: (() -> Void)?
     /// A click that was not a drag — the pet's cue to greet.
     var onClick: (() -> Void)?
+    /// Double-clicking the pet opens the manager.
+    var onDoubleClick: (() -> Void)?
+    /// Right-clicking the pet raises the same menu as the status item.
+    ///
+    /// The pet is the thing the user is looking at, so it is where they will
+    /// reach for the controls. Hunting for a menu bar icon is a needless step.
+    var onRightClick: ((NSEvent) -> Void)?
     /// Called once a drag finishes, so the position can be persisted then
     /// rather than only at quit — a crash would otherwise lose it.
     var onDragEnded: (() -> Void)?
@@ -110,7 +117,15 @@ final class PetView: NSView {
     // system moves with the window, so differencing it during a drag feeds
     // each move back into the next calculation.
 
+    override func rightMouseDown(with event: NSEvent) {
+        onRightClick?(event)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onDoubleClick?()
+            return
+        }
         guard let window else { return }
         grabOffset = WindowDrag.grabOffset(
             mouse: NSEvent.mouseLocation,

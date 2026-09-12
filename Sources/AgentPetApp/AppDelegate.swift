@@ -193,6 +193,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         petView.onClick = { [weak self] in
             self?.controller.greet()
         }
+        petView.onDoubleClick = { [weak self] in
+            self?.openManager()
+        }
+        petView.onRightClick = { [weak self] event in
+            guard let self else { return }
+            NSMenu.popUpContextMenu(self.makeMenu(), with: event, for: self.petView)
+        }
 
         // Lets the pet aim its gaze at the pointer.
         controller.petCenterProvider = { [weak self] in
@@ -266,14 +273,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildMenu() {
+        statusItem?.menu = makeMenu()
+    }
+
+    /// One menu, used by both the status item and the pet's right-click.
+    /// Building it per call keeps the two from drifting apart.
+    private func makeMenu() -> NSMenu {
         let menu = NSMenu()
 
         let header = NSMenuItem(title: "Agent Pet Runtime", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
 
+        // No key equivalent: an accessory app is never the active one, so a
+        // menu shortcut here would never fire. Advertising one that does
+        // nothing is worse than offering none.
         let openItem = NSMenuItem(title: "Open Pet Manager…",
-                                  action: #selector(openManager), keyEquivalent: "o")
+                                  action: #selector(openManager), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
         menu.addItem(.separator())
@@ -389,7 +405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
-        statusItem?.menu = menu
+        return menu
     }
 
     private func activitySummary() -> String {
