@@ -67,11 +67,13 @@ public struct AtlasValidator: Sendable {
                                + "\(pixels) visible pixels; it may render blank")
                 }
             }
+        }
 
-            if !profile.isFullySupported && track.row >= profile.requiredRows.count {
-                continue
-            }
-
+        // Only rows with surplus columns are checked for residue. The look
+        // rows use all eight columns, so they have none — flagging content
+        // there would report a correctly drawn gaze pose as a defect.
+        let cleanRows = Set(profile.rowsRequiringCleanSurplus)
+        for track in profile.tracks where cleanRows.contains(track.row) {
             for rect in atlas.unusedRects(for: track) {
                 let pixels = bitmap.opaquePixelCount(in: rect, alphaThreshold: alphaThreshold)
                 if pixels > 0 {
@@ -81,12 +83,6 @@ public struct AtlasValidator: Sendable {
                                + "that column, but it deviates from the published contract")
                 }
             }
-        }
-
-        if !profile.isFullySupported {
-            report.add("atlas", .warning,
-                       "\(profile.displayName) is partially supported: rows "
-                       + "\(profile.requiredRows.count)..<\(profile.rows) are not played")
         }
 
         return report

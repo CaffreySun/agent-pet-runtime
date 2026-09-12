@@ -95,7 +95,10 @@ struct RealPackageIntegrationTests {
         let loaded = try PetPackageLoader().load(from: v2.root)
         #expect(loaded.definition.profile == .openAICodexV2)
         #expect(loaded.isValid, "a v2 pet must load: \(loaded.report.errors.map(\.message))")
-        #expect(loaded.report.warnings.contains { $0.message.contains("partially supported") })
+        // V2 is fully supported: its extra rows are gaze poses, not spare
+        // capacity, so there is nothing partial left to warn about.
+        #expect(loaded.definition.profile.hasLookDirections)
+        #expect(loaded.atlas?.height == 2288)
     }
 
     @Test("discovery skips the package that has no manifest")

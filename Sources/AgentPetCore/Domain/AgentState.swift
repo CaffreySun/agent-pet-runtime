@@ -37,6 +37,46 @@ public enum PriorityClass: Int, Comparable, Sendable, CaseIterable {
 }
 
 public extension AgentState {
+
+    /// The atlas row this state is shown with.
+    ///
+    /// The contract names what each row *is*, not which agent state selects
+    /// it, so the mapping below is this runtime's reading of those purposes:
+    ///
+    /// - `running` is documented as "active task work, not literal
+    ///   foot-running", which is exactly what an agent does while working.
+    /// - `waiting` is "an expectant asking pose for approval, help, or user
+    ///   input", covering both blocking states.
+    /// - `jumping` is "anticipation, lift, peak, descent, and settle" — a
+    ///   celebration, and the only row that fits a task finishing well.
+    /// - `waving` is "a greeting or attention gesture", which is a reaction to
+    ///   the user rather than to the agent, so no state selects it. It plays
+    ///   when the pet is clicked.
+    /// - `running-left` and `running-right` are locomotion, chosen by which
+    ///   way the pet is being dragged — never by agent state.
+    ///
+    /// `waitingInput` and `waitingApproval` deliberately share one row: the
+    /// atlas has only one `waiting` pose, and the difference between "your
+    /// turn" and "approve this" belongs in the UI, not the animation.
+    var animationTrackName: String {
+        switch self {
+        case .idle, .paused, .unknown: return "idle"
+        case .running:                 return "running"
+        case .waitingInput,
+             .waitingApproval:         return "waiting"
+        case .completed:               return "jumping"
+        case .failed:                  return "failed"
+        }
+    }
+
+    /// Whether the state's animation is a one-shot that settles afterwards.
+    ///
+    /// A finished task and a failed one are both news; once delivered, the pet
+    /// should stop repeating it.
+    var animationPlaysOnce: Bool {
+        self == .completed || self == .failed
+    }
+
     var priorityClass: PriorityClass {
         switch self {
         case .waitingInput, .waitingApproval: return .attention

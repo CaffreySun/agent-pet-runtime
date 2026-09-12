@@ -82,10 +82,11 @@ struct SpriteAtlasTests {
         #expect(atlas.unusedRects(for: running).isEmpty)
     }
 
-    @Test("a reserved V2 row contributes no playable cells")
-    func reservedRowsPlayNothing() {
+    @Test("a V2 gaze row contributes eight playable poses")
+    func lookRowsPlayEightPoses() {
         let atlas = SpriteAtlas(profile: .openAICodexV2)
-        #expect(atlas.rects(for: atlas.profile.track(named: "reserved-9")!).isEmpty)
+        #expect(atlas.rects(for: atlas.profile.track(named: "look-a")!).count == 8)
+        #expect(atlas.rects(for: atlas.profile.track(named: "look-b")!).count == 8)
     }
 }
 
@@ -111,9 +112,9 @@ struct AtlasValidatorTests {
 
     @Test("an atlas with no alpha channel is rejected")
     func noAlpha() {
-        var bitmap = validAtlas()
-        bitmap = RGBAAtlasBitmap(width: bitmap.width, height: bitmap.height,
-                                 pixels: bitmap.pixels, hasAlpha: false)
+        let source = validAtlas()
+        let bitmap = RGBAAtlasBitmap(width: source.width, height: source.height,
+                                     pixels: source.pixels, hasAlpha: false)
         let report = validator.validate(bitmap, profile: .openAICodexV1)
         #expect(!report.isValid)
         #expect(report.errors.contains { $0.message.contains("alpha") })
@@ -196,8 +197,8 @@ struct AtlasValidatorTests {
         #expect(!report.isValid)
     }
 
-    @Test("a V2 atlas with its top nine rows filled is valid but warns")
-    func v2PartiallySupported() {
+    @Test("a fully populated V2 atlas is valid with nothing to warn about")
+    func v2FullyValid() {
         let profile = CompatibilityProfile.openAICodexV2
         var bitmap = RGBAAtlasBitmap.empty(width: profile.atlasWidth, height: profile.atlasHeight)
         let atlas = SpriteAtlas(profile: profile)
@@ -206,7 +207,23 @@ struct AtlasValidatorTests {
         }
         let report = validator.validate(bitmap, profile: profile)
         #expect(report.isValid)
-        #expect(report.warnings.contains { $0.message.contains("partially supported") })
+        // V2 adds gaze poses, not spare capacity, so there is no partial
+        // support left to warn about.
+        #expect(report.warnings.isEmpty, "unexpected warnings: \(report.warnings.map(\.message))")
+    }
+
+    @Test("a V2 atlas missing its gaze poses is reported")
+    func v2MissingGazePoses() {
+        let profile = CompatibilityProfile.openAICodexV2
+        var bitmap = RGBAAtlasBitmap.empty(width: profile.atlasWidth, height: profile.atlasHeight)
+        let atlas = SpriteAtlas(profile: profile)
+        // Fill the nine standard rows but leave the look rows empty.
+        for track in profile.tracks where track.kind != .look && track.frameCount > 0 {
+            for rect in atlas.rects(for: track) { bitmap.fill(rect) }
+        }
+        let report = validator.validate(bitmap, profile: profile)
+        #expect(!report.isValid, "the sixteen gaze poses are required content")
+        #expect(report.errors.contains { $0.message.contains("look-a") })
     }
 }
 

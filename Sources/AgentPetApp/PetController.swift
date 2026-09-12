@@ -1,18 +1,24 @@
 import AgentPetCore
 import AppKit
 
-/// Drives the pet's animation from the activity engine.
+/// Drives the pet's animation from the activity engine and the user's hands.
 ///
-/// The frame on screen is a pure function of what the engine currently
-/// focuses on, so previewing a state and reacting to a real agent both go
-/// through the same path. There is no separate "demo mode" to drift out of
-/// sync with the real thing.
+/// The frame on screen is a pure function of a `PetSituation`, so previewing a
+/// state, reacting to a real agent, and being dragged all go through the same
+/// resolver. There is no separate "demo mode" to drift out of sync with the
+/// real thing.
 @MainActor
 final class PetController {
 
-    /// Frame rate of the sampling loop. Tracks are sampled by elapsed time,
-    /// not by tick count, so this only bounds animation smoothness.
+    /// Frame rate of the sampling loop. Frames are chosen by elapsed time, not
+    /// by tick count, so this only bounds animation smoothness.
     private static let tickInterval: TimeInterval = 1.0 / 60.0
+
+    /// How close the pointer must come before it stops meaning a direction.
+    ///
+    /// The contract calls this the no-vector deadzone: with no meaningful
+    /// vector there is no gaze angle to pick, and the pet falls back to idle.
+    private static let gazeDeadzone: CGFloat = 28
 
     private let engine: ActivityEngine
     private let resolver = AnimationResolver()
@@ -20,12 +26,22 @@ final class PetController {
     private var frames: SpriteFrames?
     private var timer: Timer?
 
-    /// Set while a one-shot gesture is playing over the steady state.
-    private var gesture: (track: AnimationTrack, startedAt: Date)?
     private var lastRenderedState: AgentState?
     private var stateEnteredAt = Date()
 
+    /// Non-nil while the user is dragging.
+    private var drag: (direction: HorizontalDirection, startedAt: Date)?
+
+    /// Non-nil while a one-shot gesture is playing over the steady state.
+    private var gesture: (track: AnimationTrack, startedAt: Date)?
+
+    /// Set by the self-test to pin a single state.
+    private var forcedState: AgentState?
+
     var onFrame: ((CGImage?) -> Void)?
+
+    /// Where the pet is on screen, so gaze can be aimed at the pointer.
+    var petCenterProvider: (() -> CGPoint?)?
 
     init(tuning: ActivityTuning = .default) {
         self.engine = ActivityEngine(tuning: tuning)
@@ -36,6 +52,12 @@ final class PetController {
 
     // MARK: - Content
 
+    var loadedPetName: String?
+
+    /// The profile of the pet currently loaded, for callers that need to know
+    /// what it can do — a V1 atlas has no gaze poses.
+    var loadedProfile: CompatibilityProfile? { frames?.profile }
+
     func load(_ package: LoadedPetPackage) throws {
         guard let atlas = package.atlas else {
             throw SpriteFramesError.cannotCreateImage
@@ -44,8 +66,6 @@ final class PetController {
         lastRenderedState = nil
         render()
     }
-
-    var loadedPetName: String?
 
     // MARK: - Activity
 
@@ -68,25 +88,63 @@ final class PetController {
         forcedState != nil ? nil : engine.currentFocus()
     }
 
-    /// Plays a one-shot track over the current state — used by the preview menu
-    /// and by the integration test button.
+    // MARK: - Gestures
+
+    /// Plays a one-shot track over whatever else is happening.
     func playGesture(named name: String) {
         guard let profile = frames?.profile, let track = profile.track(named: name) else { return }
         gesture = (track, Date())
         render()
     }
 
-    /// Pins the animation to a single state, bypassing the activity engine.
-    /// Used by the render self-test to hold each state still long enough to
-    /// measure it.
+    /// The pet waves when it is clicked — the contract's "greeting or
+    /// attention gesture".
+    func greet() {
+        playGesture(named: "waving")
+    }
+
+    // MARK: - Dragging
+
+    /// The pet is picked up. Locomotion takes over from whatever it was doing:
+    /// the contract gives it dedicated rows so it can walk while carried.
+    func beginDrag() {
+        drag = (lastDragDirection, Date())
+        render()
+    }
+
+    /// Feeds the drag's movement so the pet turns to face the way it is going.
     ///
-    /// Clears any pending gesture: a preview must show the state's own track,
-    /// not whatever transient animation happened to still be playing.
+    /// Vertical movement has no row of its own, and it must not flip the pet
+    /// back and forth as the cursor wobbles, so a mostly-vertical drag keeps
+    /// the direction it already had.
+    func updateDrag(dx: CGFloat, dy: CGFloat) {
+        guard let current = drag else { return }
+        let direction = HorizontalDirection.from(
+            dx: dx, dy: dy, previous: current.direction
+        ) ?? current.direction
+        lastDragDirection = direction
+        drag = (direction, current.startedAt)
+        render()
+    }
+
+    /// The drag ended. The pet returns to its own animation, and immediately,
+    /// rather than finishing a locomotion cycle it is no longer doing.
+    func endDrag() {
+        drag = nil
+        render()
+    }
+
+    /// Remembered between drags so a pet picked up and set down repeatedly does
+    /// not reset to facing right each time.
+    private var lastDragDirection: HorizontalDirection = .right
+
+    // MARK: - Self-test support
+
+    /// Pins the animation to a single state, bypassing the activity engine.
     func previewState(_ state: AgentState) {
         forcedState = state
         gesture = nil
-        // Force the state transition to register so the track restarts at
-        // frame 0 rather than mid-animation.
+        drag = nil
         lastRenderedState = nil
         render()
     }
@@ -96,7 +154,14 @@ final class PetController {
         render()
     }
 
-    private var forcedState: AgentState?
+    /// Pins the gaze angle instead of reading the pointer. Used by the
+    /// self-test, which has no mouse.
+    func aimGaze(at angle: Double?) {
+        forcedGaze = angle
+        render()
+    }
+
+    private var forcedGaze: Double??
 
     // MARK: - Loop
 
@@ -106,7 +171,7 @@ final class PetController {
             MainActor.assumeIsolated { self?.render() }
         }
         // `.common` keeps the pet animating while a menu is open or the user is
-        // dragging the window, which the default mode would freeze.
+        // dragging, which the default mode would freeze.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -120,37 +185,58 @@ final class PetController {
 
     private func render() {
         guard let frames else { return }
-
-        let state = forcedState ?? engine.currentFocus()?.state ?? .idle
         let now = Date()
 
+        let situation = PetSituation(
+            agentState: currentState(now: now),
+            agentStateElapsed: now.timeIntervalSince(stateEnteredAt),
+            drag: drag.map { PetSituation.Drag(direction: $0.direction,
+                                               elapsed: now.timeIntervalSince($0.startedAt)) },
+            gesture: activeGesture(now: now),
+            lookAngle: gazeAngle()
+        )
+
+        let frame = resolver.resolve(situation, profile: frames.profile)
+        onFrame?(frame.flatMap { frames.image(for: $0) })
+    }
+
+    private func currentState(now: Date) -> AgentState {
+        let state = forcedState ?? engine.currentFocus()?.state ?? .idle
         if state != lastRenderedState {
-            // Entering `completed` is the cue for the celebration gesture.
-            if state == .completed, lastRenderedState != nil,
-               let waving = frames.profile.track(named: "waving") {
-                gesture = (waving, now)
-            }
             lastRenderedState = state
             stateEnteredAt = now
         }
+        return state
+    }
 
-        var activeGesture: (track: AnimationTrack, elapsed: TimeInterval)?
-        if let gesture {
-            let elapsed = now.timeIntervalSince(gesture.startedAt)
-            if elapsed < gesture.track.duration {
-                activeGesture = (gesture.track, elapsed)
-            } else {
-                self.gesture = nil
-            }
+    private func activeGesture(now: Date) -> PetSituation.Gesture? {
+        guard let gesture else { return nil }
+        let elapsed = now.timeIntervalSince(gesture.startedAt)
+        guard elapsed < gesture.track.duration else {
+            self.gesture = nil
+            return nil
         }
+        return PetSituation.Gesture(trackName: gesture.track.name, elapsed: elapsed)
+    }
 
-        let frame = resolver.resolve(
-            state: state,
-            profile: frames.profile,
-            stateElapsed: now.timeIntervalSince(stateEnteredAt),
-            gesture: activeGesture
-        )
+    /// Where the pointer is, relative to the pet, as degrees clockwise from up.
+    ///
+    /// Only computed for profiles that have gaze rows: a V1 pet has nowhere to
+    /// put the answer, so polling the pointer for it would be work with no
+    /// purpose.
+    private func gazeAngle() -> Double? {
+        // `forcedGaze` is a double optional so the self-test can distinguish
+        // "no override" from "override to no direction".
+        if let forcedGaze { return forcedGaze }
 
-        onFrame?(frame.flatMap { frames.image(for: $0) })
+        guard frames?.profile.hasLookDirections == true,
+              let center = petCenterProvider?()
+        else { return nil }
+
+        let pointer = NSEvent.mouseLocation
+        let distance = hypot(pointer.x - center.x, pointer.y - center.y)
+        guard distance > Self.gazeDeadzone else { return nil }
+
+        return LookDirection.angle(from: center, to: pointer)
     }
 }
