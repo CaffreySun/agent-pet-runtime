@@ -35,7 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         library = PetLibrary.discover()
 
         // `--pet <id>` picks a specific one, which is how the self-test can be
-        // pointed at a V2 pet to exercise the gaze rows.
+        // pointed at a V2 pet to exercise the gaze rows. It is an override for
+        // this run only, so it is deliberately not written back: the user's
+        // own choice must survive a diagnostic run.
         var chosen = library.first
         if let index = CommandLine.arguments.firstIndex(of: "--pet"),
            index + 1 < CommandLine.arguments.count {
@@ -49,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "[pet] no pet matching '\(wanted)'; using the first available\n".utf8
                 ))
             }
+        } else {
+            chosen = lastUsedPet() ?? chosen
         }
 
         if let chosen {
@@ -136,6 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 malformedFrames: bridge.malformedFrameCount
             )
         }
+        // The pet was chosen above, before the model existed. Hand the choice
+        // over so the manager marks it as the one on the desktop.
+        model.currentPetID = selectedPetID
         self.model = model
         self.managerWindow = MainWindowController(model: model)
         pushActivities()
@@ -159,9 +166,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedPetID = loaded.definition.id
             model?.currentPetID = loaded.definition.id
             rebuildMenu()
+            if CommandLine.arguments.contains("--verbose") {
+                FileHandle.standardError.write(Data(
+                    "[pet] selected \(loaded.definition.id) from \(root.path)\n".utf8
+                ))
+            }
         } catch {
             NSLog("Failed to load pet at \(root.path): \(error)")
         }
+    }
+
+    /// The pet the user last put on the desktop, resolved against what is
+    /// installed right now.
+    ///
+    /// A saved id that no longer resolves — the pet was removed, or its folder
+    /// renamed — is simply not a match, and the caller falls back to the first
+    /// pet. The stale id is left on disk rather than cleared: reinstalling the
+    /// pet, or naming the folder back, restores the choice.
+    private func lastUsedPet() -> PetLibrary.Entry? {
+        guard let id = AppConfigStore().load().pet.defaultPetID else { return nil }
+        return library.first { $0.definition.id == id }
     }
 
     @objc private func openManager() {
@@ -455,6 +479,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let entry = library.first(where: { $0.root.path == path })
         else { return }
         select(pet: entry)
+        model?.rememberPetSelection(petID: entry.definition.id)
         rebuildMenu()
     }
 
