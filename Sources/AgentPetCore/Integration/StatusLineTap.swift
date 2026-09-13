@@ -89,6 +89,23 @@ public struct StatusLineTap: Sendable {
         var original: String?
         var wrapper = ""
 
+        // The command being wrapped is shell code by contract — Claude Code
+        // runs it, with this same shell and this same user, on every render.
+        // That is the trust boundary: nothing here is a place to sanitise, and
+        // quoting it would turn a program into a literal word and break every
+        // status line that has a pipe or a substitution in it.
+        //
+        // The one input that cannot survive that contract is a NUL byte: it
+        // terminates the string as far as the shell is concerned, so the
+        // command we wrote back would be truncated and the user's prompt would
+        // break on every render. Refusing beats writing that.
+        if let command = Self.statusLineCommand(in: readRoot()["statusLine"]),
+           command.unicodeScalars.contains("\0") {
+            throw ConfigurationError.transactionFailed(
+                "the status line contains a NUL byte, which cannot be run as a shell command"
+            )
+        }
+
         let outcome = try transaction.perform(on: configURL) { object in
             let existing = object["statusLine"]
             let current = Self.statusLineCommand(in: existing)
