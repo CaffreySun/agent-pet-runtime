@@ -51,10 +51,40 @@ public struct PetPackageLoader: Sendable {
     }
 
     public static let manifestFileName = "pet.json"
+    /// Codex reads a second, older directory whose packages are named this way.
+    public static let legacyManifestFileName = "avatar.json"
+
+    /// The manifest a package uses, given the name it is expected to have.
+    ///
+    /// Codex accepts either file name, preferring `pet.json`, and so does
+    /// this: the caller that knows which directory a package came from passes
+    /// the name, and a caller holding only a path lets the file decide.
+    static func manifestURL(in root: URL, named preferred: String?) throws -> URL {
+        if let preferred {
+            let url = root.appendingPathComponent(preferred)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw PetPackageError.manifestNotFound(root.lastPathComponent)
+            }
+            return url
+        }
+        for name in [manifestFileName, legacyManifestFileName] {
+            let url = root.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        throw PetPackageError.manifestNotFound(root.lastPathComponent)
+    }
 
     /// Parse and validate a package. `decodeAtlas` skips the expensive pixel
     /// stage — useful for listing a library without rasterising every pet.
-    public func load(from root: URL, decodeAtlas: Bool = true) throws -> LoadedPetPackage {
+    ///
+    /// `manifestFileName` names the manifest to require; passing nil takes the
+    /// first of `pet.json` / `avatar.json` that exists, which is what Codex
+    /// does when it is handed a path rather than a pet id.
+    public func load(
+        from root: URL,
+        decodeAtlas: Bool = true,
+        manifestFileName: String? = nil
+    ) throws -> LoadedPetPackage {
         var report = ValidationReport()
 
         var isDirectory: ObjCBool = false
@@ -68,14 +98,15 @@ public struct PetPackageLoader: Sendable {
         report.merge(payloadValidator.validate(packageRoot: root))
 
         // 2. Manifest.
-        let manifestURL = root.appendingPathComponent(Self.manifestFileName)
-        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
-            throw PetPackageError.manifestNotFound(root.lastPathComponent)
-        }
+        let manifestURL = try Self.manifestURL(in: root, named: manifestFileName)
 
         let manifest: PetManifest
         do {
-            manifest = try PetManifest.decode(from: Data(contentsOf: manifestURL))
+            // The folder name is the id of last resort, as it is in Codex.
+            manifest = try PetManifest.decode(
+                from: Data(contentsOf: manifestURL),
+                fallbackID: root.lastPathComponent
+            )
         } catch {
             report.add("manifest", .error, "\(error)")
             // Nothing downstream can run without an id and a sprite path.

@@ -156,6 +156,21 @@ Dragging outranks everything: you are holding it. Gaze only applies when the pet
 would otherwise be idle, and falls back while the pointer is too close to give a
 direction — the contract's "no-vector deadzone".
 
+## What the pet says
+
+Beside the animation, the pet carries the message element Codex's own pet has:
+a short status above the sprite, taken from the same vocabulary — **Running**
+(with "Thinking" under it), **Needs input** when an approval is waiting (with
+the tool it is for), **Ready** when a turn finishes, **Blocked** when one
+fails. Each message expires on Codex's own clock — three minutes for work, an
+hour for a failure, a day for a pending decision, a week for a finished turn —
+and the window grows upward to fit it, so the pet itself never moves.
+
+Codex fills exactly one of those second lines from the assistant's message, a
+preview this runtime deliberately cannot see: the bridge forwards event
+metadata, never model output. The second line shows what the events do carry —
+which tool is waiting, what failed — and nothing from what you typed.
+
 ---
 
 ## Where pets come from
@@ -170,10 +185,13 @@ rm -rf ~/.codex/pets/<pet-id>   # remove: a pet is a folder, deleting it is the 
 
 Any folder in there with a `pet.json` and a spritesheet works, however it got
 there — the hatch-pet skill, a download you unzipped by hand, a friend's
-package. The Pet Manager lists exactly that directory, previews each pet, and
-puts the one you choose on your desktop; it does not install, import, or delete
-anything itself, so the app and your terminal Codex can never disagree about
-what is installed. Your choice is remembered across launches.
+package. Codex's older `~/.codex/avatars/` directory is read too, for pets
+packaged with an `avatar.json`, and a manifest may leave out its id or
+spritesheet path exactly as Codex's loader allows. The Pet Manager lists
+exactly those directories, previews each pet, and puts the one you choose on
+your desktop; it does not install, import, or delete anything itself, so the
+app and your terminal Codex can never disagree about what is installed. Your
+choice is remembered across launches.
 
 ---
 

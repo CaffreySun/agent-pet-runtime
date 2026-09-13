@@ -38,7 +38,27 @@ final class PetController {
     /// Set by the self-test to pin a single state.
     private var forcedState: AgentState?
 
-    var onFrame: ((CGImage?) -> Void)?
+    /// Set by the self-test to pin how far into that state's animation a
+    /// render sits. Without it every render samples frame zero, and a package
+    /// whose rows share their opening pose — a common way to author these
+    /// sheets — looks like it has duplicate animations.
+    private var forcedElapsed: TimeInterval?
+
+    /// The message shown beside the pet, or nil when there is nothing to say.
+    ///
+    /// Ported from Codex's ambient pet: each session state speaks in one of
+    /// four kinds, the message is stamped when it is set, and it expires on
+    /// that kind's lifetime.
+    private var message: PetNotification?
+
+    /// What the view should draw beside the sprite, if anything.
+    var currentNotification: PetNotification? {
+        guard let message, !message.isExpired(at: Date()) else { return nil }
+        return message
+    }
+
+    /// Every rendered frame, with the message that belongs beside it.
+    var onFrame: ((CGImage?, PetNotification?) -> Void)?
 
     /// Where the pet is on screen, so gaze can be aimed at the pointer.
     var petCenterProvider: (() -> CGPoint?)?
@@ -143,14 +163,23 @@ final class PetController {
     /// Pins the animation to a single state, bypassing the activity engine.
     func previewState(_ state: AgentState) {
         forcedState = state
+        forcedElapsed = nil
         gesture = nil
         drag = nil
         lastRenderedState = nil
         render()
     }
 
+    /// Pins the state *and* how far into its animation the render sits.
+    func previewState(_ state: AgentState, elapsed: TimeInterval) {
+        previewState(state)
+        forcedElapsed = elapsed
+        render()
+    }
+
     func clearPreview() {
         forcedState = nil
+        forcedElapsed = nil
         render()
     }
 
@@ -187,9 +216,12 @@ final class PetController {
         guard let frames else { return }
         let now = Date()
 
+        let state = currentState(now: now)
+        updateMessage(for: state, now: now)
+
         let situation = PetSituation(
-            agentState: currentState(now: now),
-            agentStateElapsed: now.timeIntervalSince(stateEnteredAt),
+            agentState: state,
+            agentStateElapsed: forcedElapsed ?? now.timeIntervalSince(stateEnteredAt),
             drag: drag.map { PetSituation.Drag(direction: $0.direction,
                                                elapsed: now.timeIntervalSince($0.startedAt)) },
             gesture: activeGesture(now: now),
@@ -197,7 +229,49 @@ final class PetController {
         )
 
         let frame = resolver.resolve(situation, profile: frames.profile)
-        onFrame?(frame.flatMap { frames.image(for: $0) })
+        onFrame?(frame.flatMap { frames.image(for: $0) }, currentNotification)
+    }
+
+    /// Keeps the message in step with what the pet is showing.
+    ///
+    /// Codex sets a notification when a turn starts, when an approval is
+    /// asked for, when a turn completes, and when it fails; the message stays
+    /// until it is replaced or its lifetime runs out. Here the state already
+    /// comes from the activity engine, so the message follows it, and the
+    /// lifetimes cap how long a stale one could linger.
+    private func updateMessage(for state: AgentState, now: Date) {
+        guard let kind = PetNotificationKind.forState(state) else {
+            message = nil
+            return
+        }
+        let candidate = PetNotification(
+            kind: kind, body: Self.detail(for: kind, activity: focusedActivity), setAt: now
+        )
+        // Unchanged means unchanged: re-stamping every frame would keep a
+        // message alive forever instead of letting its lifetime run out.
+        if let current = message, current.kind == candidate.kind, current.body == candidate.body {
+            return
+        }
+        message = candidate
+    }
+
+    /// What the second line can say, per kind.
+    ///
+    /// Codex fills exactly one body — the assistant's message preview for
+    /// `review` — from a model stream this runtime is not: the shim forwards
+    /// event metadata, never model output, so there is nothing to preview and
+    /// the label stands alone. `waiting` and `failed` do have specifics worth
+    /// showing, and they are the ones Codex's own desktop notifications show
+    /// too: the tool an approval is for, and what went wrong.
+    ///
+    /// `running` deliberately shows nothing extra: the only text the event
+    /// carries there is the user's prompt, and putting what someone typed on
+    /// a floating panel over their screen is not a trade this app makes.
+    private static func detail(for kind: PetNotificationKind, activity: AgentActivity?) -> String? {
+        switch kind {
+        case .waiting, .failed: return activity?.title
+        case .running, .review: return nil
+        }
     }
 
     private func currentState(now: Date) -> AgentState {

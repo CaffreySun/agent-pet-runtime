@@ -38,6 +38,44 @@ enum RenderSelfTest {
         return (opaque, count)
     }
 
+    /// A hash of what was actually drawn.
+    ///
+    /// Comparing renders by opaque-pixel count is not enough — two different
+    /// rows can light the same number of pixels, and a count cannot tell a
+    /// changed picture from an unchanged one. This compares content.
+    static func contentHash(_ view: PetView) -> String {
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            return "no-rep"
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let data = rep.bitmapData else { return "no-data" }
+        return String(
+            Hashing.sha256(Data(bytes: data, count: rep.bytesPerRow * rep.pixelsHigh)).prefix(12)
+        )
+    }
+
+    /// What one track looks like over time, for comparing tracks against each
+    /// other.
+    ///
+    /// Two samples, because a single one at the start of an animation is not
+    /// a fair comparison: packages are commonly authored with the same neutral
+    /// pose in column 0 of every row (clippit is), so every track *opens*
+    /// identically and only diverges as it plays. The offset is chosen to land
+    /// mid-cycle for every row in the contract, whose shortest is about a
+    /// second.
+    private static func trackSignature(
+        _ state: AgentState,
+        controller: PetController,
+        view: PetView
+    ) -> String {
+        var samples: [String] = []
+        for elapsed in [0.0, 0.42] {
+            controller.previewState(state, elapsed: elapsed)
+            samples.append(contentHash(view))
+        }
+        return samples.joined(separator: "+")
+    }
+
     static func run(controller: PetController, view: PetView) -> Int32 {
         print("Render self-test")
         print("")
@@ -85,7 +123,7 @@ enum RenderSelfTest {
                 opaque, total, ratio * 100
             ))
 
-            let signature = "\(image.width)x\(image.height):\(opaque)"
+            let signature = trackSignature(state, controller: controller, view: view)
             if var existing = rendersByTrack[track] {
                 if existing.signature != signature {
                     print("      ✗ same track '\(track)' rendered differently for "
@@ -114,6 +152,7 @@ enum RenderSelfTest {
 
         failures += checkDraggable(view: view)
         failures += checkBehaviourLayers(controller: controller, view: view)
+        failures += checkMessageElement(controller: controller, view: view)
 
         print("")
         print(failures == 0 ? "PASS" : "FAIL (\(failures) problem(s))")
@@ -201,6 +240,60 @@ enum RenderSelfTest {
         }
 
         controller.aimGaze(at: nil)
+        controller.clearPreview()
+        return failures
+    }
+
+    /// Verifies the message beside the pet, ported from Codex's notification.
+    ///
+    /// The message must change the picture, must take space *above* the pet
+    /// rather than over it, and must make the window grow to fit — the three
+    /// ways this feature can be silently absent.
+    private static func checkMessageElement(controller: PetController, view: PetView) -> Int {
+        print("")
+        print("Message element")
+        var failures = 0
+
+        controller.previewState(.waitingApproval)
+        guard let message = view.currentNotification else {
+            print("  ✗ a waiting agent shows no message")
+            controller.clearPreview()
+            return failures + 1
+        }
+        if message.kind.label == "Needs input" {
+            print("  ✓ a waiting agent shows “\(message.kind.label)” beside the pet")
+        } else {
+            print("  ✗ unexpected wording: \(message.kind.label)")
+            failures += 1
+        }
+
+        let withMessage = contentHash(view)
+        let height = PetView.messageHeight(for: message)
+        if height > 0, view.spriteRect.height < view.bounds.height {
+            print("  ✓ the pet keeps its place: \(Int(height))pt reserved above it")
+        } else {
+            print("  ✗ the message was drawn over the pet instead of beside it")
+            failures += 1
+        }
+
+        if let window = view.window,
+           abs(window.frame.height - (PetWindow.defaultSize.height + height)) < 1 {
+            print("  ✓ the window grew to fit the message")
+        } else {
+            print("  ✗ the window did not grow: "
+                  + "\(view.window.map { "\($0.frame.height)" } ?? "no window")")
+            failures += 1
+        }
+
+        view.show(nil as PetNotification?)
+        let withoutMessage = contentHash(view)
+        if withMessage != withoutMessage {
+            print("  ✓ the message is actually painted")
+        } else {
+            print("  ✗ the message made no difference to the render")
+            failures += 1
+        }
+
         controller.clearPreview()
         return failures
     }
