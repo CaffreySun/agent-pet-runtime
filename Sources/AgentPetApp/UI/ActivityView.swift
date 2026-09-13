@@ -87,6 +87,20 @@ struct ActivityView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(width: 52, alignment: .trailing)
+
+            // A test session is the one kind of activity that can be ended
+            // from here; everything else is owned by an agent that is still
+            // running.
+            if model.isTestActivity(activity) {
+                Button {
+                    model.stopTest()
+                } label: {
+                    Image(systemName: "stop.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Stop this test")
+            }
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())

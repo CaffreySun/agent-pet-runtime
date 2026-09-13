@@ -41,7 +41,10 @@ struct MainWindowView: View {
                     banner(status, color: .secondary, symbol: "info.circle")
                 }
             }
-            .navigationTitle(section.rawValue)
+            // The window is the app, so its title is the app's name; the
+            // section is a subtitle rather than something that renames the
+            // window every time a sidebar row is clicked.
+            .navigationSubtitle(section.rawValue)
         }
         .frame(minWidth: 760, minHeight: 520)
         .onAppear { model.refreshAll() }
@@ -83,7 +86,7 @@ struct MainWindowView: View {
 /// A separate window rather than a popover: the pet stays on screen while the
 /// user is in here, so changes are visible as they are made.
 @MainActor
-final class MainWindowController {
+final class MainWindowController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
     private let model: AgentPetModel
@@ -92,7 +95,20 @@ final class MainWindowController {
         self.model = model
     }
 
+    /// The app is an accessory — menu bar only, no Dock icon — which is right
+    /// for a pet and wrong for a window: an accessory app shows no application
+    /// menu at all, so the manager had no About, no Quit and no working copy
+    /// and paste. Going regular while the window is open gives it all of that,
+    /// and closing the window hands the menu bar back to whatever the user was
+    /// actually working in.
     func show() {
+        NSApp.setActivationPolicy(.regular)
+        if CommandLine.arguments.contains("--verbose") {
+            FileHandle.standardError.write(Data(
+                "[pet] manager open: activation policy regular, menu bar visible\n".utf8
+            ))
+        }
+
         if let window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -109,9 +125,19 @@ final class MainWindowController {
         // Bring the manager forward on whatever the user is actually looking
         // at, rather than on the pet's screen.
         window.collectionBehavior = [.moveToActiveSpace]
+        window.delegate = self
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
         self.window = window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--verbose") {
+            FileHandle.standardError.write(Data(
+                "[pet] manager closed: back to accessory, menu bar hidden\n".utf8
+            ))
+        }
     }
 }

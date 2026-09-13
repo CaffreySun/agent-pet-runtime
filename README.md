@@ -242,6 +242,11 @@ fields diagnosis needs and drops `tool_input`, `tool_response`, and
 `transcript_path` — an allowlist, so a field a future agent build adds cannot
 leak into a log by default. Files are written `0600`.
 
+One request leaves this machine: checking for updates reads the project's public
+release feed from GitHub and compares the tag with the running version. It sends
+nothing about you or the machine, it is skipped in headless runs, and it is the
+whole of the network surface — nothing else here talks to anything.
+
 ---
 
 ## Development
