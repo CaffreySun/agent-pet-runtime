@@ -106,9 +106,15 @@ public enum AgentProfiles {
             // The turn ended. This fires constantly, so it settles to idle —
             // unless a background subagent is still running, in which case the
             // agent has only paused and is still working.
+            //
+            // `last_assistant_message` rides along as the second line of the
+            // pet's "Ready" message, the way Codex shows a preview of what the
+            // agent just said. Claude Code supplies that field on `Stop`
+            // specifically so hooks do not have to read the transcript.
             NormalizationRule(
                 matches: ["Stop"],
                 kind: .completed,
+                detailField: "last_assistant_message",
                 sessionIDField: "session_id",
                 workingDirectoryField: "cwd",
                 suppressedByRunningBackgroundTask: true

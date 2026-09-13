@@ -36,6 +36,23 @@ private func envelope(payload: String) -> BridgeEnvelope {
 @Suite("Event capture redaction")
 struct EventCaptureRedactionTests {
 
+    @Test("the assistant's message rides the bridge but never a capture file")
+    func previewIsNeverCaptured() throws {
+        // It becomes the pet's second line on `Stop`, which is in-memory only.
+        // A log file that keeps model output is the one thing the allowlist
+        // exists to prevent, so the field must stay off it.
+        #expect(!EventCapture.capturableKeys.contains("last_assistant_message"))
+
+        let payload = #"{"session_id":"s","last_assistant_message":"the secret plan"}"#
+        let serialized = String(
+            decoding: try JSONSerialization.data(
+                withJSONObject: EventCapture.record(for: envelope(payload: payload))
+            ),
+            as: UTF8.self
+        )
+        #expect(!serialized.contains("the secret plan"))
+    }
+
     @Test("no field carrying user content survives into a capture record")
     func contentFieldsAreDropped() throws {
         let record = EventCapture.record(for: envelope(payload: realisticPayload))

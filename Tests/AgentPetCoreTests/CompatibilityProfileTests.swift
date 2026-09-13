@@ -111,8 +111,9 @@ struct AnimationTrackTests {
 
     @Test("track duration is the sum of its per-frame timings")
     func duration() {
+        // Idle as Codex plays it: the authored 1.10s breath, six times slower.
         let idle = CompatibilityProfile.openAICodexV1.track(named: "idle")
-        #expect(abs((idle?.duration ?? 0) - 1.10) < 0.0001)
+        #expect(abs((idle?.duration ?? 0) - 6.60) < 0.0001)
     }
 }
 
@@ -132,7 +133,7 @@ struct StateToTrackTests {
         (.running, "running"),
         (.waitingInput, "waiting"),
         (.waitingApproval, "waiting"),
-        (.completed, "jumping"),
+        (.completed, "review"),
         (.failed, "failed"),
         (.paused, "idle"),
         (.unknown, "idle"),

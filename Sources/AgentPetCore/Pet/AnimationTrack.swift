@@ -28,6 +28,17 @@ public enum TrackKind: String, Codable, Sendable, CaseIterable {
 /// `idle` runs `280, 110, 110, 140, 140, 320`, holding its first and last
 /// frames nearly three times as long as its middle ones. A single fps cannot
 /// express that, and approximating it makes the pet breathe wrong.
+///
+/// The idle row is also the one place the published table and Codex's playback
+/// disagree: Codex multiplies those six durations by six before playing them
+/// (the app's `ger = her.map(frameDurationMs * 6)`, the TUI's
+/// `idle_animation`), so the calm loop is a slow breath, not a fast blink. The
+/// profile below stores what is played, not what is authored.
+///
+/// `repeats` is the other half of Codex's playback shape: a state's row plays
+/// three times and then hands over to the idle row, which loops from there. A
+/// pet that repeated its working pose forever would be a twitch, not a
+/// companion.
 public struct AnimationTrack: Hashable, Sendable {
     public let name: String
     public let row: Int
@@ -35,19 +46,23 @@ public struct AnimationTrack: Hashable, Sendable {
     public let frameDurations: [TimeInterval]
     public let loop: LoopMode
     public let kind: TrackKind
+    /// How many times the row plays before the resolver settles into idle.
+    public let repeats: Int
 
     public init(
         name: String,
         row: Int,
         frameDurations: [TimeInterval],
         loop: LoopMode,
-        kind: TrackKind
+        kind: TrackKind,
+        repeats: Int = 1
     ) {
         self.name = name
         self.row = row
         self.frameDurations = frameDurations
         self.loop = loop
         self.kind = kind
+        self.repeats = max(1, repeats)
     }
 
     /// Convenience for the contract's common shape: every frame the same
@@ -59,7 +74,8 @@ public struct AnimationTrack: Hashable, Sendable {
         frameDuration: TimeInterval,
         finalFrameDuration: TimeInterval,
         loop: LoopMode,
-        kind: TrackKind
+        kind: TrackKind,
+        repeats: Int = 1
     ) {
         let middle = Array(repeating: frameDuration, count: max(0, frameCount - 1))
         self.init(
@@ -67,7 +83,8 @@ public struct AnimationTrack: Hashable, Sendable {
             row: row,
             frameDurations: middle + [finalFrameDuration],
             loop: loop,
-            kind: kind
+            kind: kind,
+            repeats: repeats
         )
     }
 

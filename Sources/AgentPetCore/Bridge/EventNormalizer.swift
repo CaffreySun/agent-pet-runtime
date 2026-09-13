@@ -10,6 +10,14 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
     public let kind: AgentEventKind
     /// Top-level payload key to read a human summary from, if present.
     public let summaryField: String?
+    /// Top-level payload key to read a second line from, if present.
+    ///
+    /// Used for Claude Code's `last_assistant_message` on `Stop` — the field
+    /// exists precisely so hooks do not have to read and parse a transcript.
+    /// It becomes the pet's "Ready" message, and it is never written to an
+    /// event capture: it is model output, which is the one thing the log
+    /// allowlist exists to keep out of files.
+    public let detailField: String?
     /// Top-level payload key holding the session id.
     public let sessionIDField: String?
     /// Top-level payload key holding the working directory.
@@ -34,6 +42,7 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
         matches: [String],
         kind: AgentEventKind,
         summaryField: String? = nil,
+        detailField: String? = nil,
         sessionIDField: String? = nil,
         workingDirectoryField: String? = nil,
         whenNotificationType: String? = nil,
@@ -42,6 +51,7 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
         self.matches = matches
         self.kind = kind
         self.summaryField = summaryField
+        self.detailField = detailField
         self.sessionIDField = sessionIDField
         self.workingDirectoryField = workingDirectoryField
         self.whenNotificationType = whenNotificationType
@@ -132,6 +142,8 @@ public struct EventNormalizer: Sendable {
         let sessionID = Self.string(payload, rule.sessionIDField)
             ?? Self.fallbackSessionID(for: envelope, profile: profile)
         let summary = Self.string(payload, rule.summaryField)
+        let detail = Self.string(payload, rule.detailField)
+            .flatMap { PetNotification.preview(of: $0) }
         let cwd = Self.string(payload, rule.workingDirectoryField)
 
         var focus: FocusTarget = .unavailable
@@ -149,6 +161,7 @@ public struct EventNormalizer: Sendable {
                 source: "\(envelope.agentID).hook.\(envelope.eventName)"
             ),
             summary: summary,
+            detail: detail,
             projectPath: cwd.map { URL(fileURLWithPath: $0) },
             focusTarget: focus
         )]

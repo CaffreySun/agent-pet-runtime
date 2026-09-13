@@ -44,6 +44,10 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
 
     // MARK: - Tracks
 
+    /// How many times a state's row plays before the pet settles into idle.
+    /// Codex's playback shape, in both the app and the TUI.
+    private static let stateRepeats = 3
+
     /// The nine standard rows, with the contract's own per-frame timings.
     ///
     /// Every value below is copied from the published animation-row table. The
@@ -51,11 +55,13 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
     /// beat to land on rather than ending abruptly.
     public var tracks: [AnimationTrack] {
         var all: [AnimationTrack] = [
-            // 280, 110, 110, 140, 140, 320 — the middle frames are quick and
-            // the ends are held, which is a breath, not an even cycle.
+            // The contract's authored idle is 280, 110, 110, 140, 140, 320 ms;
+            // Codex plays it six times slower, and those are the numbers here.
+            // The middle frames are still quick and the ends still held — a
+            // breath, not an even cycle, and not a nervous one.
             AnimationTrack(
                 name: "idle", row: 0,
-                frameDurations: [0.280, 0.110, 0.110, 0.140, 0.140, 0.320],
+                frameDurations: [1.680, 0.660, 0.660, 0.840, 0.840, 1.920],
                 loop: .loop, kind: .state
             ),
             AnimationTrack(
@@ -78,28 +84,32 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
                 frameDuration: 0.140, finalFrameDuration: 0.280,
                 loop: .once, kind: .gesture
             ),
-            // `failed` is a reaction, so it plays through and settles rather
-            // than cycling forever.
+            // The four agent states all play the way Codex plays them: three
+            // passes of the row, then the idle row, which is where the loop
+            // restarts. `failed` gets the same treatment rather than freezing
+            // on a grimace — the settling is what stops it grimacing.
             AnimationTrack(
                 name: "failed", row: 5, frameCount: 8,
                 frameDuration: 0.140, finalFrameDuration: 0.240,
-                loop: .once, kind: .state
+                loop: .loop, kind: .state, repeats: Self.stateRepeats
             ),
             AnimationTrack(
                 name: "waiting", row: 6, frameCount: 6,
                 frameDuration: 0.150, finalFrameDuration: 0.260,
-                loop: .loop, kind: .state
+                loop: .loop, kind: .state, repeats: Self.stateRepeats
             ),
             // Active task work, not foot-running — despite the name.
             AnimationTrack(
                 name: "running", row: 7, frameCount: 6,
                 frameDuration: 0.120, finalFrameDuration: 0.220,
-                loop: .loop, kind: .state
+                loop: .loop, kind: .state, repeats: Self.stateRepeats
             ),
+            // Focused inspection of finished work — Codex plays this row when
+            // a turn completes, which is what our `completed` state means.
             AnimationTrack(
                 name: "review", row: 8, frameCount: 6,
                 frameDuration: 0.150, finalFrameDuration: 0.280,
-                loop: .loop, kind: .state
+                loop: .loop, kind: .state, repeats: Self.stateRepeats
             ),
         ]
 

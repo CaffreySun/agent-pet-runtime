@@ -91,4 +91,19 @@ public struct PetNotification: Sendable, Equatable {
     public func isExpired(at now: Date) -> Bool {
         now.timeIntervalSince(setAt) >= kind.lifetime
     }
+
+    /// How much of a message can become a second line. Codex's own limit.
+    public static let previewGraphemes = 200
+
+    /// Tidies a message into something a small panel can show.
+    ///
+    /// Codex's `agent_turn_preview`, ported: collapse every run of whitespace
+    /// to one space, trim, and cut to `previewGraphemes` characters (grapheme
+    /// clusters, so an emoji is not sliced in half). An empty result means
+    /// there is nothing worth putting on a second line.
+    public static func preview(of text: String, limit: Int = PetNotification.previewGraphemes) -> String? {
+        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !collapsed.isEmpty else { return nil }
+        return String(collapsed.prefix(limit))
+    }
 }

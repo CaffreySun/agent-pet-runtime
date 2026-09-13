@@ -196,6 +196,38 @@ struct ClaudeCodeNormalizationTests {
         #expect(normalizer.normalize(envelope(event: "Stop", payload: "{}")).first?.kind == .completed)
     }
 
+    @Test("a Stop carries the assistant's last message as the pet's second line")
+    func stopCarriesPreview() {
+        // The message contains JSON escapes on purpose: real payloads carry
+        // newlines inside the string, not as literal line breaks.
+        let payload = """
+        {"session_id":"s","cwd":"/tmp","stop_hook_active":false,
+         "last_assistant_message":"  Fixed the   flaky test.\\n\\nIt was a race.  "}
+        """
+        let event = normalizer.normalize(envelope(event: "Stop", payload: payload)).first
+
+        #expect(event?.kind == .completed)
+        #expect(event?.detail == "Fixed the flaky test. It was a race.",
+                "whitespace is collapsed, the way Codex tidies its preview")
+    }
+
+    @Test("a preview is cut to Codex's two hundred characters")
+    func previewIsBounded() {
+        let long = String(repeating: "ab", count: 300)
+        let event = normalizer.normalize(envelope(
+            event: "Stop", payload: #"{"session_id":"s","last_assistant_message":"\#(long)"}"#
+        )).first
+        #expect(event?.detail?.count == 200)
+    }
+
+    @Test("no preview when the agent sends none, and none for other events")
+    func previewOnlyWhereItExists() {
+        #expect(normalizer.normalize(envelope(event: "Stop", payload: "{}")).first?.detail == nil)
+        // A tool event has nothing to preview even if a payload planted one.
+        let planted = #"{"session_id":"s","tool_name":"Bash","last_assistant_message":"hi"}"#
+        #expect(normalizer.normalize(envelope(event: "PreToolUse", payload: planted)).first?.detail == nil)
+    }
+
     @Test("session id and working directory are extracted")
     func fieldExtraction() {
         let events = normalizer.normalize(envelope(

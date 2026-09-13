@@ -14,16 +14,20 @@ private func track(_ name: String, _ profile: CompatibilityProfile = .openAICode
 @Suite("Contract frame timings")
 struct ContractTimingTests {
 
-    /// Every value here is copied from the published animation-row table.
-    /// The point of the table is that timings are *not* uniform, so a single
-    /// frame rate cannot reproduce any of these rows.
+    /// Every value here is copied from the published animation-row table, with
+    /// idle in the six-times-slower form Codex plays it in (the app's
+    /// `her.map(frameDurationMs * 6)`, the TUI's `idle_animation`). The point
+    /// of the table is that timings are *not* uniform, so a single frame rate
+    /// cannot reproduce any of these rows.
     @Test("idle holds its ends and quickens its middle")
     func idleTimings() {
         let idle = track("idle")
-        #expect(idle.frameDurations == [0.280, 0.110, 0.110, 0.140, 0.140, 0.320])
+        #expect(idle.frameDurations == [1.680, 0.660, 0.660, 0.840, 0.840, 1.920])
         // The first and last frames are held far longer than the middle ones.
         #expect(idle.frameDurations.first! > idle.frameDurations[1] * 2)
         #expect(idle.frameDurations.last! > idle.frameDurations[3] * 2)
+        // And the whole cycle is the calm one: nearly six seconds, not one.
+        #expect(abs(idle.duration - 6.6) < 0.0001)
     }
 
     @Test("row durations match the published table")
@@ -72,13 +76,13 @@ struct FrameAdvanceTests {
 
     @Test("a frame is held for its own duration, not a shared one")
     func perFrameDurations() {
-        let idle = track("idle")   // 280, 110, 110, 140, 140, 320
+        let idle = track("idle")   // 1680, 660, 660, 840, 840, 1920
         #expect(idle.frameIndex(at: 0).index == 0)
-        #expect(idle.frameIndex(at: 0.279).index == 0)
-        #expect(idle.frameIndex(at: 0.280).index == 1)
-        #expect(idle.frameIndex(at: 0.389).index == 1)
-        #expect(idle.frameIndex(at: 0.390).index == 2)
-        #expect(idle.frameIndex(at: 0.500).index == 3)
+        #expect(idle.frameIndex(at: 1.679).index == 0)
+        #expect(idle.frameIndex(at: 1.680).index == 1)
+        #expect(idle.frameIndex(at: 2.339).index == 1)
+        #expect(idle.frameIndex(at: 2.340).index == 2)
+        #expect(idle.frameIndex(at: 3.000).index == 3)
     }
 
     @Test("the final frame is held for its own longer duration")
@@ -214,11 +218,13 @@ struct PresentationLayerTests {
         stateElapsed: TimeInterval = 0,
         drag: PetSituation.Drag? = nil,
         gesture: PetSituation.Gesture? = nil,
-        look: Double? = nil
+        look: Double? = nil,
+        reducedMotion: Bool = false
     ) -> PetSituation {
         PetSituation(
             agentState: state, agentStateElapsed: stateElapsed,
-            drag: drag, gesture: gesture, lookAngle: look
+            drag: drag, gesture: gesture, lookAngle: look,
+            reducedMotion: reducedMotion
         )
     }
 
@@ -234,7 +240,7 @@ struct PresentationLayerTests {
         #expect(resolver.resolve(situation(state: .running), profile: v1)?.row == 7)
         #expect(resolver.resolve(situation(state: .waitingInput), profile: v1)?.row == 6)
         #expect(resolver.resolve(situation(state: .failed), profile: v1)?.row == 5)
-        #expect(resolver.resolve(situation(state: .completed), profile: v1)?.row == 4)
+        #expect(resolver.resolve(situation(state: .completed), profile: v1)?.row == 8)
     }
 
     @Test("dragging picks the locomotion row for the direction")
@@ -316,19 +322,19 @@ struct PresentationLayerTests {
         #expect(frame?.trackName == "idle")
     }
 
-    @Test("completion celebrates once and then settles to idle")
+    @Test("completion inspects the finished work, then settles to idle")
     func completionSettles() {
-        let jumping = track("jumping")
+        let review = track("review")
 
         let during = resolver.resolve(
             situation(state: .completed, stateElapsed: 0.1), profile: v1
         )
-        #expect(during?.trackName == "jumping")
+        #expect(during?.trackName == "review", "a finished turn is inspected, not celebrated")
 
         let after = resolver.resolve(
-            situation(state: .completed, stateElapsed: jumping.duration + 0.5), profile: v1
+            situation(state: .completed, stateElapsed: review.duration * 3 + 0.5), profile: v1
         )
-        #expect(after?.trackName == "idle", "the pet must not celebrate forever")
+        #expect(after?.trackName == "idle", "the pet must not inspect forever")
     }
 
     @Test("failure plays through and then settles rather than looping a grimace")
@@ -338,19 +344,65 @@ struct PresentationLayerTests {
         #expect(during?.trackName == "failed")
 
         let after = resolver.resolve(
-            situation(state: .failed, stateElapsed: failed.duration + 0.5), profile: v1
+            situation(state: .failed, stateElapsed: failed.duration * 3 + 0.5), profile: v1
         )
         #expect(after?.trackName == "idle")
     }
 
-    @Test("running and waiting loop for as long as they last")
-    func steadyStatesLoop() {
-        for state in [AgentState.running, .waitingInput, .waitingApproval] {
-            let after = resolver.resolve(situation(state: state, stateElapsed: 60), profile: v1)
-            #expect(after?.trackName == state.animationTrackName,
-                    "\(state) should still be animating after a minute")
-            #expect(after?.isFinished == false)
+    @Test("a steady state plays three passes and then breathes")
+    func steadyStatesRepeatThenSettle() {
+        // Codex's playback shape: the row three times, then the idle row,
+        // which is what loops from there. A pet that ran its working pose for
+        // a minute straight would be a twitch.
+        for state in [AgentState.running, .waitingInput, .waitingApproval, .completed, .failed] {
+            let track = track(state.animationTrackName)
+            #expect(track.repeats == 3, "\(state) should repeat its row three times")
+
+            let firstPass = resolver.resolve(
+                situation(state: state, stateElapsed: track.duration * 0.5), profile: v1
+            )
+            #expect(firstPass?.trackName == state.animationTrackName)
+
+            let settling = resolver.resolve(
+                situation(state: state, stateElapsed: track.duration * 3 + 0.5), profile: v1
+            )
+            #expect(settling?.trackName == "idle", "\(state) should settle into idle")
+            #expect(settling?.isFinished == false, "and keep breathing quietly")
         }
+    }
+
+    @Test("a settled state does not hand over to gaze")
+    func settleIgnoresGaze() {
+        // While the agent is still working the pet must not turn away to
+        // watch the pointer, even though it has settled into idle frames.
+        let frame = resolver.resolve(
+            situation(state: .running, stateElapsed: 60, look: 90), profile: v2
+        )
+        #expect(frame?.trackName == "idle", "gaze would have shown a look row")
+    }
+
+    @Test("reduced motion holds the first frame of whatever would have played")
+    func reducedMotionHoldsStill() {
+        // Codex's reduced-motion path is one frame per state; so is this, and
+        // the setting reaches every layer, not just idle.
+        for state in AgentState.allCases {
+            let frame = resolver.resolve(
+                situation(state: state, stateElapsed: 3.0, reducedMotion: true), profile: v1
+            )
+            #expect(frame?.column == 0, "\(state) should not advance under reduced motion")
+        }
+
+        let dragged = resolver.resolve(
+            situation(drag: .init(direction: .right, elapsed: 0.9), reducedMotion: true),
+            profile: v1
+        )
+        #expect(dragged?.trackName == "running-right")
+        #expect(dragged?.column == 0, "a dragged pet holds still too")
+
+        let gazing = resolver.resolve(
+            situation(look: 90, reducedMotion: true), profile: v2
+        )
+        #expect(gazing?.column == 0, "the gaze pose does not wander")
     }
 
     @Test("every state resolves to a playable frame in both profiles")
@@ -414,7 +466,7 @@ struct StateTrackMappingTests {
         (.running, "running", 7),
         (.waitingInput, "waiting", 6),
         (.waitingApproval, "waiting", 6),
-        (.completed, "jumping", 4),
+        (.completed, "review", 8),
         (.failed, "failed", 5),
         (.paused, "idle", 0),
         (.unknown, "idle", 0),
