@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var library: [PetLibrary.Entry] = []
     private var selectedPetID: String?
+    /// Last message written to the verbose log, so the frame loop does not
+    /// repeat it sixty times a second.
+    private var lastLoggedMessage: PetNotification?
     private var model: AgentPetModel?
     private var managerWindow: MainWindowController?
 
@@ -22,14 +25,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildWindow()
         buildStatusItem()
         var firstFrame = true
-        controller.onFrame = { [weak self] image in
+        controller.onFrame = { [weak self] image, notification in
             if firstFrame, CommandLine.arguments.contains("--verbose") {
                 firstFrame = false
                 FileHandle.standardError.write(Data(
                     "[pet] first frame delivered: \(image.map { "\($0.width)x\($0.height)" } ?? "nil")\n".utf8
                 ))
             }
-            self?.petView.show(image)
+            guard let self else { return }
+            self.petView.show(image)
+            self.petView.show(notification)
+            self.resizeWindow(for: notification)
+            self.logMessageChange(notification)
         }
 
         library = PetLibrary.discover()
@@ -264,6 +271,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func defaultOrigin(for size: NSSize) -> NSPoint {
         guard let screen = NSScreen.screens.first else { return NSPoint(x: 100, y: 100) }
         return PetWindow.defaultOrigin(on: screen)
+    }
+
+    /// Grows the window upward when a message appears, and shrinks it back.
+    private func logMessageChange(_ notification: PetNotification?) {
+        guard notification != lastLoggedMessage else { return }
+        lastLoggedMessage = notification
+        guard CommandLine.arguments.contains("--verbose") else { return }
+        let text = notification.map { "\($0.kind.label) — \($0.body)" } ?? "cleared"
+        FileHandle.standardError.write(Data("[pet] message: \(text)\n".utf8))
+    }
+    ///
+    /// The origin is left alone, so the pet does not move: the message takes
+    /// space *above* it, exactly as Codex reserves rows above its sprite
+    /// rather than drawing over the transcript.
+    private func resizeWindow(for notification: PetNotification?) {
+        guard let window else { return }
+        let height = PetWindow.defaultSize.height + PetView.messageHeight(for: notification)
+        guard abs(window.frame.height - height) > 0.5 else { return }
+        window.setFrame(
+            NSRect(origin: window.frame.origin,
+                   size: NSSize(width: PetWindow.defaultSize.width, height: height)),
+            display: true
+        )
     }
 
     private func restoredOrigin() -> NSPoint? {

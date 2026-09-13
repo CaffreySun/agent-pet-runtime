@@ -470,13 +470,18 @@ dedupeKey = hash(agentID, eventName, sessionID, payloadEventID)
 ### 6.1 唯一的来源：Codex 自己的 pet 目录
 
 ```
-$CODEX_HOME/pets/                 # 未设置 CODEX_HOME 时即 ~/.codex/pets/
-└── <folder>/                     # 目录名不必等于 id；manifest 的 id 才是主键
-    ├── pet.json
-    └── spritesheet.webp          # 具体文件名由 pet.json 的 spritesheetPath 指定
+$CODEX_HOME/                      # 未设置 CODEX_HOME 时即 ~/.codex/
+├── pets/<folder>/                # 目录名不必等于 id；manifest 的 id 才是主键
+│   ├── pet.json
+│   └── spritesheet.webp          # 文件名由 spritesheetPath 指定，缺省即此
+└── avatars/<folder>/             # 旧位置，Codex 仍在读
+    ├── avatar.json               # 同一格式；id/displayName 可缺省，回退见下
+    └── spritesheet.webp
 ```
 
-运行时**只读**这个目录，任何情况下都不写入。`CODEX_HOME` 是**替换**而不是追加（与 `codex-pets` CLI、hatch-pet skill 一致）；两个都搜会列出终端 Codex 根本加载不了的 pet。
+运行时**只读**这两个目录，任何情况下都不写入。`CODEX_HOME` 是**替换**而不是追加（与 `codex-pets` CLI、hatch-pet skill 一致）；两个都搜会列出终端 Codex 根本加载不了的 pet。`pets/` 后扫，因此两边同名时以 `pets/` 的包为准——与 Codex 的 picker 一致（它也是先 `avatars` 后 `pets` 覆盖同名条目）。
+
+清单字段的回退照抄 Codex 的 loader（`codex-rs/tui/src/pets/model.rs`）：`id` 缺省取目录名（旧 `avatar.json` 就是这么写的），`displayName` 缺省取 id，`spritesheetPath` 缺省 `spritesheet.webp`。目录名当 id 时仍须通过本项目的 id 校验——`Clippy/` 这样的大写目录若无显式 id 会被跳过，而不是被悄悄改名：本项目存进 config 的每个 id 都要能原样匹配回来。
 
 增 / 改 / 删都不由本项目做：
 
@@ -505,6 +510,23 @@ v0.1 实现过一份自有存储（`Application Support/AgentPetRuntime/pets/`�
 - 删除的代价只是一套安装事务、一份元数据格式和 20 个测试。加载与校验（§7）不变——非法包与 Codex 一样被跳过，不做兜底。
 
 `docs/SPEC-REVIEW.md` §2.5 / §3.5 保留了当时的 store 结论，已在该文标注反转。
+
+### 6.4 宠物旁的提示元素（2026-09-13 移植自 Codex）
+
+Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可选第二行正文。TUI 的 PR #21206 自己写明 "The ambient text overlay is currently disabled" —— 数据模型与触发逻辑是完整的，绘制被暂时关掉（所以 TUI 的测试断言标签**不**出现在终端缓冲里）；Codex App 里这个元素是可见的。本运行时把模型完整移植过来，并自己绘制。
+
+| kind | 标签 | 回退正文 | 生命周期 | 触发（Codex → 本项目） |
+|---|---|---|---|---|
+| running | Running | Thinking | 3 分钟 | 回合开始 → `.running` |
+| waiting | Needs input | Needs input | 24 小时 | 审批 / elicitation → `.waitingApproval`、`.waitingInput` |
+| review | Ready | Ready | 7 天 | 回合完成（Codex 的正文 = 助手消息预览） → `.completed` |
+| failed | Blocked | Blocked | 1 小时 | 出错 → `.failed` |
+
+- **正文 == 标签 → 只画一行，否则两行**：Codex 用同样的字符串比较决定终端里占一行还是两行（`notification_height`）。running 的回退正文是 "Thinking"，所以它总是两行。
+- **生命周期从设置时刻起算，状态不变就不重新计时**：渲染循环 60fps，若每帧重打时间戳，一条消息会被无限续命。过期即不再显示，直到状态再次变化。
+- **正文只填 waiting 与 failed**（工具名 / 错误文本，都来自事件元数据）。Codex 唯一填正文的 kind 是 review（助手消息预览），这里留空：事件的 `summary` 在 running 时是用户 prompt，把用户输入摆到悬浮窗上不是本项目的取舍；要补上助手预览就得让 hook 携带模型输出，那会推翻"桥只转发元数据"的既定决策（见 §6.2 与 `CLAUDE.local.md`）。
+- **画在精灵上方，窗口向上生长、原点不动**：等价于 Codex 在精灵上方预留终端行，而不是盖在 transcript 上。窗口高度 = 默认 156pt + 31pt（一行）或 46pt（两行）；`hitTest` 只认精灵区域，点提示文字不会拖动宠物。
+- **与动画的关系**：Codex 用 notification 同时驱动动画（running/waiting/review/failed 行）；本项目的动画已由 Activity Engine 的状态表驱动，提示元素只补文字与生命周期，不再重复驱动动画。
 
 ---
 

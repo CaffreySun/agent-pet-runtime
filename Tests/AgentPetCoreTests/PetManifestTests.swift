@@ -51,15 +51,43 @@ struct PetManifestTests {
         #expect(m.id == "a")
     }
 
-    @Test("missing required fields report which one", arguments: [
-        (#"{"displayName":"A","spritesheetPath":"s.webp"}"#, "id"),
-        (#"{"id":"a","spritesheetPath":"s.webp"}"#,           "displayName"),
-        (#"{"id":"a","displayName":"A"}"#,                    "spritesheetPath"),
-    ])
-    func missingRequiredField(json: String, field: String) {
-        #expect(throws: PetManifestError.missingField(field)) {
-            try PetManifest.decode(from: Data(json.utf8))
+    @Test("a manifest with no id at all reports that")
+    func missingID() {
+        #expect(throws: PetManifestError.missingField("id")) {
+            try PetManifest.decode(from: Data(#"{"displayName":"A","spritesheetPath":"s.webp"}"#.utf8))
         }
+    }
+
+    @Test("the folder name is the id of last resort, as it is in Codex")
+    func idFallsBackToFolderName() throws {
+        // Legacy avatar.json files are written this way.
+        let json = #"{"displayName":"Legacy","spritesheetPath":"spritesheet.webp"}"#
+        let manifest = try PetManifest.decode(from: Data(json.utf8), fallbackID: "old-friend")
+
+        #expect(manifest.id == "old-friend")
+        // An explicit id still wins over the folder it sits in.
+        let named = try PetManifest.decode(
+            from: Data(#"{"id":"explicit","displayName":"N"}"#.utf8), fallbackID: "folder"
+        )
+        #expect(named.id == "explicit")
+    }
+
+    @Test("a folder name that is not a valid id is rejected, not renamed")
+    func invalidFallbackID() {
+        #expect(throws: PetManifestError.invalidID("Clippy")) {
+            try PetManifest.decode(
+                from: Data(#"{"displayName":"A","spritesheetPath":"s.webp"}"#.utf8),
+                fallbackID: "Clippy"
+            )
+        }
+    }
+
+    @Test("missing displayName falls back to the id; missing spritesheetPath to the convention")
+    func optionalFieldsFallBack() throws {
+        let manifest = try PetManifest.decode(from: Data(#"{"id":"a"}"#.utf8))
+        #expect(manifest.displayName == "a")
+        #expect(manifest.spritesheetPath == "spritesheet.webp")
+        #expect(manifest.description == "a")
     }
 
     @Test("invalid ids are rejected", arguments: [

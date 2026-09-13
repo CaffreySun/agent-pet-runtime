@@ -9,11 +9,15 @@ public enum PetManifestError: Error, Equatable, Sendable {
 
 /// The `pet.json` shipped inside a pet package.
 ///
-/// Decoding is deliberately lenient: third-party tooling (`codex-pets.net` and
-/// friends) already emits `kind`, `source`, `sourceId`, `spriteVersionNumber`
-/// and no doubt more. Unknown keys are ignored rather than rejected, and only
-/// `id` / `displayName` / `spritesheetPath` are actually required.
-public struct PetManifest: Codable, Sendable, Hashable {
+/// Decoding is deliberately lenient, and now matches Codex's own loader
+/// (`codex-rs/tui/src/pets/model.rs`): third-party tooling (`codex-pets.net`
+/// and friends) already emits `kind`, `source`, `sourceId`,
+/// `spriteVersionNumber` and no doubt more, so unknown keys are ignored;
+/// `displayName` falls back to the id, and `spritesheetPath` to the
+/// conventional file name. Only the id has to come from somewhere — the
+/// manifest, or the folder the package sits in, which is how legacy
+/// `avatar.json` files are written.
+public struct PetManifest: Sendable, Hashable {
     public let id: String
     public let displayName: String
     public let description: String?
@@ -45,53 +49,67 @@ public struct PetManifest: Codable, Sendable, Hashable {
         self.sourceId = sourceId
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case id, displayName, description, spritesheetPath
-        case spriteVersionNumber, kind, source, sourceId
+    /// What Codex assumes when a manifest does not name its spritesheet.
+    public static let defaultSpritesheetPath = "spritesheet.webp"
+
+    /// Every field is optional on disk; the required ones are enforced here so
+    /// the fallbacks live in one place rather than in each caller.
+    private struct RawManifest: Decodable {
+        let id: String?
+        let displayName: String?
+        let description: String?
+        let spritesheetPath: String?
+        let spriteVersionNumber: Int?
+        let kind: String?
+        let source: String?
+        let sourceId: String?
     }
 
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-
-        guard let id = try c.decodeIfPresent(String.self, forKey: .id) else {
-            throw PetManifestError.missingField("id")
-        }
-        guard let displayName = try c.decodeIfPresent(String.self, forKey: .displayName) else {
-            throw PetManifestError.missingField("displayName")
-        }
-        guard let path = try c.decodeIfPresent(String.self, forKey: .spritesheetPath) else {
-            throw PetManifestError.missingField("spritesheetPath")
-        }
-
-        guard Self.isValidID(id) else {
-            throw PetManifestError.invalidID(id)
-        }
-        guard !path.trimmingCharacters(in: .whitespaces).isEmpty else {
-            throw PetManifestError.emptySpritesheetPath
-        }
-
-        self.id = id
-        self.displayName = displayName
-        // A manifest without a description is legal; fall back to the name so
-        // the UI never has to special-case an empty string.
-        self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? displayName
-        self.spritesheetPath = path
-        self.spriteVersionNumber = try c.decodeIfPresent(Int.self, forKey: .spriteVersionNumber)
-        self.kind = try c.decodeIfPresent(String.self, forKey: .kind)
-        self.source = try c.decodeIfPresent(String.self, forKey: .source)
-        self.sourceId = try c.decodeIfPresent(String.self, forKey: .sourceId)
-    }
-
-    public static func decode(from data: Data) throws -> PetManifest {
+    /// - Parameter fallbackID: the package folder's name, used when the
+    ///   manifest has no `id`. Codex does the same; legacy `avatar.json` files
+    ///   rely on it. The result still has to be a valid id, so a folder named
+    ///   `Clippy` without an explicit id is rejected rather than silently
+    ///   renamed — every id this runtime stores is one it can write to a
+    ///   config file and match again later.
+    public static func decode(from data: Data, fallbackID: String? = nil) throws -> PetManifest {
+        let raw: RawManifest
         do {
-            return try JSONDecoder().decode(PetManifest.self, from: data)
-        } catch let error as PetManifestError {
-            throw error
+            raw = try JSONDecoder().decode(RawManifest.self, from: data)
         } catch let error as DecodingError {
             throw PetManifestError.malformedJSON(Self.describe(error))
         } catch {
             throw PetManifestError.malformedJSON(String(describing: error))
         }
+
+        let declaredID = raw.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let id = declaredID.isEmpty ? fallbackID : declaredID else {
+            throw PetManifestError.missingField("id")
+        }
+        guard Self.isValidID(id) else {
+            throw PetManifestError.invalidID(id)
+        }
+
+        let declaredName = raw.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let displayName = declaredName.isEmpty ? id : declaredName
+
+        let path = raw.spritesheetPath?.trimmingCharacters(in: .whitespaces)
+            ?? Self.defaultSpritesheetPath
+        guard !path.isEmpty else {
+            throw PetManifestError.emptySpritesheetPath
+        }
+
+        return PetManifest(
+            id: id,
+            displayName: displayName,
+            // A manifest without a description is legal; fall back to the name
+            // so the UI never has to special-case an empty string.
+            description: raw.description ?? displayName,
+            spritesheetPath: path,
+            spriteVersionNumber: raw.spriteVersionNumber,
+            kind: raw.kind,
+            source: raw.source,
+            sourceId: raw.sourceId
+        )
     }
 
     /// Profile implied by the manifest alone. `nil` means "decide from the

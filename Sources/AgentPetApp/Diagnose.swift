@@ -15,12 +15,17 @@ enum Diagnose {
         print("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         print("")
 
-        // One directory, the one Codex reads. A missing one is worth saying
+        // The directories Codex itself scans. A missing one is worth saying
         // out loud: it is the difference between "no pets" and "wrong path".
         let petsDirectory = PetLibrary.petsDirectory
-        let exists = FileManager.default.fileExists(atPath: petsDirectory.path)
-        print("Pets directory (Codex's own):")
-        print("  \(exists ? "✓" : "✗") \(petsDirectory.path)")
+        print("Pets directories (Codex's own):")
+        for (directory, manifest) in [
+            (petsDirectory, PetPackageLoader.manifestFileName),
+            (PetLibrary.avatarsDirectory, PetPackageLoader.legacyManifestFileName),
+        ] {
+            let exists = FileManager.default.fileExists(atPath: directory.path)
+            print("  \(exists ? "✓" : "✗") \(directory.path)  (\(manifest))")
+        }
         print("")
 
         let entries = PetLibrary.discover()
