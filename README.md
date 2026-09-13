@@ -26,7 +26,20 @@ bridge is measured and bounded, and nothing is recorded that should not be.
 
 ## Install
 
-Not yet packaged. Build from source:
+```bash
+brew tap dncore/agent-pet-runtime
+brew install --cask agent-pet-runtime
+```
+
+The app is ad-hoc signed rather than notarised, so the cask strips macOS's
+quarantine attribute on install. If Gatekeeper still objects:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/AgentPet.app"
+```
+
+<details>
+<summary>Or build from source</summary>
 
 ```bash
 git clone https://github.com/dncore/agent-pet-runtime.git
@@ -37,6 +50,14 @@ open build/AgentPet.app
 ```
 
 Requires macOS 14+ and Swift 6.1+ (Xcode 16.4 or newer).
+
+</details>
+
+The cask is generated from
+[`homebrew/agent-pet-runtime.rb.template`](homebrew/agent-pet-runtime.rb.template)
+on every release and pushed to
+[dncore/homebrew-agent-pet-runtime](https://github.com/dncore/homebrew-agent-pet-runtime).
+Edit the template here, not the tap.
 
 ---
 
