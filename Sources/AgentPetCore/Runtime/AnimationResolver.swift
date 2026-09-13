@@ -167,17 +167,18 @@ public struct AnimationResolver: Sendable {
         if situation.agentState.priorityClass != .inactive,
            let track = profile.track(named: situation.agentState.animationTrackName) {
             let elapsed = situation.agentStateElapsed
-            let passDuration = track.duration * Double(track.repeats)
-            if elapsed < passDuration {
-                // Inside the passes: the row plays, wrapping each time.
-                return frame(for: track, elapsed: elapsed.truncatingRemainder(dividingBy: track.duration))
+            let passes = track.duration * Double(track.repeats)
+
+            // A condition (`repeats == 1`) loops its row for as long as the
+            // state lasts. A moment plays out its passes and then hands over
+            // to the idle row, which is where the loop restarts — Codex's
+            // `loopStartIndex` at the idle segment. Gaze stays out of it
+            // either way: the agent is still working, so the pet should not
+            // turn away to watch the pointer.
+            if track.repeats > 1, elapsed >= passes, let idle = profile.track(named: "idle") {
+                return frame(for: idle, elapsed: elapsed - passes)
             }
-            // The row has said its piece. Codex hands over to the idle row and
-            // loops there, and gaze stays out of it: the agent is still
-            // working, so the pet should not turn away to watch the pointer.
-            if let idle = profile.track(named: "idle") {
-                return frame(for: idle, elapsed: elapsed - passDuration)
-            }
+            return frame(for: track, elapsed: elapsed)
         }
 
         // 4. Gaze.

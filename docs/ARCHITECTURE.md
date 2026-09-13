@@ -140,9 +140,9 @@ agent-pet-runtime/
 契约给的是**创作值**；Codex 播放时又叠了两个变换，本运行时现在照做：
 
 1. **idle 放慢 6 倍。** App 端（`ChatGPT.app` 内 `app.asar`，宠物组件）：`her = [280,110,110,140,140,320]`，`ger = her.map(frameDurationMs * 6)`，而 `uer('idle')` 返回的是 `ger`。TUI 端（`codex-rs/tui/src/pets/model.rs::idle_animation`）直接写的就是 1680/660/660/840/840/1920。两处一致，所以 280 是**创作**时长，动画实际播的是 6 倍。
-2. **任何非 idle 状态 = 整行播 3 遍，再落进 idle 段并从那里循环。** App：`uer` 返回 `frames: [...row, ...row, ...row, ...ger], loopStartIndex: 3 * row.length`；TUI：`app_state_animation` 同样是三遍 + `idle_animation().frames`，测试名就叫 `app_running_animation_repeats_then_settles_into_idle`。
+2. **一次性状态 = 整行播 3 遍，再落进 idle 段并从那里循环。** App：`uer` 返回 `frames: [...row, ...row, ...row, ...ger], loopStartIndex: 3 * row.length`；TUI：`app_state_animation` 同样是三遍 + `idle_animation().frames`，测试名就叫 `app_running_animation_repeats_then_settles_into_idle`。
 
-本实现落在 `AnimationResolver` 第 3 层：`repeats` 遍之后交给 idle 轨（用剩余时长取帧），因此不需要"播完标记"——`animationPlaysOnce` 与 `settledState` 随之删除。
+本实现落在 `AnimationResolver` 第 3 层：`repeats > 1` 的轨道播完那几遍后交给 idle 轨（用剩余时长取帧），因此不需要"播完标记"。**但 `repeats = 1` 的轨道（running / waiting）是"持续状态"，整行一直循环**——这是对 Codex 组合的一个有意偏离，理由是实测：Codex 里 running/waiting 是*通知*，随状态更新不断重设，而本项目的状态可以持续几十分钟；照搬"三遍后沉降"会让宠物在 agent 明显还在干活时三秒就进入慢速呼吸，看起来像睡着了（用户实测反馈，2026-09-13）。"播三遍再沉降"保留给真正的一次性状态（completed → review、failed）。
 
 **与 Codex 无法对齐的两处，均为有意保留**：拖动中的 locomotion 持续循环（Codex 的拖动是另一种状态机，且拖到一半改为发呆不合理）；`waving`/`jumping` 仍是本项目的手势层（点击问候），不套用三遍+沉降。
 

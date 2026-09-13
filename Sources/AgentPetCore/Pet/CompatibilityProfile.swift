@@ -44,9 +44,9 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
 
     // MARK: - Tracks
 
-    /// How many times a state's row plays before the pet settles into idle.
-    /// Codex's playback shape, in both the app and the TUI.
-    private static let stateRepeats = 3
+    /// How many times a *moment's* row plays before the pet settles into
+    /// idle. Codex's playback shape, in both the app and the TUI.
+    private static let momentRepeats = 3
 
     /// The nine standard rows, with the contract's own per-frame timings.
     ///
@@ -84,32 +84,35 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
                 frameDuration: 0.140, finalFrameDuration: 0.280,
                 loop: .once, kind: .gesture
             ),
-            // The four agent states all play the way Codex plays them: three
-            // passes of the row, then the idle row, which is where the loop
-            // restarts. `failed` gets the same treatment rather than freezing
-            // on a grimace — the settling is what stops it grimacing.
+            // A failure is a moment: three passes and then the idle breath,
+            // which is what stops the pet holding a grimace.
             AnimationTrack(
                 name: "failed", row: 5, frameCount: 8,
                 frameDuration: 0.140, finalFrameDuration: 0.240,
-                loop: .loop, kind: .state, repeats: Self.stateRepeats
+                loop: .loop, kind: .state, repeats: Self.momentRepeats
             ),
+            // Waiting is a condition: a pending approval can outlast any
+            // three passes by minutes, and the pet should look like it is
+            // still asking the whole time.
             AnimationTrack(
                 name: "waiting", row: 6, frameCount: 6,
                 frameDuration: 0.150, finalFrameDuration: 0.260,
-                loop: .loop, kind: .state, repeats: Self.stateRepeats
+                loop: .loop, kind: .state
             ),
-            // Active task work, not foot-running — despite the name.
+            // Active task work, not foot-running — despite the name. Also a
+            // condition: looping for as long as the agent works is the point.
             AnimationTrack(
                 name: "running", row: 7, frameCount: 6,
                 frameDuration: 0.120, finalFrameDuration: 0.220,
-                loop: .loop, kind: .state, repeats: Self.stateRepeats
+                loop: .loop, kind: .state
             ),
             // Focused inspection of finished work — Codex plays this row when
-            // a turn completes, which is what our `completed` state means.
+            // a turn completes, which is what our `completed` state means. A
+            // moment like `failed`.
             AnimationTrack(
                 name: "review", row: 8, frameCount: 6,
                 frameDuration: 0.150, finalFrameDuration: 0.280,
-                loop: .loop, kind: .state, repeats: Self.stateRepeats
+                loop: .loop, kind: .state, repeats: Self.momentRepeats
             ),
         ]
 
