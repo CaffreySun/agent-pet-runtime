@@ -225,6 +225,9 @@ Sources/agentpet-hook/    Agent 执行的 shim。必须永远 exit 0。
 | Pet Manager：列出 Codex 的宠物、预览、选用 | 完成——只读；宠物由 Codex 自己的工具链安装 |
 | Agent 集成：检测、配置、移除 | **仅 Claude Code** |
 | Activity Center、设置、诊断导出 | 完成 |
+| 会话面板：每会话一行，各项可配置 | 完成 |
+| 上下文占用（读取 Claude Code 状态栏） | 完成——可选开启，包裹你已有的状态栏命令 |
+| 重启/升级后不丢回合中的会话 | 完成——未送达事件在下次启动时回放 |
 | Grok / Codex / Pi 配置 | 未做——它们的格式需要各自的配置器 |
 | 聚焦到终端窗口 | 改为打开项目目录；hook payload 里没有终端标识 |
 
