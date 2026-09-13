@@ -57,6 +57,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>                 <string>${BUNDLE_ID}</string>
     <key>CFBundleInfoDictionaryVersion</key>      <string>6.0</string>
     <key>CFBundleName</key>                       <string>Agent Pet Runtime</string>
+    <key>NSHumanReadableCopyright</key>           <string>MIT licensed. Copyright (c) 2026 dncore.</string>
     <key>CFBundleDisplayName</key>                <string>Agent Pet Runtime</string>
     <key>CFBundlePackageType</key>                <string>APPL</string>
     <key>CFBundleShortVersionString</key>         <string>${VERSION}</string>

@@ -71,7 +71,17 @@ struct AgentsView: View {
                 }
 
                 if status.canUninstall {
-                    Button("Test") { model.sendTestEvent(agentID: status.profile.agentID) }
+                    // One button, two jobs: a test that cannot be stopped from
+                    // where it was started would be a trap.
+                    if model.activeTestAgentID == status.profile.agentID {
+                        Button("Stop Test") { model.stopTest() }
+                            .help("The test stops on its own after "
+                                  + "\(Int(AgentPetModel.testDuration))s anyway")
+                    } else {
+                        Button("Test") { model.sendTestEvent(agentID: status.profile.agentID) }
+                            .help("Sends a synthetic event through the real pipeline. "
+                                  + "It stops on its own after \(Int(AgentPetModel.testDuration))s.")
+                    }
 
                     Button("Remove Integration", role: .destructive) {
                         model.removeAgentIntegration(status)

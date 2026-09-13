@@ -73,7 +73,13 @@ final class AgentPetModel: ObservableObject {
 
     func refreshPets() {
         pets = PetLibrary.discover()
+        onPetsChanged?(pets)
     }
+
+    /// Called whenever the pet list is re-read, so the menu bar's copy of it
+    /// cannot drift from the manager's. They are the same directory; they
+    /// should never be two different answers.
+    var onPetsChanged: (([PetLibrary.Entry]) -> Void)?
 
     func refreshAgents() {
         let profiles = AgentIntegrationRegistry.all(transaction: transaction)
@@ -203,19 +209,70 @@ final class AgentPetModel: ObservableObject {
         }
     }
 
+    /// The session id every test event uses, so the UI can tell a test apart
+    /// from a real session and offer to stop exactly that one.
+    static let testSessionID = "test-session"
+
+    /// How long a test is allowed to sit in the activity list before it
+    /// removes itself. It is a demonstration, not work: leaving it running
+    /// forever made the activity list a place where nothing could be trusted
+    /// to mean anything.
+    static let testDuration: TimeInterval = 60
+
+    /// The agent whose test is currently running, if any.
+    @Published private(set) var activeTestAgentID: String?
+    private var testTimeout: Timer?
+
     /// Feeds a synthetic event through the real pipeline, which is what makes
     /// it a test of the integration rather than of the animation.
+    ///
+    /// The test session is short-lived by construction: it is stopped by the
+    /// button that started it, or by `testDuration` passing, whichever comes
+    /// first.
     func sendTestEvent(agentID: String) {
+        stopTest(announce: false)
+        activeTestAgentID = agentID
+
         let event = AgentEvent(
             agentID: agentID,
-            sessionID: "test-session",
+            sessionID: Self.testSessionID,
             kind: .waitingInput,
             at: Date(),
             confidence: EventConfidence(level: .high, source: "test"),
             summary: "Test event from Agent Pet Runtime"
         )
         onTestEvent?(event)
-        statusMessage = "Sent a test event as \(agentID). The pet should react."
+        statusMessage = "Sent a test event as \(agentID). It stops on its own in "
+            + "\(Int(Self.testDuration))s."
+
+        testTimeout = Timer.scheduledTimer(withTimeInterval: Self.testDuration, repeats: false) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.stopTest() }
+        }
+    }
+
+    /// Ends the test session now: the activity is closed through the same
+    /// path a real session closes by, so nothing is left behind.
+    func stopTest(announce: Bool = true) {
+        testTimeout?.invalidate()
+        testTimeout = nil
+        guard let agentID = activeTestAgentID else { return }
+        activeTestAgentID = nil
+
+        onTestEvent?(AgentEvent(
+            agentID: agentID,
+            sessionID: Self.testSessionID,
+            kind: .sessionClosed,
+            at: Date(),
+            confidence: EventConfidence(level: .high, source: "test"),
+            summary: "Test ended"
+        ))
+        if announce { statusMessage = "Test stopped." }
+    }
+
+    /// Whether this activity is the running test.
+    func isTestActivity(_ activity: AgentActivity) -> Bool {
+        activity.sessionID == Self.testSessionID && activity.agentID == activeTestAgentID
     }
 
     var onTestEvent: ((AgentEvent) -> Void)?

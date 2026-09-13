@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Last message written to the verbose log, so the frame loop does not
     /// repeat it sixty times a second.
     private var lastLoggedMessage: PetNotification?
+
+    /// Set when a check finds a newer release, so both menus can say so.
+    private var availableUpdate: UpdateCheck.Release?
     private var model: AgentPetModel?
     private var managerWindow: MainWindowController?
 
@@ -43,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         handleTerminationSignals()
+        buildMainMenu()
         buildWindow()
         buildStatusItem()
         var firstFrame = true
@@ -93,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startBridge()
         buildModel()
         rebuildMenu()
+        checkForUpdatesInBackground()
 
         if CommandLine.arguments.contains("--selftest") {
             let status = RenderSelfTest.run(controller: controller, view: petView)
@@ -161,6 +166,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.ingest(event)
             self?.pushActivities()
         }
+        // One directory, one list: the menu bar's copy of the library follows
+        // the manager's, so a pet installed while the manager is open shows up
+        // in the Pet menu without a relaunch.
+        model.onPetsChanged = { [weak self] pets in
+            self?.library = pets
+            self?.rebuildMenu()
+        }
         model.bridgeSummary = { [weak self] in
             guard let bridge = self?.bridge else {
                 return DiagnosticsBundle.BridgeSummary(
@@ -220,6 +232,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func lastUsedPet() -> PetLibrary.Entry? {
         guard let id = AppConfigStore().load().pet.defaultPetID else { return nil }
         return library.first { $0.definition.id == id }
+    }
+
+    @objc private func openUpdatePage() {
+        guard let update = availableUpdate else { return }
+        NSWorkspace.shared.open(update.page)
     }
 
     @objc private func openManager() {
@@ -374,6 +391,159 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    // MARK: - About, updates
+
+    /// The standard About panel, with the shape of the app in its credits.
+    @objc private func showAbout() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Agent Pet Runtime",
+            .applicationVersion: UpdateCheck.currentVersion,
+            .credits: NSAttributedString(
+                string: "A desktop pet that reacts to what your CLI coding agents are doing.\n"
+                    + "github.com/dncore/agent-pet-runtime",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                ]
+            ),
+        ])
+    }
+
+    /// Checks the release feed now and says what it found. The automatic check
+    /// at launch stays quiet; this one was asked for, so it answers.
+    @objc private func checkForUpdates() {
+        Task { @MainActor in
+            let outcome = await UpdateCheck.run()
+            noteUpdate(outcome)
+            present(outcome)
+        }
+    }
+
+    private func present(_ outcome: UpdateCheck.Outcome) {
+        let alert = NSAlert()
+        switch outcome {
+        case .upToDate(let current):
+            alert.messageText = "Agent Pet Runtime \(current) is the latest version."
+            alert.informativeText = ""
+            alert.addButton(withTitle: "OK")
+        case .available(let release, let current):
+            alert.messageText = "Agent Pet Runtime \(release.version) is available."
+            alert.informativeText = "You are running \(current)."
+            alert.addButton(withTitle: "Open Release Page")
+            alert.addButton(withTitle: "Later")
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(release.page)
+            }
+            return
+        case .failed(let reason):
+            alert.messageText = "Could not check for updates."
+            alert.informativeText = reason
+            alert.addButton(withTitle: "OK")
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    /// Records what a check found, so the menu can carry it.
+    private func noteUpdate(_ outcome: UpdateCheck.Outcome) {
+        switch outcome {
+        case .available(let release, _):
+            if availableUpdate != release {
+                availableUpdate = release
+                rebuildMenu()
+            }
+            if CommandLine.arguments.contains("--verbose") {
+                FileHandle.standardError.write(Data(
+                    "[pet] update available: \(release.version)\n".utf8
+                ))
+            }
+        case .upToDate, .failed:
+            availableUpdate = nil
+        }
+    }
+
+    /// A quiet check a few seconds after launch: a newer release only adds a
+    /// menu item. Nothing is downloaded, and nothing interrupts the pet.
+    private func checkForUpdatesInBackground() {
+        guard !HeadlessMode.isActive else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+            noteUpdate(await UpdateCheck.run())
+        }
+    }
+
+    // MARK: - Main menu
+
+    /// The menu bar the app shows while its window is frontmost.
+    ///
+    /// The app spends most of its life as an accessory with no menu bar at all;
+    /// this exists for the manager window, and without it the window is a
+    /// classic macOS oddity: no About, no Quit, and copy and paste that do not
+    /// work because nothing is bound to them.
+    private func buildMainMenu() {
+        let name = "Agent Pet Runtime"
+        let main = NSMenu()
+
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About \(name)", action: #selector(showAbout), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = NSMenuItem(
+            title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h"
+        )
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthers)
+        appMenu.addItem(
+            withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""
+        )
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"
+        )
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(
+            withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"
+        )
+        editItem.submenu = editMenu
+        main.addItem(editItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(
+            withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"
+        )
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(
+            withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"
+        )
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+        NSApp.windowsMenu = windowMenu
+
+        NSApp.mainMenu = main
+
+        if CommandLine.arguments.contains("--verbose") {
+            FileHandle.standardError.write(Data(
+                "[pet] main menu: \(main.items.count) menus for the manager window\n".utf8
+            ))
+        }
+    }
+
     // MARK: - Menu
 
     private func buildStatusItem() {
@@ -414,6 +584,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   action: #selector(openManager), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
+
+        if let update = availableUpdate {
+            let item = NSMenuItem(
+                title: "Update Available: \(update.version)…",
+                action: #selector(openUpdatePage), keyEquivalent: ""
+            )
+            item.target = self
+            menu.addItem(item)
+        }
+
         menu.addItem(.separator())
 
         // Pets
@@ -523,6 +703,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activityItem.isEnabled = false
         menu.addItem(activityItem)
 
+        menu.addItem(.separator())
+        let about = NSMenuItem(title: "About Agent Pet Runtime", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
+        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
+        menu.addItem(updates)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
