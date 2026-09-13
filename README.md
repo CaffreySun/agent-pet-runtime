@@ -158,6 +158,25 @@ direction — the contract's "no-vector deadzone".
 
 ---
 
+## Where pets come from
+
+Pets belong to Codex. The runtime reads Codex's own pets directory —
+`$CODEX_HOME/pets`, or `~/.codex/pets` — and never writes to it:
+
+```sh
+npx codex-pets add <pet-id>     # install from codex-pets.net; run again to update
+rm -rf ~/.codex/pets/<pet-id>   # remove: a pet is a folder, deleting it is the whole operation
+```
+
+Any folder in there with a `pet.json` and a spritesheet works, however it got
+there — the hatch-pet skill, a download you unzipped by hand, a friend's
+package. The Pet Manager lists exactly that directory, previews each pet, and
+puts the one you choose on your desktop; it does not install, import, or delete
+anything itself, so the app and your terminal Codex can never disagree about
+what is installed. Your choice is remembered across launches.
+
+---
+
 ## Performance
 
 The shim runs on the agent's critical path, once per tool call, so this is the
@@ -217,7 +236,6 @@ Sources/AgentPetCore/     Pure logic. No AppKit, so it is all testable headlessl
 ├── Activity/             ActivityEngine — priority, aging, focus hold, dwell
 ├── Bridge/               Envelope, framing, server, normalizer, hook setup
 ├── Pet/                  Manifest, compatibility profiles, validation, decoding
-├── Pets/                 Store: install, upgrade, uninstall, provenance
 ├── Integration/          Config transaction, configurators, detection
 ├── Runtime/              AnimationResolver, drag geometry
 ├── Settings/             AppConfig
@@ -240,7 +258,7 @@ corrected specification.
 | Core, pet loading, validation, activity engine | done |
 | Floating pet, drag, gaze, position memory | done |
 | Event bridge, verified against the real binary | done |
-| Pet Manager: import, preview, upgrade, uninstall | done |
+| Pet Manager: list Codex's pets, preview, pick one | done — read-only; pets are installed with Codex's own tooling |
 | Agent Integrations: detect, configure, remove | Claude Code only |
 | Activity Center, Settings, diagnostics export | done |
 | Grok / Codex / Pi configuration | not built — their formats need their own configurators |

@@ -15,11 +15,12 @@ enum Diagnose {
         print("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         print("")
 
-        print("Search paths:")
-        for path in PetLibrary.searchPaths {
-            let exists = FileManager.default.fileExists(atPath: path.path)
-            print("  \(exists ? "✓" : "✗") \(path.path)")
-        }
+        // One directory, the one Codex reads. A missing one is worth saying
+        // out loud: it is the difference between "no pets" and "wrong path".
+        let petsDirectory = PetLibrary.petsDirectory
+        let exists = FileManager.default.fileExists(atPath: petsDirectory.path)
+        print("Pets directory (Codex's own):")
+        print("  \(exists ? "✓" : "✗") \(petsDirectory.path)")
         print("")
 
         let entries = PetLibrary.discover()
@@ -60,7 +61,9 @@ enum Diagnose {
         if !loadedAny {
             print("No playable pet. The window would show nothing.")
             print("")
-            print("This is a complete diagnosis; install a pet package to see one.")
+            print("This is a complete diagnosis; install a pet package to see one:")
+            print("  npx codex-pets add <pet-id>          (from codex-pets.net)")
+            print("or drop any package folder into \(petsDirectory.path)")
             return 0
         }
 

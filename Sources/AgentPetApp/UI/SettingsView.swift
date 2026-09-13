@@ -48,9 +48,11 @@ struct SettingsView: View {
                 }
                 HStack {
                     Button("Reveal Support Folder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([model.petStore.root])
+                        NSWorkspace.shared.activateFileViewerSelecting([
+                            BridgeSocketLocation.applicationSupportDirectory
+                        ])
                     }
-                    Text(model.petStore.root.path)
+                    Text(BridgeSocketLocation.applicationSupportDirectory.path)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)

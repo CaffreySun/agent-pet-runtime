@@ -127,6 +127,19 @@ Agent 状态是一个由 hook 事件驱动的小型状态机。**映射是最容
 
 ---
 
+## 宠物从哪来
+
+宠物属于 Codex。运行时读的就是 Codex 自己的宠物目录——`$CODEX_HOME/pets`，未设置时即 `~/.codex/pets`——并且从不写入：
+
+```sh
+npx codex-pets add <pet-id>     # 从 codex-pets.net 安装；再跑一次就是更新
+rm -rf ~/.codex/pets/<pet-id>   # 移除：宠物就是一个文件夹，删掉它就是全部操作
+```
+
+目录里任何带 `pet.json` 和 spritesheet 的文件夹都算数，怎么来的都行——hatch-pet skill 生成的、手动解压的、别人分享的。Pet Manager 列的就是这个目录：预览、把你选中的那只放上桌面；它自己不安装、不导入、不删除任何东西，因此本 app 与你终端的 Codex 永远不可能对"装了什么"给出两个答案。你的选择会被记住，下次启动仍是它。
+
+---
+
 ## 性能
 
 shim 跑在 Agent 的关键路径上，每次工具调用一次，所以这个数字**决定方案是否可行**。
@@ -171,7 +184,6 @@ Sources/AgentPetCore/     纯逻辑。不依赖 AppKit，所以全部可以无�
 ├── Activity/             ActivityEngine —— 优先级、老化、焦点保持、完成停留
 ├── Bridge/               信封、分帧、服务端、归一化、hook 配置生成
 ├── Pet/                  manifest、兼容档、校验、解码
-├── Pets/                 存储：安装、升级、卸载、来源追溯
 ├── Integration/          配置事务、配置器、检测
 ├── Runtime/              AnimationResolver、拖动几何
 ├── Settings/             AppConfig
@@ -192,7 +204,7 @@ Sources/agentpet-hook/    Agent 执行的 shim。必须永远 exit 0。
 | 核心、宠物加载、校验、Activity 引擎 | 完成 |
 | 悬浮宠物、拖动、注视、位置记忆 | 完成 |
 | 事件桥接，已对着真实二进制验证 | 完成 |
-| Pet Manager：导入、预览、升级、卸载 | 完成 |
+| Pet Manager：列出 Codex 的宠物、预览、选用 | 完成——只读；宠物由 Codex 自己的工具链安装 |
 | Agent 集成：检测、配置、移除 | **仅 Claude Code** |
 | Activity Center、设置、诊断导出 | 完成 |
 | Grok / Codex / Pi 配置 | 未做——它们的格式需要各自的配置器 |
