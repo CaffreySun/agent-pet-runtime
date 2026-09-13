@@ -10,8 +10,7 @@ import Foundation
 @MainActor
 final class AgentPetModel: ObservableObject {
 
-    @Published private(set) var installedPets: [InstalledPet] = []
-    @Published private(set) var availablePets: [AvailablePet] = []
+    @Published private(set) var pets: [PetLibrary.Entry] = []
     @Published private(set) var agentStatuses: [AgentStatus] = []
     @Published private(set) var activities: [AgentActivity] = []
     @Published private(set) var focusedActivityID: String?
@@ -27,14 +26,6 @@ final class AgentPetModel: ObservableObject {
         didSet { if config != oldValue { saveConfig() } }
     }
 
-    struct AvailablePet: Identifiable {
-        let id: String
-        let name: String
-        let root: URL
-        let alreadyInstalled: Bool
-    }
-
-    let petStore: PetStore
     let integrationService: AgentIntegrationService
     let transaction: ConfigTransaction
 
@@ -51,7 +42,6 @@ final class AgentPetModel: ObservableObject {
         onActivitiesChanged: @escaping ([AgentActivity], String?) -> Void = { _, _ in }
     ) {
         self.shimPath = shimPath
-        self.petStore = PetStore(root: root)
         self.transaction = ConfigTransaction(
             backupDirectory: root.appendingPathComponent("backups")
         )
@@ -82,11 +72,7 @@ final class AgentPetModel: ObservableObject {
     }
 
     func refreshPets() {
-        installedPets = petStore.installedPets()
-        availablePets = petStore.discoverCodexPets().map {
-            AvailablePet(id: $0.root.lastPathComponent, name: $0.name,
-                         root: $0.root, alreadyInstalled: $0.alreadyInstalled)
-        }
+        pets = PetLibrary.discover()
     }
 
     func refreshAgents() {
@@ -126,12 +112,12 @@ final class AgentPetModel: ObservableObject {
             let bundle = DiagnosticsBundle(
                 app: DiagnosticsBundle.currentAppInfo(),
                 bridge: bridgeSummary(),
-                pets: petStore.installedPets().map {
+                pets: pets.map {
                     DiagnosticsBundle.PetSummary(
                         id: $0.id,
-                        displayName: $0.metadata.displayName,
-                        profile: $0.metadata.compatibilityProfile,
-                        compatibilityWarningCount: 0
+                        displayName: $0.name,
+                        profile: $0.definition.profile.rawValue,
+                        compatibilityWarningCount: $0.warnings.count
                     )
                 },
                 agents: agentStatuses.map {
@@ -166,55 +152,27 @@ final class AgentPetModel: ObservableObject {
 
     // MARK: - Pet actions
 
-    func installPet(from url: URL) {
-        run("Installed \(url.lastPathComponent)") {
-            _ = try petStore.install(from: url, provenance: .imported)
-            refreshPets()
-        }
-    }
-
-    func importAvailable(_ pet: AvailablePet) {
-        run("Imported \(pet.name)") {
-            _ = try petStore.install(from: pet.root, provenance: .codexPets)
-            refreshPets()
-        }
-    }
-
-    func upgradePet(_ pet: InstalledPet, from url: URL) {
-        run("Upgraded \(pet.metadata.displayName)") {
-            _ = try petStore.upgrade(petID: pet.id, from: url)
-            refreshPets()
-        }
-    }
-
-    func uninstallPet(_ pet: InstalledPet) {
-        run("Removed \(pet.metadata.displayName)") {
-            let outcome = try petStore.uninstall(petID: pet.id)
-            if !outcome.removedFromDisk, let source = outcome.sourcePreserved {
-                statusMessage = "Deregistered. The original at \(source) was left untouched."
-            }
-            refreshPets()
-        }
-    }
-
-    func usePet(_ pet: InstalledPet) {
+    /// There is no install, upgrade, or uninstall here on purpose. Pets belong
+    /// to Codex: `npx codex-pets add <id>` installs and updates them, and
+    /// deleting a folder removes one. A second manager inside this app would
+    /// be a second source of truth.
+    func usePet(_ pet: PetLibrary.Entry) {
         onUsePet?(pet)
         currentPetID = pet.id
         rememberPetSelection(petID: pet.id)
-        statusMessage = "“\(pet.metadata.displayName)” is now on the desktop."
+        statusMessage = "“\(pet.name)” is now on the desktop."
     }
 
     /// Records which pet the desktop is showing, so the next launch restores it.
     ///
-    /// Takes an id rather than an `InstalledPet` because the menu bar picks
-    /// pets straight out of the library — a pet found in `~/.codex/pets` that
-    /// was never imported here still has to be remembered.
+    /// Takes an id rather than an entry because the menu bar picks pets
+    /// straight out of the library as well, and both must land on the same key.
     func rememberPetSelection(petID: String) {
         config.pet.defaultPetID = petID
     }
 
     /// Set by the app to switch the desktop pet.
-    var onUsePet: ((InstalledPet) -> Void)?
+    var onUsePet: ((PetLibrary.Entry) -> Void)?
 
     // MARK: - Agent actions
 
@@ -299,14 +257,6 @@ final class AgentPetModel: ObservableObject {
     /// Turns errors into something a user can act on rather than a type name.
     private func describe(_ error: Error) -> String {
         switch error {
-        case let PetStoreError.validationFailed(petID, issues):
-            return "“\(petID)” was rejected:\n" + issues.prefix(3).joined(separator: "\n")
-        case let PetStoreError.notInstalled(petID):
-            return "“\(petID)” is not installed."
-        case let PetStoreError.upgradeFailedAndRestored(petID, detail):
-            return "Upgrading “\(petID)” failed and the previous version was restored.\n\(detail)"
-        case let PetStoreError.stagingFailed(detail):
-            return "Could not install: \(detail)"
         case let ConfigTransactionError.concurrentModification(path):
             return "\(path) changed while it was being edited. Nothing was written — try again."
         case let ConfigTransactionError.existingContentNotJSON(path, _):

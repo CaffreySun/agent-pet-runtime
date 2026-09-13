@@ -465,82 +465,46 @@ dedupeKey = hash(agentID, eventName, sessionID, payloadEventID)
 
 ---
 
-## 6. Pet Provenance 与生命周期（补齐 §8.4 / §8.6）
+## 6. Pet 来源与生命周期（2026-09-13 修正）
 
-### 6.1 存储布局
-
-```
-~/Library/Application Support/AgentPetRuntime/
-├── pets/<pet-id>/
-│   ├── pet.json
-│   ├── spritesheet.webp
-│   └── .agentpet/metadata.json      ← 运行时私有，不污染 package
-├── integrations/<agent-id>.json
-├── backups/<agent-id>/<timestamp>/  ← 保留最近 10 份
-├── staging/                         ← 安装事务的临时区
-└── logs/
-```
-
-**metadata.json 放在 `.agentpet/` 子目录**而不是 package root，因为 §6.2 的校验器会拒绝 package 里出现未预期的文件。运行时自己的元数据必须与用户资产隔离。
-
-### 6.2 `metadata.json`
-
-```json
-{
-  "schemaVersion": 1,
-  "petID": "pet-one",
-  "displayName": "pet-two",
-  "compatibilityProfile": "openaiCodexV1",
-  "contentHash": "sha256:...",
-  "provenance": {
-    "kind": "imported",
-    "originalSourcePath": "/Users/x/Downloads/pet-one",
-    "originalSourceRemoved": false,
-    "installedAt": "2026-09-12T01:00:00Z",
-    "managedByRuntime": true
-  },
-  "installedVersion": null,
-  "lastValidatedAt": "2026-09-12T01:00:00Z"
-}
-```
-
-**`managedByRuntime` 是卸载时唯一决定"能否删磁盘"的字段。**
-
-| 值 | 来源 | 卸载行为 |
-|---|---|---|
-| `true` | 用户 Import 到运行时存储 | 删除 `pets/<pet-id>/` 整个目录 |
-| `false` | 指向 `~/.codex/pets/...` 的发现条目 | **只删注册表条目，磁盘不动** |
-
-### 6.3 安装事务
+### 6.1 唯一的来源：Codex 自己的 pet 目录
 
 ```
-1. 复制到 staging/<uuid>/
-2. 校验（manifest → 路径安全 → payload → atlas）
-3. 计算 contentHash
-4. 写 staging/<uuid>/.agentpet/metadata.json
-5. 原子 rename: staging/<uuid> → pets/<pet-id>
-   ├── 若 pets/<pet-id> 已存在 → 先 rename 到 staging/<uuid>.old
-   └── 失败 → 把 .old rename 回去
-6. 删除 .old
+$CODEX_HOME/pets/                 # 未设置 CODEX_HOME 时即 ~/.codex/pets/
+└── <folder>/                     # 目录名不必等于 id；manifest 的 id 才是主键
+    ├── pet.json
+    └── spritesheet.webp          # 具体文件名由 pet.json 的 spritesheetPath 指定
 ```
 
-**顺序关键**：先全部校验再落盘。校验失败时 `pets/` 目录从未被触碰，天然实现"失败自动恢复"。
+运行时**只读**这个目录，任何情况下都不写入。`CODEX_HOME` 是**替换**而不是追加（与 `codex-pets` CLI、hatch-pet skill 一致）；两个都搜会列出终端 Codex 根本加载不了的 pet。
 
-### 6.4 `PetSource` 扩展（修正 §8.7）
+增 / 改 / 删都不由本项目做：
 
-原方案的 `enum PetSource { bundled, local, imported, registry(URL) }` 不够，因为实测存在一个重要的真实来源：
+| 操作 | 标准做法 |
+|---|---|
+| 安装 | `npx codex-pets add <pet-id>`（codex-pets.net；整包用 `add-collection <slug>`） |
+| 更新 | 再跑一次 `add`：它直接覆盖 `pet.json` 与 `spritesheet.webp`（实测 codex-pets@0.3.0 的 installer 就是 `mkdir -p` + `writeFile`） |
+| 移除 | 删除 `$CODEX_HOME/pets/<folder>/`。生态里没有 remove 命令；Codex TUI 只有 "Disable terminal pets"（不加载，也不删除） |
+| 其他来源 | 手动解压、hatch-pet skill 生成后直接写入——只要目录里有合法 `pet.json` + spritesheet 即可 |
 
-```swift
-enum PetSource: Equatable {
-    case bundled
-    case imported(from: URL)        // 用户主动 Import
-    case codexPets                  // ~/.codex/pets/ 发现  ← 新增
-    case local                      // 已在运行时存储中
-    case registry(URL)              // v0.2
-}
-```
+实测 codex-cli 0.153.4 没有任何 pet 子命令，TUI 只有交互式 picker；`codex-pets` CLI 只有 `add` 与 `add-collection`。所以"移除"在标准生态里**就是删目录**，本项目不为此发明第二套语义。
 
-`~/.codex/pets/` 作为**只读发现源**：Pet Manager 的 "Discover" 扫描它，展示为可 Import 的条目。导入即复制，之后两者独立。
+### 6.2 本项目只写一样东西：用户选了哪只
+
+`config.json` 的 `pet.defaultPetID`（`~/Library/Application Support/AgentPetRuntime/config.json`）。启动时按 id 在上面那个目录里解析；解析不到（pet 被删除）则回退第一只，不报错、也不清除旧值——重新装回来即恢复原选择。`--pet <id>` 是仅本次运行的覆盖，不写回。
+
+这是 app 与 pet 唯一的状态关系：**不复制、不注册、不记哈希**。
+
+### 6.3 为什么删掉运行时的自有存储（2026-09-13 反转）
+
+v0.1 实现过一份自有存储（`Application Support/AgentPetRuntime/pets/`，带 provenance metadata、staging 安装事务、Import / Upgrade / Uninstall）。**已整体删除。** 理由：
+
+- **两套列表必然漂移**：用户用 Codex 的标准工具装了一只 pet，本 app 要等一次 Import 才看得到；两个"已安装"列表给出不同答案，是设计缺陷。
+- **来源不可复制**：Import 把 `~/.codex/pets/<id>` 复制一份，Codex 侧一更新副本就过期，同一只 pet 出现两个内容哈希。
+- **选择入口在 Codex**：终端里跑哪只由 Codex 的 picker 决定，桌面这只由本 app 决定；但"有没有这只 pet"两边读同一份目录，才不会出现两个答案。
+- 删除的代价只是一套安装事务、一份元数据格式和 20 个测试。加载与校验（§7）不变——非法包与 Codex 一样被跳过，不做兜底。
+
+`docs/SPEC-REVIEW.md` §2.5 / §3.5 保留了当时的 store 结论，已在该文标注反转。
 
 ---
 
@@ -741,7 +705,7 @@ enum RuntimeConstants {
 | `PetState` 层 | 独立 5 态状态机 | **删除**，`AgentState → AnimationTrack` 直连 | 中间层无信息增量，只是多一套词汇 |
 | atlas 行驱动 | 隐含 9 行 ← 9 态 | 4 行状态驱动 + 3 行手势 + 2 行位移 | 行语义与状态语义不同构 |
 | V2 atlas | 不定义为稳定，倾向拒绝 | **降级兼容**，播放 row 0–8 | 用户已有 V2 资产 |
-| `~/.codex/pets` | 未提及 | 只读发现源 | 实测已存在 5 个 Pet |
-| 卸载安全 | "不删源目录" | 靠 `managedByRuntime` 字段 | 原表述不可实现 |
+| `~/.codex/pets` | 未提及 | **唯一的 pet 来源**，只读 | 与 Codex TUI、`codex-pets` CLI 读同一目录，两个答案的问题不复存在 |
+| 卸载安全 | "不删源目录" | **不适用**：本项目不持有 pet，增删改都在 Codex 侧 | 自有存储已删除（§6.3） |
 | ADR-009 XPC | 保留 | **删除** | v0.1 无第三方代码需隔离 |
 | 开发顺序 | P0 状态机 → P2 Activity | **合并为一个里程碑** | 状态机的输入由 Activity Engine 决定，不能分开 |

@@ -121,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shimPath: shimPath
         )
         model.onUsePet = { [weak self] pet in
-            self?.loadPet(at: pet.root, name: pet.metadata.displayName)
+            self?.loadPet(at: pet.root, name: pet.name)
         }
         model.onTestEvent = { [weak self] event in
             self?.controller.ingest(event)
@@ -295,23 +295,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// machine with no user — a CI runner, most obviously — blocks forever, and
     /// the app appears to hang rather than to report a missing pet.
     private func presentNoPets() {
-        let searchPaths = PetLibrary.searchPaths.map(\.path)
+        let directory = PetLibrary.petsDirectory.path
+        let explanation = """
+            Nothing in \(directory).
+
+            Install one with:
+                npx codex-pets add <pet-id>
+
+            …or drop any package folder in there.
+            """
 
         guard !HeadlessMode.isActive else {
-            FileHandle.standardError.write(Data("""
-                [pet] no pet packages found. Looked in:
-                \(searchPaths.map { "        \($0)" }.joined(separator: "\n"))
-
-                """.utf8))
+            FileHandle.standardError.write(Data("[pet] no pet packages found.\n\n\(explanation)\n\n".utf8))
             return
         }
 
         let alert = NSAlert()
         alert.messageText = "No pet packages found"
-        alert.informativeText = """
-            Looked in:
-            \(searchPaths.map { "  \($0)" }.joined(separator: "\n"))
-            """
+        alert.informativeText = explanation
         alert.alertStyle = .informational
         alert.runModal()
     }

@@ -2,12 +2,17 @@ import AgentPetCore
 import AppKit
 import SwiftUI
 
-/// Pet Manager: what is installed, and how to add more.
+/// Pet Manager: what Codex has installed, and how to install more.
+///
+/// Read-only by design. Pets live in Codex's own pets directory and are added,
+/// updated, and removed with Codex's own tooling; a second manager here would
+/// be a second source of truth, and the two would drift.
 struct PetsView: View {
 
     @ObservedObject var model: AgentPetModel
     @State private var sprites: [String: SpriteFrames] = [:]
-    @State private var selection: InstalledPet?
+    @State private var warnings: [String: [String]] = [:]
+    @State private var selection: String?
     @State private var previewTrack = "idle"
 
     private let previewTracks = ["idle", "running", "waiting", "waving", "failed", "review"]
@@ -27,61 +32,60 @@ struct PetsView: View {
     private var installedList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Installed")
+                Text("Pets")
                     .font(.headline)
                 Spacer()
+                // Pets are installed from a terminal, so the directory can
+                // change while this window is open.
                 Button {
-                    importFromDisk()
+                    model.refreshPets()
+                    sprites.removeAll()
+                    warnings.removeAll()
+                    loadSprites()
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: "arrow.clockwise")
                 }
-                .help("Import a pet package folder")
+                .help("Read \(PetLibrary.petsDirectory.path) again")
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([PetLibrary.petsDirectory])
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .help("Reveal \(PetLibrary.petsDirectory.path) in the Finder")
             }
             .padding(10)
 
             Divider()
 
-            if model.installedPets.isEmpty {
+            if model.pets.isEmpty {
                 emptyState
             } else {
-                List(model.installedPets, selection: $selection) { pet in
-                    row(for: pet).tag(pet)
+                List(model.pets, id: \.id, selection: $selection) { pet in
+                    row(for: pet).tag(pet.id)
                 }
-            }
-
-            if !model.availablePets.isEmpty {
-                Divider()
-                Text("Found in ~/.codex/pets")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 6)
-                List(availablePets) { pet in
-                    availableRow(pet)
-                }
-                .frame(height: 120)
             }
         }
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Text("No pets installed")
+            Text("No pets found")
                 .foregroundStyle(.secondary)
-            Text("Import a package folder, or import one of the pets Codex already has.")
+            Text("Codex reads \(PetLibrary.petsDirectory.path).\nInstall one with:\n\nnpx codex-pets add <pet-id>")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
+                .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
     }
 
-    private func row(for pet: InstalledPet) -> some View {
+    private func row(for pet: PetLibrary.Entry) -> some View {
         HStack(spacing: 10) {
             preview(for: pet, track: "idle", size: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(pet.metadata.displayName).fontWeight(.medium)
+                Text(pet.name).fontWeight(.medium)
                 Text(pet.id)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -96,29 +100,11 @@ struct PetsView: View {
         .padding(.vertical, 2)
     }
 
-    private func availableRow(_ pet: AgentPetModel.AvailablePet) -> some View {
-        HStack {
-            Text(pet.name)
-                .font(.callout)
-            Spacer()
-            if pet.alreadyInstalled {
-                Text("Imported")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Button("Import") { model.importAvailable(pet) }
-                    .buttonStyle(.link)
-            }
-        }
-    }
-
-    private var availablePets: [AgentPetModel.AvailablePet] { model.availablePets }
-
     // MARK: - Detail
 
     @ViewBuilder
     private var detail: some View {
-        if let pet = selection {
+        if let pet = selection.flatMap(selectedPet) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     preview(for: pet, track: previewTrack, size: 220)
@@ -132,13 +118,14 @@ struct PetsView: View {
                     .pickerStyle(.segmented)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(pet.metadata.displayName).font(.title2)
+                        Text(pet.name).font(.title2)
                         Text(pet.definition.description)
                             .foregroundStyle(.secondary)
                     }
 
                     infoGrid(for: pet)
                     actions(for: pet)
+                    managementNotes(for: pet)
                 }
                 .padding(16)
             }
@@ -151,19 +138,16 @@ struct PetsView: View {
         }
     }
 
-    private func infoGrid(for pet: InstalledPet) -> some View {
+    private func selectedPet(_ id: String) -> PetLibrary.Entry? {
+        model.pets.first { $0.id == id }
+    }
+
+    private func infoGrid(for pet: PetLibrary.Entry) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
             row("ID", pet.id)
-            row("Profile", pet.metadata.compatibilityProfile)
-            row("Source", pet.metadata.provenance.kind.rawValue)
-            if let origin = pet.metadata.provenance.originalSourcePath {
-                row("Imported from", origin)
-            }
-            row("Installed", pet.metadata.provenance.installedAt.formatted(date: .abbreviated, time: .shortened))
-            row("Managed", pet.isManagedByRuntime ? "Yes — uninstall removes it" : "No — files are left alone")
-            if pet.definition.profile != .openAICodexV1 {
-                row("Note", "Rows beyond the V1 set are not played")
-            }
+            row("Profile", pet.definition.profile.rawValue)
+            row("Folder", pet.root.path)
+            row("Warnings", warningSummary(for: pet))
         }
         .font(.callout)
     }
@@ -178,25 +162,51 @@ struct PetsView: View {
         }
     }
 
-    private func actions(for pet: InstalledPet) -> some View {
+    private func actions(for pet: PetLibrary.Entry) -> some View {
         HStack {
             Button("Use on Desktop") {
                 model.usePet(pet)
             }
             .buttonStyle(.borderedProminent)
 
-            Button("Upgrade…") { upgrade(pet) }
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([pet.root])
+            }
 
             Spacer()
+        }
+        .padding(.top, 4)
+    }
 
-            Button("Uninstall", role: .destructive) { model.uninstallPet(pet) }
+    /// What this window deliberately does not do, and where to do it instead.
+    private func managementNotes(for pet: PetLibrary.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+            Text("Adding, updating, and removing pets happens in Codex, not here.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("""
+                Install or update — re-running it is safe, and that is what updating means:
+                  npx codex-pets add \(pet.id)
+
+                Remove — a pet is a folder; deleting it is the whole operation:
+                  rm -rf "\(pet.root.path)"
+
+                Any folder in \(PetLibrary.petsDirectory.path) with a pet.json and a \
+                spritesheet works, however it got there. Codex picks the pet in its own \
+                terminal picker.
+                """)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, 4)
     }
 
     // MARK: - Sprite cache
 
-    private func preview(for pet: InstalledPet, track: String, size: CGFloat) -> some View {
+    private func preview(for pet: PetLibrary.Entry, track: String, size: CGFloat) -> some View {
         Group {
             if let sprite = sprites[pet.id] {
                 AnimatedPetView(sprite: sprite, trackName: track)
@@ -207,38 +217,30 @@ struct PetsView: View {
         .frame(width: size, height: size * 208 / 192)
     }
 
+    /// Compatibility warnings only appear once the atlas is decoded, so they
+    /// are collected here rather than read off the discovery listing — a row
+    /// that always said "None" would be worse than no row.
+    private func warningSummary(for pet: PetLibrary.Entry) -> String {
+        guard let messages = warnings[pet.id] else { return "Reading…" }
+        return messages.isEmpty ? "None" : messages.joined(separator: " · ")
+    }
+
     /// Atlases are decoded once per pet and held, because decoding an 11 MB
     /// sheet on every list redraw would make the window unusable.
     private func loadSprites() {
-        for pet in model.installedPets where sprites[pet.id] == nil {
-            guard let loaded = try? PetPackageLoader().load(from: pet.root),
-                  let atlas = loaded.atlas,
-                  let frames = try? SpriteFrames(bitmap: atlas, profile: loaded.definition.profile)
-            else { continue }
-            sprites[pet.id] = frames
+        for pet in model.pets where sprites[pet.id] == nil {
+            do {
+                let loaded = try PetPackageLoader().load(from: pet.root)
+                guard let atlas = loaded.atlas else { continue }
+                sprites[pet.id] = try SpriteFrames(
+                    bitmap: atlas, profile: loaded.definition.profile
+                )
+                warnings[pet.id] = loaded.report.warnings.map(\.message)
+            } catch {
+                warnings[pet.id] = ["\(error)"]
+            }
         }
     }
 
     private var currentPetID: String? { model.currentPetID }
-
-    // MARK: - File pickers
-
-    private func importFromDisk() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose a pet package folder (one containing pet.json)"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.installPet(from: url)
-    }
-
-    private func upgrade(_ pet: InstalledPet) {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.message = "Choose the new version of “\(pet.metadata.displayName)”"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.upgradePet(pet, from: url)
-    }
 }
