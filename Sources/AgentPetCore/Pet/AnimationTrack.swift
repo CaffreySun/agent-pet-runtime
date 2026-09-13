@@ -35,10 +35,15 @@ public enum TrackKind: String, Codable, Sendable, CaseIterable {
 /// `idle_animation`), so the calm loop is a slow breath, not a fast blink. The
 /// profile below stores what is played, not what is authored.
 ///
-/// `repeats` is the other half of Codex's playback shape: a state's row plays
-/// three times and then hands over to the idle row, which loops from there. A
-/// pet that repeated its working pose forever would be a twitch, not a
-/// companion.
+/// `repeats` is the other half of Codex's playback shape, and it separates
+/// two kinds of state. A **moment** — a task finishing, a failure — plays its
+/// row `repeats` times and then hands over to the idle row, which loops from
+/// there; that is Codex's `[...row, ...row, ...row, ...idle]` with
+/// `loopStartIndex` at the idle segment. A **condition** — working, waiting on
+/// a human — has `repeats == 1` and loops its row for as long as it lasts,
+/// because a condition outlives three passes by minutes, and settling into a
+/// calm breath while the agent is plainly still working reads as "asleep
+/// already".
 public struct AnimationTrack: Hashable, Sendable {
     public let name: String
     public let row: Int

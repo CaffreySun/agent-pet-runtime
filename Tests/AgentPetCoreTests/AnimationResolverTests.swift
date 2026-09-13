@@ -349,12 +349,33 @@ struct PresentationLayerTests {
         #expect(after?.trackName == "idle")
     }
 
-    @Test("a steady state plays three passes and then breathes")
-    func steadyStatesRepeatThenSettle() {
-        // Codex's playback shape: the row three times, then the idle row,
-        // which is what loops from there. A pet that ran its working pose for
-        // a minute straight would be a twitch.
-        for state in [AgentState.running, .waitingInput, .waitingApproval, .completed, .failed] {
+    @Test("conditions loop for as long as they last, however long that is")
+    func conditionsLoop() {
+        // Working and waiting are conditions, not moments: an agent can think
+        // for ten minutes and an approval can sit for an hour. The pet keeps
+        // animating its row the whole time — settling into a calm breath
+        // three seconds in reads as "asleep already" while the agent is
+        // plainly still working.
+        for state in [AgentState.running, .waitingInput, .waitingApproval] {
+            for elapsed in [0.5, 5.0, 60.0, 3600.0] {
+                let frame = resolver.resolve(
+                    situation(state: state, stateElapsed: elapsed), profile: v1
+                )
+                #expect(frame?.trackName == state.animationTrackName,
+                        "\(state) stopped animating after \(elapsed)s")
+                #expect(frame?.isFinished == false)
+            }
+            let track = track(state.animationTrackName)
+            #expect(track.repeats == 1, "\(state) should loop rather than settle")
+        }
+    }
+
+    @Test("moments play three passes and then settle into the breath")
+    func momentsSettle() {
+        // A finished turn and a failure are news, not conditions: the row
+        // plays three times — Codex's `[...row, ...row, ...row, ...idle]` —
+        // and then the pet breathes, which is what stops it holding a pose.
+        for state in [AgentState.completed, .failed] {
             let track = track(state.animationTrackName)
             #expect(track.repeats == 3, "\(state) should repeat its row three times")
 
@@ -371,14 +392,16 @@ struct PresentationLayerTests {
         }
     }
 
-    @Test("a settled state does not hand over to gaze")
-    func settleIgnoresGaze() {
-        // While the agent is still working the pet must not turn away to
-        // watch the pointer, even though it has settled into idle frames.
-        let frame = resolver.resolve(
-            situation(state: .running, stateElapsed: 60, look: 90), profile: v2
-        )
-        #expect(frame?.trackName == "idle", "gaze would have shown a look row")
+    @Test("a working pet does not hand over to gaze")
+    func workingIgnoresGaze() {
+        // The agent is still working, so the pet must not turn away to watch
+        // the pointer — at any point in the state's life.
+        for elapsed in [0.5, 60.0] {
+            let frame = resolver.resolve(
+                situation(state: .running, stateElapsed: elapsed, look: 90), profile: v2
+            )
+            #expect(frame?.trackName == "running", "gaze would have shown a look row")
+        }
     }
 
     @Test("reduced motion holds the first frame of whatever would have played")

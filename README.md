@@ -147,12 +147,12 @@ the ends held two to three times as long as the middle — and Codex plays it si
 times slower, which is what this runtime plays too. A single frame rate cannot
 reproduce any of it, so the runtime stores a duration per frame.
 
-Playback follows Codex's shape exactly: a state's row plays **three times** and
-then hands over to the idle row, which loops from there. A pet that repeated
-its working pose for as long as the agent worked would be a twitch; this one
-does its bit and then breathes, and the message beside it is what keeps saying
-what is happening. When the system asks for reduced motion, everything holds a
-single frame.
+Working and waiting loop their rows for as long as the state lasts — a pet
+that stopped moving three seconds into a ten-minute turn would read as asleep.
+A finished turn or a failure is a moment rather than a condition: its row
+plays three times (Codex's own shape) and then the pet settles into the breath,
+which is what stops it holding a pose. When the system asks for reduced motion,
+everything holds a single frame.
 
 Playback is layered, first match wins:
 
