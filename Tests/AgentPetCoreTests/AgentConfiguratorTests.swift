@@ -277,7 +277,7 @@ struct RealisticSettingsTests {
 @Suite("Integration health")
 struct IntegrationHealthTests {
 
-    private let evaluator = IntegrationHealthEvaluator(freshnessWindow: 30)
+    private let evaluator = IntegrationHealthEvaluator()
     private let configured = IntegrationRecord(
         agentID: "claude-code",
         status: .configured,
@@ -289,7 +289,7 @@ struct IntegrationHealthTests {
     func notDetected() {
         let health = evaluator.health(
             record: configured, isDetected: false, lastEventAt: now,
-            entriesPresent: true, now: now
+            entriesPresent: true
         )
         #expect(health == .notDetected)
     }
@@ -298,45 +298,51 @@ struct IntegrationHealthTests {
     func detectedOnly() {
         let health = evaluator.health(
             record: IntegrationRecord(agentID: "x"), isDetected: true,
-            lastEventAt: nil, entriesPresent: false, now: now
+            lastEventAt: nil, entriesPresent: false
         )
         #expect(health == .detected)
     }
 
-    @Test("a recent event means connected")
+    @Test("an event that has arrived at all means connected")
     func connected() {
         let health = evaluator.health(
             record: configured, isDetected: true,
-            lastEventAt: now.addingTimeInterval(-10), entriesPresent: true, now: now
+            lastEventAt: now.addingTimeInterval(-10), entriesPresent: true
         )
         #expect(health == .connected)
         #expect(health.isHealthy)
     }
 
-    @Test("configured but silent for a while is degraded, not healthy")
-    func degraded() {
+    @Test("an agent that was heard from an hour ago is still connected")
+    func quietIsNotDegraded() {
+        // The regression this exists for: hooks fire around turns, so silence
+        // is what a healthy integration looks like between them. Judging it as
+        // degradation made the card cry wolf every time the user stopped to
+        // read an answer — and after a restart, when the timestamp lived only
+        // in memory, it did so immediately.
         let health = evaluator.health(
             record: configured, isDetected: true,
-            lastEventAt: now.addingTimeInterval(-600), entriesPresent: true, now: now
+            lastEventAt: now.addingTimeInterval(-3600), entriesPresent: true
+        )
+        #expect(health == .connected)
+        #expect(health.isHealthy)
+    }
+
+    @Test("configured but never any event deserves attention")
+    func neverHeardFrom() {
+        let health = evaluator.health(
+            record: configured, isDetected: true,
+            lastEventAt: nil, entriesPresent: true
         )
         #expect(health == .degraded)
         #expect(!health.isHealthy)
-    }
-
-    @Test("configured but never any event is degraded, not connected")
-    func configuredButSilent() {
-        let health = evaluator.health(
-            record: configured, isDetected: true,
-            lastEventAt: nil, entriesPresent: true, now: now
-        )
-        #expect(health == .degraded)
     }
 
     @Test("our entries disappearing from the file needs attention")
     func disconnected() {
         let health = evaluator.health(
             record: configured, isDetected: true,
-            lastEventAt: now, entriesPresent: false, now: now
+            lastEventAt: now, entriesPresent: false
         )
         #expect(health == .disconnected)
     }
@@ -345,7 +351,7 @@ struct IntegrationHealthTests {
     func failureWins() {
         let health = evaluator.health(
             record: configured, isDetected: true, lastEventAt: now,
-            entriesPresent: true, now: now, failure: "permission denied"
+            entriesPresent: true, failure: "permission denied"
         )
         #expect(health == .failed("permission denied"))
     }

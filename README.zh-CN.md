@@ -173,6 +173,8 @@ shim 跑在 Agent 的关键路径上，每次工具调用一次，所以这个�
 
 运行时读取 session id、工作目录、事件名。它**不读** prompt、模型输出、源码——不是过滤掉，是根本不读。写到磁盘的集成记录里只有 hook 命令和时间戳，没别的。
 
+App 没运行时（重启，或 `brew upgrade` 替换 bundle 的那几秒），hook 会把未送达的事件写进 `pending-events/`，供下次启动回放。这些文件与事件日志同一条白名单（session id、目录、事件名与工具**名**；绝不包含 prompt、参数、输出、源码），权限 `0600`，上限 200 条，回放后即删。
+
 `--log-events` 会写诊断抓包，**默认关闭**。它只保留诊断需要的字段，丢弃 `tool_input`、`tool_response`、`transcript_path`——用的是白名单，所以未来 Agent 版本新增的字段也不会默认泄漏进日志。文件权限 `0600`。
 
 离开这台机器的请求只有一个：检查更新会读取项目在 GitHub 的公开 release feed，把 tag 与当前版本比较。它不携带任何关于你或这台机器的信息，无头运行时不会发起，且这是全部的联网面——其余一切都不与外部通信。
@@ -182,7 +184,7 @@ shim 跑在 Agent 的关键路径上，每次工具调用一次，所以这个�
 ## 开发
 
 ```bash
-swift build && swift test        # 347 个测试
+swift build && swift test        # 367 个测试
 swift run AgentPet               # 跑起来
 
 swift run AgentPet --diagnose                      # 发现了哪些宠物，以及为什么

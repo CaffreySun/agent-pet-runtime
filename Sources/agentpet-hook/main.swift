@@ -14,9 +14,10 @@ import Foundation
 //      it can block the tool call and feed stderr back to the model. A pet
 //      that changes what the agent does would be a far worse bug than a pet
 //      that misses an event.
-//   2. Never block. If the runtime is not running, the event is dropped. That
-//      is the correct trade: a missed animation is invisible, a stalled agent
-//      is not.
+//   2. Never block. If the runtime is not running, the event is written to a
+//      small spool file for the next launch to replay (see EventSpool) and
+//      this process exits. The trade is unchanged: a missed animation is
+//      invisible, a stalled agent is not.
 //   3. Never write to stdout. The agent may be parsing it.
 //
 // Measured cold start with Foundation linked is ~3.7ms, inside the 5ms P50
@@ -78,7 +79,11 @@ let envelope = BridgeEnvelope(
 )
 
 let socketURL = resolveSocketURL()
-deliver(envelope, to: socketURL)
+if !deliver(envelope, to: socketURL) {
+    // Nobody was listening. The event is not lost: the next launch of the
+    // runtime replays it, reduced to the fields the state machine needs.
+    EventSpool.write(envelope, to: resolveSpoolURL())
+}
 exit(0)
 
 // MARK: - Helpers
@@ -125,15 +130,27 @@ func resolveSocketURL() -> URL {
     return BridgeSocketLocation.defaultURL
 }
 
-/// Connects, writes one frame, and closes. Never throws to the caller: every
-/// failure path is a silent drop by design.
-func deliver(_ envelope: BridgeEnvelope, to url: URL) {
-    guard let frame = try? envelope.encoded() else { return }
-    guard frame.count <= BridgeEnvelope.maximumPayloadBytes * 2 else { return }
-    guard url.path.utf8.count <= BridgeSocketLocation.maximumPathBytes else { return }
+/// Where undelivered events wait. Overridable so a test can spool somewhere
+/// harmless instead of the user's Application Support directory.
+func resolveSpoolURL() -> URL {
+    if let override = ProcessInfo.processInfo.environment["AGENTPET_SPOOL"], !override.isEmpty {
+        return URL(fileURLWithPath: override)
+    }
+    return EventSpool.defaultDirectory
+}
+
+/// Connects, writes one frame, and closes. Never throws to the caller.
+///
+/// Returns whether the frame was handed to a listening runtime; a `false`
+/// means the caller should spool it. Every failure path here is a failure to
+/// deliver, not an error to report.
+func deliver(_ envelope: BridgeEnvelope, to url: URL) -> Bool {
+    guard let frame = try? envelope.encoded() else { return false }
+    guard frame.count <= BridgeEnvelope.maximumPayloadBytes * 2 else { return false }
+    guard url.path.utf8.count <= BridgeSocketLocation.maximumPathBytes else { return false }
 
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    guard fd >= 0 else { return }
+    guard fd >= 0 else { return false }
     defer { close(fd) }
 
     var on: Int32 = 1
@@ -159,12 +176,12 @@ func deliver(_ envelope: BridgeEnvelope, to url: URL) {
         }
     }
 
-    if result != 0 && errno != EINPROGRESS { return }
-    if result != 0 && !waitWritable(fd, milliseconds: 50) { return }
+    if result != 0 && errno != EINPROGRESS { return false }
+    if result != 0 && !waitWritable(fd, milliseconds: 50) { return false }
 
     var frameWithNewline = frame
     frameWithNewline.append(0x0A)
-    writeAll(fd, frameWithNewline)
+    return writeAll(fd, frameWithNewline)
 }
 
 /// True once the socket is writable, false on timeout or error.
@@ -175,8 +192,9 @@ func waitWritable(_ fd: Int32, milliseconds: Int32) -> Bool {
 }
 
 /// Writes the whole buffer, tolerating short writes. Gives up after the poll
-/// deadline rather than spinning against a peer that is not reading.
-func writeAll(_ fd: Int32, _ data: Data) {
+/// deadline rather than spinning against a peer that is not reading — and
+/// says so, because an unfinished frame is one the server will discard.
+func writeAll(_ fd: Int32, _ data: Data) -> Bool {
     var offset = 0
     let total = data.count
 
@@ -187,11 +205,12 @@ func writeAll(_ fd: Int32, _ data: Data) {
         }
         if written <= 0 {
             if errno == EAGAIN || errno == EINTR {
-                if !waitWritable(fd, milliseconds: 50) { return }
+                if !waitWritable(fd, milliseconds: 50) { return false }
                 continue
             }
-            return
+            return false
         }
         offset += written
     }
+    return true
 }

@@ -90,9 +90,17 @@ public extension AgentState {
 
     /// How long this state may go without an event before it degrades.
     /// `nil` means the state never times out on silence.
+    ///
+    /// `running` is the one worth thinking about: a single tool call can run
+    /// for minutes with no hook in between (a build, a test suite, a
+    /// subagent), and every one of those minutes the agent is still working.
+    /// At the old thirty seconds the pet abandoned a job that was plainly
+    /// still running. Five minutes covers the common long tool with room to
+    /// spare; the cost is that a session killed mid-turn animates as working
+    /// for that long before it is allowed to settle.
     var staleTimeout: TimeInterval? {
         switch self {
-        case .running:          return 30
+        case .running:          return 300
         case .unknown:          return 60
         case .waitingApproval:  return 300
         case .failed:           return 600

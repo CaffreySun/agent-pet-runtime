@@ -192,7 +192,9 @@ struct PriorityClassTests {
 struct StaleTimeoutTests {
 
     @Test("states that can go stale declare where they degrade to", arguments: [
-        (AgentState.running, 30.0, AgentState.unknown),
+        // Five minutes for `running`: one Bash call can run for two, a
+        // subagent for more, and every one of those minutes is still work.
+        (AgentState.running, 300.0, AgentState.unknown),
         (.unknown, 60.0, .idle),
         (.waitingApproval, 300.0, .unknown),
         (.failed, 600.0, .idle),

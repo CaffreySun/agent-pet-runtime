@@ -237,6 +237,13 @@ The runtime reads session ids, working directories, and event names. It does
 read. The integration records it writes to disk contain hook commands and
 timestamps, and nothing else.
 
+When the app is not running — a relaunch, or the moment `brew upgrade` takes to
+replace the bundle — the hook writes undelivered events to `pending-events/`
+so the next launch can pick up where it left off. Those files are held to the
+same allowlist as the event log (session id, directory, event and tool *names*;
+never prompts, arguments, output, or source), written `0600`, capped at 200
+events, and deleted as they are replayed.
+
 `--log-events` writes a diagnostic capture, off by default. It keeps only the
 fields diagnosis needs and drops `tool_input`, `tool_response`, and
 `transcript_path` — an allowlist, so a field a future agent build adds cannot
@@ -252,7 +259,7 @@ whole of the network surface — nothing else here talks to anything.
 ## Development
 
 ```bash
-swift build && swift test        # 347 tests
+swift build && swift test        # 367 tests
 swift run AgentPet               # run it
 
 swift run AgentPet --diagnose                      # what pets are discoverable, and why

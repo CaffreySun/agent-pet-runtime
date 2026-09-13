@@ -128,7 +128,11 @@ struct AgentsView: View {
         case .failed(let message):
             return message
         case .degraded where status.record.isConfigured:
-            return "Configured, but no events have arrived recently."
+            // Not "no events recently" — an idle agent is silent, and saying
+            // otherwise made a working setup look broken. This fires only
+            // when nothing has ever arrived since the hooks were installed.
+            return "Hooks are installed, but no event has ever reached the pet. "
+                + "Agents read their hooks at startup, so restart it once."
         default:
             return nil
         }
