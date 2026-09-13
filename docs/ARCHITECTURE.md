@@ -561,6 +561,46 @@ Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可
 - **画在精灵上方，窗口向上生长、原点不动**：等价于 Codex 在精灵上方预留终端行，而不是盖在 transcript 上。窗口高度 = 默认 156pt + 31pt（一行）或 46pt（两行）；`hitTest` 只认精灵区域，点提示文字不会拖动宠物。
 - **与动画的关系**：Codex 用 notification 同时驱动动画（running/waiting/review/failed 行）；本项目的动画已由 Activity Engine 的状态表驱动，提示元素只补文字与生命周期，不再重复驱动动画。
 
+### 6.5 会话面板（2026-09-14）
+
+单一提示元素被推广成**每个会话一行**的面板：同一 agent 的会话相邻，组与组之间按各自最优会话的排名排序（即 §4.1 的优先级），组内同样按排名——需要用户的会话永远在最上面，与宠物动画的焦点一致（`ActivityEngine.rankedActivities()` 就是 `currentFocus` 用的那个排序）。
+
+| 项 | 内容 | 数据来源 |
+|---|---|---|
+| `agent` | 显示名 | `AgentProfiles.displayName` |
+| `session` | session id **后六位** | `AgentActivity.sessionID` |
+| `task` | 会话名 > 仓库名 > 目录名 | 状态栏 tap（名字/仓库）或 `focusTarget`（cwd） |
+| `tool` | 当前工具，**仅 `running` 时显示** | 规则的 `toolNameField`（**不是** `summary`） |
+| `context` | 百分比 + 荧光绿横条（#39FF14） | 状态栏 tap；无 tap 则该项不画 |
+| `message` | §6.4 的标签（+ 正文） | 每个会话自己的状态 |
+
+规则与理由：
+
+- **"当前工具"只来自 `toolNameField`，绝不取 `title`**：`summary` 可能是用户 prompt（`UserPromptSubmit` 的 summaryField 正是 `prompt`），而面板悬浮在所有窗口之上。为此 `AgentActivity.toolName` 是独立字段，只由声明了 `toolNameField: "tool_name"` 的规则填充。
+- **完成/失败的行显示正文，running 的行不显示**——与 §6.4 同一条取舍。
+- **idle 行有寿命**：终端被关掉时不会有 `SessionEnd`，一行"闲置会话"如果常驻，就会在宠物旁边飘一辈子。闲置行（`state == .idle`）在 `max(updatedAt, context.capturedAt)` 之后 10 分钟消失；状态栏还在报数的会话因此一直可见（它确实还活着）。
+- **`alwaysVisible=false`** 时，面板仅在存在非 idle 会话时出现；出现后显示全部行。
+- **窗口横向也要长**：面板最宽 520pt（超出则截断文本），窗口以精灵为轴左右对称加宽，底边不动——这样宠物在屏幕上纹丝不动。位置持久化存的是**还原到默认宽度时的原点**，否则宽面板一次、窄面板一次地退出会把宠物一步步挪走。
+- **配置**（`AppConfig.messagePanel`）：`alwaysVisible` + 有序 `items`（开关与顺序即数组顺序）。`AppConfig` 改为逐字段 `decodeIfPresent`：合成解码会让"旧版本写下的配置文件缺新键"变成整份配置解码失败，而 store 拒绝半读——结果就是用户的所有设置被静默重置。
+- **重建时机**：每次事件 + 至多每秒一次（状态机会按时钟老化，只在事件时重建会错过它）。管理器不参与：[`MainWindow` 的 1s ticker] 只刷管理器的副本，宠物自己走这条路径。
+
+### 6.6 状态栏 tap：上下文用量的唯一来源（2026-09-14）
+
+hook payload **不含**任何 token 计数——在 2.1.268 的二进制里逐字段确认过：`used_percentage` / `context_window` 只出现在**状态栏** JSON 的 schema 中（`context_window.used_percentage`、`context_window_size`、`total_input_tokens`、`session_name`、`workspace.repo.name`）。这个数字只有 Claude Code 自己算得对：上下文窗口大小取决于模型，而网关背后的模型名外部无从得知（本机实测同一条会话已占用 302k token）。
+
+因此 tap 的做法是**包住用户已有的状态栏命令**，而不是替换它：
+
+```
+statusLine.command = "<shim>" --agent claude-code --statusline --original <base64(原命令)>
+```
+
+- shim 依次做两件事：把 stdin 的 JSON **减字段**（`session_id` / `session_name` / `used_percentage` / `window` / `tokens` / `repo 或 project 目录名`，与原命令无关的 transcript_path、cost、rate_limits 全部丢弃），投递到 bridge；然后 `bash -c` 运行原命令，**stdin 原样传入、stdout/stderr 原样透传、退出码原样返回**。Claude Code 看到的仍是它原来的状态栏。
+- **永不 spool**：状态栏每次渲染都会被调用，spool 会被同一事实的副本淹没。投递失败即丢弃。
+- **协议**：`Statusline` 事件 → 规则 kind `.contextUpdate` → `AgentEvent.context`。引擎里它走独立路径：**不改状态、不刷新 `updatedAt`、不参与超时**——状态栏在提示符处也在渲染，若算作"活着"，用户中断的回合会永远显示 running。它同时是"这个会话存在"的证据：对未知会话会创建一条 `idle` 活动（这就是重启后面板能立刻列全开会话的原因）。
+- **敏感度**：`session_name` 是用户自己起的名字（`/rename`），显示在用户自己的屏幕上，但不进任何日志（不在 `EventCapture.capturableKeys`，也不在 shim 的归约之外）。
+- **事务与可撤销**：走与 hook 相同的 `ConfigTransaction`；`entriesPresent` 检查"现在文件里的命令是否仍是我们写的那条"；若用户后来自己改了状态栏则显示 drifted，卸载时**不动别人的东西**。记录里 `statusLine.original` 保存原命令用于还原；没有原命令时卸载会把 `statusLine` 键整个删掉（不留空壳）。
+- **幂等与去嵌套**：重装时先解包——识别依据是 `--original` 的 base64 内容而不是 shim 路径，所以 app 换位置后重装得到的是"包住原命令的新 wrapper"，而不是"wrapper 套 wrapper"。
+
 ---
 
 ## 7. 校验规格（补齐 §8.4 "Validate atlas"）

@@ -41,6 +41,10 @@ enum CommandLineTool {
       Nothing is uploaded. The runtime reads session ids, working
       directories, and event names — never prompts, model output, or source.
 
+      Context usage is off by default. Turning it on in the manager wraps
+      Claude Code's status line: the runtime keeps the token counts it
+      reports, and runs your own status line command unchanged.
+
       Events that arrive while the app is not running are held in
       pending-events/ and replayed at the next launch, reduced to those same
       fields. Files are written owner-only (0600) and removed as they are read.

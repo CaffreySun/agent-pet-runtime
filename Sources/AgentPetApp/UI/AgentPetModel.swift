@@ -28,6 +28,7 @@ final class AgentPetModel: ObservableObject {
 
     let integrationService: AgentIntegrationService
     let transaction: ConfigTransaction
+    let root: URL
 
     /// Resolved at launch and passed in; the UI never guesses it.
     let shimPath: String
@@ -41,6 +42,7 @@ final class AgentPetModel: ObservableObject {
         shimPath: String,
         onActivitiesChanged: @escaping ([AgentActivity], String?) -> Void = { _, _ in }
     ) {
+        self.root = root
         self.shimPath = shimPath
         self.transaction = ConfigTransaction(
             backupDirectory: root.appendingPathComponent("backups")
@@ -181,6 +183,49 @@ final class AgentPetModel: ObservableObject {
 
     /// Set by the app to switch the desktop pet.
     var onUsePet: ((PetLibrary.Entry) -> Void)?
+
+    // MARK: - Context usage (the status-line tap)
+
+    /// Where a session's context usage comes from.
+    ///
+    /// Hooks do not carry token counts; Claude Code hands them to the status
+    /// line instead. The tap runs this app's shim as the status line and
+    /// passes the user's own command through it untouched — which is why it
+    /// is a switch the user throws, not something installed on first sight.
+    func statusLineTap() -> StatusLineTap {
+        StatusLineTap(
+            configURL: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude/settings.json"),
+            store: IntegrationStore(directory: root.appendingPathComponent("integrations")),
+            transaction: transaction
+        )
+    }
+
+    @Published private(set) var contextTap: StatusLineTap.State = .notInstalled
+
+    func refreshContextTap() {
+        contextTap = statusLineTap().state()
+    }
+
+    func enableContextTap() {
+        run("Context usage is on") {
+            let outcome = try statusLineTap().configure(shimPath: shimPath)
+            statusMessage = outcome.didChange
+                ? "Your status line now runs through the runtime. It keeps working exactly as before."
+                : "Already installed — nothing to change."
+            refreshContextTap()
+        }
+    }
+
+    func disableContextTap() {
+        run("Context usage is off") {
+            let outcome = try statusLineTap().uninstall()
+            statusMessage = outcome.didChange
+                ? "Your original status line is back."
+                : "Nothing to remove."
+            refreshContextTap()
+        }
+    }
 
     // MARK: - Agent actions
 

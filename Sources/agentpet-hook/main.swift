@@ -35,6 +35,15 @@ if arguments.contains("--version") {
     exit(0)
 }
 
+// The status-line tap (opt-in, installed by the manager) runs this shim as
+// Claude Code's status line. Two jobs, in this order: forward a reduced copy
+// of what Claude Code knows to the bridge, then run the command this shim
+// displaced and hand its output through untouched. The user's prompt must look
+// exactly as it did, whatever happens here.
+if arguments.contains("--statusline") {
+    exit(runStatusLineTap(arguments: arguments))
+}
+
 // Grok Build deliberately scans and trusts ~/.claude/settings.json, so the
 // Claude Code hooks installed there also run on Grok's own hook events. Left
 // unguarded they would report every Grok session as a Claude Code one.
@@ -121,6 +130,114 @@ func waitReadable(_ fd: Int32, milliseconds: Int32) -> Bool {
 func controllingTerminal() -> String? {
     guard let pointer = ttyname(STDIN_FILENO) else { return nil }
     return String(cString: pointer)
+}
+
+// MARK: - Status-line tap
+
+/// Runs as Claude Code's status line: reports what it can, then gets out of
+/// the way of the status line the user actually configured.
+///
+/// Returns the exit code of the wrapped command, so this process is invisible
+/// to Claude Code — it sees its own status line, with its own exit code.
+func runStatusLineTap(arguments: [String]) -> Int32 {
+    let input = readStandardInput()
+
+    let agentID = value(of: "--agent") ?? "claude-code"
+    if let reduced = reducedStatusPayload(input) {
+        let envelope = BridgeEnvelope(
+            agentID: agentID,
+            eventName: "Statusline",
+            receivedAt: Date(),
+            proc: BridgeProcessInfo(pid: getpid(), ppid: getppid(), tty: nil),
+            rawPayload: reduced
+        )
+        // Fire and forget, and never spool: a status line renders over and
+        // over, so the next reading is a second away. Writing these down
+        // would fill the spool with duplicates of a fact that is stale by
+        // the time it is read back.
+        _ = deliver(envelope, to: resolveSocketURL())
+    }
+
+    let encoded = value(of: "--original") ?? ""
+    guard let data = Data(base64Encoded: encoded),
+          let original = String(data: data, encoding: .utf8),
+          !original.isEmpty
+    else {
+        // Nothing was displaced — either the tap was installed over a bare
+        // prompt, or this copy of the command is unreadable. Either way the
+        // honest output is none.
+        return 0
+    }
+
+    return runWrapped(original, stdin: input)
+}
+
+/// Reduces Claude Code's status-line JSON to the handful of fields the panel
+/// can use.
+///
+/// An allowlist, like the event log: the payload also carries the transcript
+/// path, cost, and rate-limit state, and none of that belongs anywhere near
+/// this app's files or its socket.
+func reducedStatusPayload(_ input: Data) -> Data? {
+    guard !input.isEmpty,
+          let root = try? JSONSerialization.jsonObject(with: input) as? [String: Any]
+    else { return nil }
+
+    var reduced: [String: Any] = [:]
+    if let sessionID = root["session_id"] as? String { reduced["session_id"] = sessionID }
+    if let name = root["session_name"] as? String, !name.isEmpty { reduced["session_name"] = name }
+
+    let window = root["context_window"] as? [String: Any]
+    if let percent = window?["used_percentage"] as? NSNumber {
+        reduced["used_percentage"] = percent.doubleValue
+    }
+    if let size = window?["context_window_size"] as? NSNumber { reduced["window"] = size.intValue }
+    if let tokens = window?["total_input_tokens"] as? NSNumber { reduced["tokens"] = tokens.intValue }
+
+    // Repository name when there is one, else the project directory: the
+    // closest thing to a task title that does not require reading a transcript.
+    let workspace = root["workspace"] as? [String: Any]
+    let repo = workspace?["repo"] as? [String: Any]
+    if let name = repo?["name"] as? String, !name.isEmpty {
+        reduced["project"] = name
+    } else if let directory = (workspace?["project_dir"] as? String)
+        ?? (workspace?["current_dir"] as? String)
+        ?? (root["cwd"] as? String), !directory.isEmpty {
+        reduced["project"] = (directory as NSString).lastPathComponent
+    }
+
+    guard reduced["session_id"] != nil else { return nil }
+    return try? JSONSerialization.data(withJSONObject: reduced)
+}
+
+/// Runs the displaced status-line command with the same input, passing its
+/// output through untouched.
+func runWrapped(_ command: String, stdin input: Data) -> Int32 {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = ["-c", command]
+    process.standardOutput = FileHandle.standardOutput
+    process.standardError = FileHandle.standardError
+
+    let pipe = Pipe()
+    process.standardInput = pipe
+
+    do {
+        try process.run()
+    } catch {
+        return 0
+    }
+
+    // Written off the main path: a payload larger than the pipe buffer would
+    // otherwise wait for a reader that has not started yet.
+    let handle = pipe.fileHandleForWriting
+    DispatchQueue.global().async {
+        try? handle.write(contentsOf: input)
+        try? handle.close()
+    }
+
+    process.waitUntilExit()
+    return process.terminationStatus
 }
 
 func resolveSocketURL() -> URL {

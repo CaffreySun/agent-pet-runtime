@@ -12,17 +12,41 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var pet: PetConfig
     public var agents: AgentConfig
     public var diagnostics: DiagnosticsConfig
+    public var messagePanel: MessagePanelConfig
 
     public init(
         schemaVersion: Int = AppConfig.currentSchemaVersion,
         pet: PetConfig = PetConfig(),
         agents: AgentConfig = AgentConfig(),
-        diagnostics: DiagnosticsConfig = DiagnosticsConfig()
+        diagnostics: DiagnosticsConfig = DiagnosticsConfig(),
+        messagePanel: MessagePanelConfig = MessagePanelConfig()
     ) {
         self.schemaVersion = schemaVersion
         self.pet = pet
         self.agents = agents
         self.diagnostics = diagnostics
+        self.messagePanel = messagePanel
+    }
+
+    /// Decoded field by field, each with its default.
+    ///
+    /// Synthesised decoding would make every added setting a breaking change:
+    /// a config file written by the previous version has no key for it, the
+    /// decode fails, and `AppConfigStore.load()` — which refuses to half-read
+    /// a file — would quietly reset the user's pet, window, and diagnostics
+    /// choices. A missing key means "not chosen yet", which is exactly what
+    /// the default is for.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = AppConfig()
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+            ?? defaults.schemaVersion
+        pet = try container.decodeIfPresent(PetConfig.self, forKey: .pet) ?? defaults.pet
+        agents = try container.decodeIfPresent(AgentConfig.self, forKey: .agents) ?? defaults.agents
+        diagnostics = try container.decodeIfPresent(DiagnosticsConfig.self, forKey: .diagnostics)
+            ?? defaults.diagnostics
+        messagePanel = try container.decodeIfPresent(MessagePanelConfig.self, forKey: .messagePanel)
+            ?? defaults.messagePanel
     }
 
     public struct PetConfig: Codable, Sendable, Equatable {

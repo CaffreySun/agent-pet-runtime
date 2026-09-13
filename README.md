@@ -171,18 +171,28 @@ direction — the contract's "no-vector deadzone".
 
 Beside the animation, the pet carries the message element Codex's own pet has:
 a short status above the sprite, taken from the same vocabulary — **Running**
-(with "Thinking" under it), **Needs input** when an approval is waiting (with
-the tool it is for), **Ready** when a turn finishes, **Blocked** when one
-fails. Each message expires on Codex's own clock — three minutes for work, an
-hour for a failure, a day for a pending decision, a week for a finished turn —
-and the window grows upward to fit it, so the pet itself never moves.
+**Needs input** when an approval is waiting (with the tool it is for), **Ready**
+when a turn finishes, **Blocked** when one fails — and the window grows upward
+to fit it, so the pet itself never moves.
 
-The second line carries what the event knows: which tool an approval is
-waiting on, what failed, and — when a turn finishes — a preview of the
-assistant's last message, which Claude Code hands to hooks as
+The row is a session: one line per open session, sessions of the same agent
+kept together, the one the pet is showing first. Each row can carry the agent's
+name, the last six characters of the session id, the session's name or project,
+the tool it is currently using, how full its context window is, and the status
+message above. Every item can be toggled and reordered in the manager's
+Settings, and the panel can be set to stay up or to appear only while something
+is happening. The second line of the status message is what the event knows:
+which tool an approval is waiting on, what failed, and — when a turn finishes —
+a preview of the assistant's last message, which Claude Code hands to hooks as
 `last_assistant_message` and Codex shows the same way. It is tidied like
 Codex's (whitespace collapsed, cut to 200 characters), it stays in memory, and
 it never reaches a log file. Nothing you typed is ever shown.
+
+**Context usage** is the one figure hooks do not carry — Claude Code reports it
+only to its status line. Settings offers to tap that: the runtime receives the
+status-line JSON, keeps the reduced few fields, and runs the status line you
+already had through it untouched. It is off until you turn it on, it is
+removed with one button, and it never reads a transcript.
 
 ---
 
@@ -259,7 +269,7 @@ whole of the network surface — nothing else here talks to anything.
 ## Development
 
 ```bash
-swift build && swift test        # 367 tests
+swift build && swift test        # 398 tests
 swift run AgentPet               # run it
 
 swift run AgentPet --diagnose                      # what pets are discoverable, and why

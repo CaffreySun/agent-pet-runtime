@@ -10,6 +10,14 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
     public let kind: AgentEventKind
     /// Top-level payload key to read a human summary from, if present.
     public let summaryField: String?
+    /// Top-level payload key holding a tool *name*.
+    ///
+    /// Tracked separately from `summary` because a summary may be the user's
+    /// prompt — the `UserPromptSubmit` rule reads exactly that field — and the
+    /// message panel draws a session's current tool beside the pet, over
+    /// whatever the user is looking at. A name like `Bash` is a label; a
+    /// prompt is not.
+    public let toolNameField: String?
     /// Top-level payload key to read a second line from, if present.
     ///
     /// Used for Claude Code's `last_assistant_message` on `Stop` — the field
@@ -43,6 +51,7 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
         kind: AgentEventKind,
         summaryField: String? = nil,
         detailField: String? = nil,
+        toolNameField: String? = nil,
         sessionIDField: String? = nil,
         workingDirectoryField: String? = nil,
         whenNotificationType: String? = nil,
@@ -52,6 +61,7 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
         self.kind = kind
         self.summaryField = summaryField
         self.detailField = detailField
+        self.toolNameField = toolNameField
         self.sessionIDField = sessionIDField
         self.workingDirectoryField = workingDirectoryField
         self.whenNotificationType = whenNotificationType
@@ -144,11 +154,24 @@ public struct EventNormalizer: Sendable {
         let summary = Self.string(payload, rule.summaryField)
         let detail = Self.string(payload, rule.detailField)
             .flatMap { PetNotification.preview(of: $0) }
+        let toolName = Self.string(payload, rule.toolNameField)
         let cwd = Self.string(payload, rule.workingDirectoryField)
 
         var focus: FocusTarget = .unavailable
         if let cwd, !cwd.isEmpty {
             focus = .openingDirectory(URL(fileURLWithPath: cwd))
+        }
+
+        // A status-line reading is the one event that describes rather than
+        // moves: it carries what the session's own status line knows (tokens
+        // used, its name, its project) and no state at all.
+        let context = rule.kind == .contextUpdate
+            ? SessionContext.fromStatusPayload(payload, at: envelope.receivedAt)
+            : nil
+        if rule.kind == .contextUpdate, context == nil {
+            // A reading with nothing in it — a session before its first
+            // message reports nulls — is not worth an activity.
+            return []
         }
 
         return [AgentEvent(
@@ -162,8 +185,10 @@ public struct EventNormalizer: Sendable {
             ),
             summary: summary,
             detail: detail,
+            toolName: toolName,
             projectPath: cwd.map { URL(fileURLWithPath: $0) },
-            focusTarget: focus
+            focusTarget: focus,
+            context: context
         )]
     }
 

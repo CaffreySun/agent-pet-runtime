@@ -44,21 +44,24 @@ final class PetController {
     /// sheets — looks like it has duplicate animations.
     private var forcedElapsed: TimeInterval?
 
-    /// The message shown beside the pet, or nil when there is nothing to say.
+    /// The rows shown beside the pet: one per session, grouped by agent.
     ///
-    /// Ported from Codex's ambient pet: each session state speaks in one of
-    /// four kinds, the message is stamped when it is set, and it expires on
-    /// that kind's lifetime.
-    private var message: PetNotification?
+    /// Rebuilt on every event and at most once a second otherwise — the state
+    /// machine ages sessions on a clock, so a panel built only on events would
+    /// go stale while nothing was arriving, and one built sixty times a second
+    /// would be work with no result.
+    private(set) var panel: MessagePanel = .empty
+    private var lastPanelBuild = Date.distantPast
 
-    /// What the view should draw beside the sprite, if anything.
-    var currentNotification: PetNotification? {
-        guard let message, !message.isExpired(at: Date()) else { return nil }
-        return message
-    }
+    /// How the panel is configured. Asked rather than stored, so a change in
+    /// the manager shows up without the controller knowing a window exists.
+    var panelConfig: () -> MessagePanelConfig = { MessagePanelConfig() }
 
-    /// Every rendered frame, with the message that belongs beside it.
-    var onFrame: ((CGImage?, PetNotification?) -> Void)?
+    /// Display names for agents, by id.
+    var agentNames: () -> [String: String] = { [:] }
+
+    /// Every rendered frame, with the panel that belongs beside it.
+    var onFrame: ((CGImage?, MessagePanel) -> Void)?
 
     /// Where the pet is on screen, so gaze can be aimed at the pointer.
     var petCenterProvider: (() -> CGPoint?)?
@@ -96,6 +99,7 @@ final class PetController {
 
     func ingest(_ event: AgentEvent) {
         engine.ingest(event)
+        rebuildPanel(now: Date())
         render()
     }
 
@@ -103,6 +107,7 @@ final class PetController {
         engine.reset()
         lastRenderedState = nil
         gesture = nil
+        panel = .empty
         render()
     }
 
@@ -172,6 +177,8 @@ final class PetController {
         gesture = nil
         drag = nil
         lastRenderedState = nil
+        // A preview is of one animation, not of the user's sessions.
+        panel = .empty
         render()
     }
 
@@ -185,6 +192,7 @@ final class PetController {
     func clearPreview() {
         forcedState = nil
         forcedElapsed = nil
+        rebuildPanel(now: Date())
         render()
     }
 
@@ -221,8 +229,13 @@ final class PetController {
         guard let frames else { return }
         let now = Date()
 
+        // The panel ages on its own — a session goes quiet, a row stops being
+        // worth showing — so it is rebuilt on the clock as well as on events.
+        if now.timeIntervalSince(lastPanelBuild) >= 1 {
+            rebuildPanel(now: now)
+        }
+
         let state = currentState(now: now)
-        updateMessage(for: state, now: now)
 
         let situation = PetSituation(
             agentState: state,
@@ -235,49 +248,20 @@ final class PetController {
         )
 
         let frame = resolver.resolve(situation, profile: frames.profile)
-        onFrame?(frame.flatMap { frames.image(for: $0) }, currentNotification)
+        onFrame?(frame.flatMap { frames.image(for: $0) }, panel)
     }
 
-    /// Keeps the message in step with what the pet is showing.
-    ///
-    /// Codex sets a notification when a turn starts, when an approval is
-    /// asked for, when a turn completes, and when it fails; the message stays
-    /// until it is replaced or its lifetime runs out. Here the state already
-    /// comes from the activity engine, so the message follows it, and the
-    /// lifetimes cap how long a stale one could linger.
-    private func updateMessage(for state: AgentState, now: Date) {
-        guard let kind = PetNotificationKind.forState(state) else {
-            message = nil
-            return
-        }
-        let candidate = PetNotification(
-            kind: kind, body: Self.detail(for: kind, activity: focusedActivity), setAt: now
+    /// Rebuilds the rows from the engine's current view of the world.
+    private func rebuildPanel(now: Date) {
+        lastPanelBuild = now
+        let focused = forcedState != nil ? nil : engine.currentFocus()
+        panel = MessagePanel.build(
+            ranked: engine.rankedActivities(),
+            focusedID: focused?.id,
+            agentNames: agentNames(),
+            config: panelConfig(),
+            now: now
         )
-        // Unchanged means unchanged: re-stamping every frame would keep a
-        // message alive forever instead of letting its lifetime run out.
-        if let current = message, current.kind == candidate.kind, current.body == candidate.body {
-            return
-        }
-        message = candidate
-    }
-
-    /// What the second line can say, per kind.
-    ///
-    /// `review` carries the assistant's message preview — Codex's one filled
-    /// body, here taken from the `last_assistant_message` Claude Code puts on
-    /// every `Stop`, collapsed and cut to Codex's two hundred characters.
-    /// `waiting` and `failed` carry what their events know: which tool an
-    /// approval is for, and what went wrong.
-    ///
-    /// `running` deliberately shows nothing extra: the only text the event
-    /// carries there is the user's prompt, and putting what someone typed on
-    /// a floating panel over their screen is not a trade this app makes.
-    private static func detail(for kind: PetNotificationKind, activity: AgentActivity?) -> String? {
-        switch kind {
-        case .waiting, .failed: return activity?.title
-        case .review:           return activity?.detail
-        case .running:          return nil
-        }
     }
 
     private func currentState(now: Date) -> AgentState {

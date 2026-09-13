@@ -278,6 +278,109 @@ struct BridgeEndToEndTests {
         #expect(engine.currentFocus()?.sessionID == "mid-turn")
     }
 
+    /// Runs the shim in status-line mode with stdout captured — the whole
+    /// point of the tap is that the user's status line comes back out.
+    private func runStatusLineShim(
+        socket: URL,
+        original: String?,
+        stdin: String,
+        spool: URL
+    ) throws -> (status: Int32, stdout: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ShimBinary.path!)
+        let encoded = Data((original ?? "").utf8).base64EncodedString()
+        process.arguments = ["--agent", "claude-code", "--statusline", "--original", encoded]
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["AGENTPET_SOCKET"] = socket.path
+        environment["AGENTPET_SPOOL"] = spool.path
+        process.environment = environment
+
+        let input = Pipe()
+        let output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        try process.run()
+        input.fileHandleForWriting.write(Data(stdin.utf8))
+        input.fileHandleForWriting.closeFile()
+
+        let out = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: out, as: UTF8.self))
+    }
+
+    @Test("the status-line tap reports, then runs the user's own command")
+    func statusLineTap() async throws {
+        let box = EnvelopeBox()
+        let (server, socket) = try makeServer(box)
+        defer { server.stop() }
+
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        // A status line shaped the way the installed build documents it, with
+        // the fields the app must not keep mixed in.
+        let payload = """
+        {
+          "session_id": "6b1e4c2a-0000-0000-0000-000000000000",
+          "session_name": "payment refactor",
+          "transcript_path": "/Users/someone/.claude/projects/p/6b1e4c2a.jsonl",
+          "context_window": {
+            "used_percentage": 61.5,
+            "context_window_size": 200000,
+            "total_input_tokens": 123000
+          },
+          "workspace": { "repo": { "name": "checkout" } },
+          "cost": { "total_cost_usd": 3.5 }
+        }
+        """
+        let hud = "cat > /dev/null; printf 'HUD-OK'"
+        let result = try runStatusLineShim(socket: socket, original: hud, stdin: payload, spool: spool)
+
+        #expect(result.status == 0)
+        #expect(result.stdout == "HUD-OK", "the user's status line must come through untouched")
+
+        #expect(await waitForEnvelopes(box, count: 1))
+        let envelope = try #require(box.envelopes.first)
+        #expect(envelope.eventName == "Statusline")
+        let reduced = try #require(envelope.payloadUTF8)
+        #expect(reduced.contains("61.5"))
+        #expect(reduced.contains("payment refactor"))
+        #expect(reduced.contains("checkout"))
+        #expect(!reduced.contains("transcript_path"),
+                "the status payload carries paths and costs; the socket gets the allowlist")
+        #expect(!reduced.contains("cost"))
+
+        let events = EventNormalizer(profiles: AgentProfiles.all).normalize(envelope)
+        let event = try #require(events.first)
+        #expect(event.kind == .contextUpdate)
+        #expect(event.context?.usedPercent == 61.5)
+        #expect(event.context?.sessionName == "payment refactor")
+    }
+
+    @Test("the wrapped status line still runs when the runtime is not")
+    func statusLineWithoutRuntime() throws {
+        // The worst possible failure mode of this feature is a pet that
+        // breaks the user's prompt when the pet is not even running.
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+        let dead = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-does-not-exist-\(UUID().uuidString).sock")
+
+        let result = try runStatusLineShim(
+            socket: dead, original: "cat > /dev/null; printf 'HUD-OK'; exit 7",
+            stdin: #"{"session_id":"x"}"#, spool: spool
+        )
+        #expect(result.stdout == "HUD-OK")
+        #expect(result.status == 7, "Claude Code must see the wrapped command's own exit code")
+        #expect(EventSpool.pendingCount(in: spool) == 0,
+                "a status line renders constantly; spooling it would fill the spool with duplicates")
+    }
+
     @Test("nothing is spooled while the runtime is listening")
     func liveEventsAreNotSpooled() async throws {
         let box = EnvelopeBox()
