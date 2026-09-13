@@ -54,9 +54,14 @@ enum Diagnose {
         }
         print("")
 
+        // Reporting a missing pet or a missing display *is* the diagnosis.
+        // A non-zero exit here would say "the command failed" when it in fact
+        // did its job, and would fail a CI smoke test on a bare machine.
         if !loadedAny {
             print("No playable pet. The window would show nothing.")
-            return 1
+            print("")
+            print("This is a complete diagnosis; install a pet package to see one.")
+            return 0
         }
 
         let size = PetWindow.defaultSize
@@ -70,7 +75,9 @@ enum Diagnose {
 
         guard let screen = NSScreen.screens.first else {
             print("No displays are available to this process.")
-            return 1
+            print("")
+            print("Expected on a CI runner or over ssh. The pet needs a window server.")
+            return 0
         }
         let origin = PetWindow.defaultOrigin(on: screen)
         print("Pet window would open at:  (\(Int(origin.x)), \(Int(origin.y))) "
