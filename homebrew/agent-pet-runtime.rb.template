@@ -14,15 +14,6 @@ cask "agent-pet-runtime" do
 
   app "AgentPet.app"
 
-  # Quit the running pet before the bundle is replaced. Without this the old
-  # binary keeps running from memory and keeps holding the bridge socket, so
-  # hook events would keep going to a process whose files are gone.
-  preflight_steps do
-    run "/usr/bin/osascript",
-        args:         ["-e", 'tell application "Agent Pet Runtime" to quit'],
-        must_succeed: false
-  end
-
   # The app is ad-hoc signed, not notarised, so macOS quarantines it on
   # download and Gatekeeper reports it as damaged. Stripping the attribute on
   # install is what makes a downloaded copy behave like a built one.
@@ -30,7 +21,28 @@ cask "agent-pet-runtime" do
     run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/AgentPet.app"]
   end
 
-  uninstall quit: "com.dncore.agentpet"
+  # Stop the running pet before the bundle is replaced. Without this the old
+  # binary keeps running from memory, holding the bridge socket, so hook events
+  # go to a process whose files are gone and the update waits for a restart
+  # that may be days away.
+  #
+  # `quit:` asks over an AppleEvent, which macOS permits only from a terminal
+  # that has been granted automation access. Nobody grants it, so in practice
+  # brew warns that the application did not quit and carries on — and that is
+  # also why `signal:` is here: it finds the process through NSWorkspace and
+  # sends SIGTERM, neither of which needs permission. The app turns SIGTERM
+  # into a normal quit (it saves its window position and closes its socket).
+  #
+  # `on_upgrade:` is load-bearing: Homebrew skips signals during an upgrade by
+  # default, on the assumption that the polite quit worked.
+  #
+  # This cannot be a `preflight_steps` run: cask install steps execute inside
+  # Homebrew's seatbelt profile, which denies AppleEvents, process listing
+  # (pgrep fails with "Cannot get process list") and LaunchServices. The
+  # uninstall stanzas run outside it.
+  uninstall quit:       "com.dncore.agentpet",
+            signal:     ["TERM", "com.dncore.agentpet"],
+            on_upgrade: :signal
 
   zap trash: [
     "~/Library/Application Support/AgentPetRuntime",

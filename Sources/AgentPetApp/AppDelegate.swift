@@ -21,7 +21,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let positionKey = "pet.window.origin"
 
+    /// Signal sources that turn a termination signal into a normal quit.
+    ///
+    /// `brew upgrade` stops the old process before replacing the bundle, and
+    /// the cask does it with SIGTERM. Left alone that is an abrupt death: no
+    /// `applicationWillTerminate`, so the window position goes unsaved and the
+    /// bridge socket is left behind for the next launch to clean up. Turning
+    /// the signal into `terminate` makes an upgrade stop the pet exactly the
+    /// way the Quit menu item does.
+    private var terminationSignals: [DispatchSourceSignal] = []
+
+    private func handleTerminationSignals() {
+        for number in [SIGTERM, SIGINT] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler { NSApp.terminate(nil) }
+            source.resume()
+            terminationSignals.append(source)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        handleTerminationSignals()
         buildWindow()
         buildStatusItem()
         var firstFrame = true
