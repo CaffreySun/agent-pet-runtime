@@ -47,8 +47,12 @@ public extension AgentState {
     ///   foot-running", which is exactly what an agent does while working.
     /// - `waiting` is "an expectant asking pose for approval, help, or user
     ///   input", covering both blocking states.
-    /// - `jumping` is "anticipation, lift, peak, descent, and settle" — a
-    ///   celebration, and the only row that fits a task finishing well.
+    /// - `review` is "focused inspection of completed output", which is the
+    ///   row Codex itself plays when a turn completes — the pet looks at what
+    ///   was just made rather than celebrating it.
+    /// - `jumping` is "anticipation, lift, peak, descent, and settle". Codex
+    ///   never plays it for a turn; here it is left to the gesture layer and
+    ///   the animation preview.
     /// - `waving` is "a greeting or attention gesture", which is a reaction to
     ///   the user rather than to the agent, so no state selects it. It plays
     ///   when the pet is clicked.
@@ -64,17 +68,9 @@ public extension AgentState {
         case .running:                 return "running"
         case .waitingInput,
              .waitingApproval:         return "waiting"
-        case .completed:               return "jumping"
+        case .completed:               return "review"
         case .failed:                  return "failed"
         }
-    }
-
-    /// Whether the state's animation is a one-shot that settles afterwards.
-    ///
-    /// A finished task and a failed one are both news; once delivered, the pet
-    /// should stop repeating it.
-    var animationPlaysOnce: Bool {
-        self == .completed || self == .failed
     }
 
     var priorityClass: PriorityClass {

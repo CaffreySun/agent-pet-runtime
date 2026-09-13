@@ -75,19 +75,24 @@ public struct PetSituation: Sendable, Equatable {
     public var gesture: Gesture?
     /// Degrees clockwise from up, or nil when the pointer is in the deadzone.
     public var lookAngle: Double?
+    /// The system asks for reduced motion, and the user has not opted out.
+    /// Codex holds the first frame of whatever would be playing; so does this.
+    public var reducedMotion: Bool
 
     public init(
         agentState: AgentState = .idle,
         agentStateElapsed: TimeInterval = 0,
         drag: Drag? = nil,
         gesture: Gesture? = nil,
-        lookAngle: Double? = nil
+        lookAngle: Double? = nil,
+        reducedMotion: Bool = false
     ) {
         self.agentState = agentState
         self.agentStateElapsed = agentStateElapsed
         self.drag = drag
         self.gesture = gesture
         self.lookAngle = lookAngle
+        self.reducedMotion = reducedMotion
     }
 }
 
@@ -113,12 +118,30 @@ public struct AnimationResolver: Sendable {
     ///    manipulation, and the contract gives locomotion its own rows
     ///    precisely so the pet can walk as it is carried.
     /// 2. **A playing gesture** — a one-shot reaction, until it finishes.
-    /// 3. **Agent state** — what the agent is doing, when it is doing anything.
+    /// 3. **Agent state** — the row for what the agent is doing, played the
+    ///    way Codex plays it: three passes, then the idle row, which is where
+    ///    the loop restarts. The pet keeps breathing while the work continues;
+    ///    the message beside it is what says the work is still happening.
     /// 4. **Gaze** — when the pet would otherwise be idle and the pointer gives
     ///    it a direction to look in. The contract treats this as an
     ///    alternative to idle: with no direction vector it falls back.
     /// 5. **Idle**.
+    ///
+    /// Under reduced motion every layer collapses to the first frame of
+    /// whatever it would have played, which is what Codex does and what the
+    /// system setting asks for.
     public func resolve(_ situation: PetSituation, profile: CompatibilityProfile) -> AnimationFrame? {
+        guard let frame = resolveAnimating(situation, profile: profile) else { return nil }
+        guard situation.reducedMotion else { return frame }
+        return AnimationFrame(
+            trackName: frame.trackName, row: frame.row, column: 0, isFinished: false
+        )
+    }
+
+    private func resolveAnimating(
+        _ situation: PetSituation,
+        profile: CompatibilityProfile
+    ) -> AnimationFrame? {
         // 1. Dragging.
         if let drag = situation.drag,
            let track = profile.track(named: drag.direction.trackName) {
@@ -143,12 +166,18 @@ public struct AnimationResolver: Sendable {
         // went.
         if situation.agentState.priorityClass != .inactive,
            let track = profile.track(named: situation.agentState.animationTrackName) {
-            let resolved = frame(for: track, elapsed: situation.agentStateElapsed)
-            if !resolved.isFinished { return resolved }
-            // A one-shot that has finished yields to the layers beneath it: a
-            // finished task should not hold a frozen celebration, and a failed
-            // one should not hold a frozen grimace.
-            if !situation.agentState.animationPlaysOnce { return resolved }
+            let elapsed = situation.agentStateElapsed
+            let passDuration = track.duration * Double(track.repeats)
+            if elapsed < passDuration {
+                // Inside the passes: the row plays, wrapping each time.
+                return frame(for: track, elapsed: elapsed.truncatingRemainder(dividingBy: track.duration))
+            }
+            // The row has said its piece. Codex hands over to the idle row and
+            // loops there, and gaze stays out of it: the agent is still
+            // working, so the pet should not turn away to watch the pointer.
+            if let idle = profile.track(named: "idle") {
+                return frame(for: idle, elapsed: elapsed - passDuration)
+            }
         }
 
         // 4. Gaze.
@@ -164,15 +193,5 @@ public struct AnimationResolver: Sendable {
         // 5. Idle.
         guard let idle = profile.track(named: "idle") else { return nil }
         return frame(for: idle, elapsed: situation.agentStateElapsed)
-    }
-
-    /// The state a session settles into once a one-shot has finished.
-    ///
-    /// `completed` is the one state whose reaction is itself the message — once
-    /// the celebration is over there is nothing left to say, so the pet
-    /// returns to idle rather than celebrating forever.
-    public func settledState(after gesture: AnimationTrack, from state: AgentState) -> AgentState {
-        if state == .completed { return .idle }
-        return state
     }
 }

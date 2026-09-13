@@ -63,6 +63,11 @@ final class PetController {
     /// Where the pet is on screen, so gaze can be aimed at the pointer.
     var petCenterProvider: (() -> CGPoint?)?
 
+    /// Whether to hold still. The answer is the user's setting *and* the
+    /// system's request, and it changes while the app runs, so it is asked
+    /// rather than stored.
+    var shouldReduceMotion: () -> Bool = { false }
+
     init(tuning: ActivityTuning = .default) {
         self.engine = ActivityEngine(tuning: tuning)
     }
@@ -225,7 +230,8 @@ final class PetController {
             drag: drag.map { PetSituation.Drag(direction: $0.direction,
                                                elapsed: now.timeIntervalSince($0.startedAt)) },
             gesture: activeGesture(now: now),
-            lookAngle: gazeAngle()
+            lookAngle: gazeAngle(),
+            reducedMotion: shouldReduceMotion()
         )
 
         let frame = resolver.resolve(situation, profile: frames.profile)
@@ -257,12 +263,11 @@ final class PetController {
 
     /// What the second line can say, per kind.
     ///
-    /// Codex fills exactly one body — the assistant's message preview for
-    /// `review` — from a model stream this runtime is not: the shim forwards
-    /// event metadata, never model output, so there is nothing to preview and
-    /// the label stands alone. `waiting` and `failed` do have specifics worth
-    /// showing, and they are the ones Codex's own desktop notifications show
-    /// too: the tool an approval is for, and what went wrong.
+    /// `review` carries the assistant's message preview — Codex's one filled
+    /// body, here taken from the `last_assistant_message` Claude Code puts on
+    /// every `Stop`, collapsed and cut to Codex's two hundred characters.
+    /// `waiting` and `failed` carry what their events know: which tool an
+    /// approval is for, and what went wrong.
     ///
     /// `running` deliberately shows nothing extra: the only text the event
     /// carries there is the user's prompt, and putting what someone typed on
@@ -270,7 +275,8 @@ final class PetController {
     private static func detail(for kind: PetNotificationKind, activity: AgentActivity?) -> String? {
         switch kind {
         case .waiting, .failed: return activity?.title
-        case .running, .review: return nil
+        case .review:           return activity?.detail
+        case .running:          return nil
         }
     }
 

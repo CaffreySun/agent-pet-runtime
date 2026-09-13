@@ -138,9 +138,17 @@ session as Claude Code.
 
 The published pet contract defines nine standard animation rows plus sixteen
 gaze poses, each with **per-frame timings in milliseconds**. They are not
-uniform: `idle` runs `280, 110, 110, 140, 140, 320` — a breath, with the ends
-held two to three times as long as the middle. A single frame rate cannot
-reproduce that, so the runtime stores a duration per frame.
+uniform: the authored `idle` is `280, 110, 110, 140, 140, 320` — a breath, with
+the ends held two to three times as long as the middle — and Codex plays it six
+times slower, which is what this runtime plays too. A single frame rate cannot
+reproduce any of it, so the runtime stores a duration per frame.
+
+Playback follows Codex's shape exactly: a state's row plays **three times** and
+then hands over to the idle row, which loops from there. A pet that repeated
+its working pose for as long as the agent worked would be a twitch; this one
+does its bit and then breathes, and the message beside it is what keeps saying
+what is happening. When the system asks for reduced motion, everything holds a
+single frame.
 
 Playback is layered, first match wins:
 
@@ -166,10 +174,12 @@ fails. Each message expires on Codex's own clock — three minutes for work, an
 hour for a failure, a day for a pending decision, a week for a finished turn —
 and the window grows upward to fit it, so the pet itself never moves.
 
-Codex fills exactly one of those second lines from the assistant's message, a
-preview this runtime deliberately cannot see: the bridge forwards event
-metadata, never model output. The second line shows what the events do carry —
-which tool is waiting, what failed — and nothing from what you typed.
+The second line carries what the event knows: which tool an approval is
+waiting on, what failed, and — when a turn finishes — a preview of the
+assistant's last message, which Claude Code hands to hooks as
+`last_assistant_message` and Codex shows the same way. It is tidied like
+Codex's (whitespace collapsed, cut to 200 characters), it stays in memory, and
+it never reaches a log file. Nothing you typed is ever shown.
 
 ---
 

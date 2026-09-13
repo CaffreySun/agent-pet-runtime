@@ -130,6 +130,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.onUsePet = { [weak self] pet in
             self?.loadPet(at: pet.root, name: pet.name)
         }
+        // The settings toggle and the system setting both have to be on for
+        // the pet to hold still; the system one alone is what Codex honours.
+        controller.shouldReduceMotion = { [weak model] in
+            guard let model, model.config.pet.respectsReduceMotion else { return false }
+            return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        }
         model.onTestEvent = { [weak self] event in
             self?.controller.ingest(event)
             self?.pushActivities()

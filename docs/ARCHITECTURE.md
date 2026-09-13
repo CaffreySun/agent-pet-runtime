@@ -116,11 +116,11 @@ agent-pet-runtime/
 
 ### 3.1 播放参数是逐帧毫秒，不是帧率
 
-原方案只给了每行**帧数**，据此实现是错的。契约给出**每一帧的毫秒时长**，且**不均匀**：
+原方案只给了每行**帧数**，据此实现是错的。契约给出**每一帧的毫秒时长**，且**不均匀**（下表的 idle 已按 Codex 的播放值，见 §3.1a）：
 
 | 行 | 帧时长 |
 |---|---|
-| 0 `idle` | **280, 110, 110, 140, 140, 320 ms** |
+| 0 `idle` | **1680, 660, 660, 840, 840, 1920 ms**（契约写作 280, 110, … 的 6 倍） |
 | 1 `running-right` | 120 ×7，末帧 220 |
 | 2 `running-left` | 120 ×7，末帧 220 |
 | 3 `waving` | 140 ×3，末帧 280 |
@@ -134,6 +134,17 @@ agent-pet-runtime/
 `idle` 首末帧是中间帧的 2–3 倍长——那是**呼吸**，不是匀速循环。用单一 fps 无法表达，近似会走形。
 
 因此 `AnimationTrack` 持有 `frameDurations: [TimeInterval]`，**没有 fps 字段**。
+
+### 3.1a Codex 的播放形状（2026-09-13 对齐，两处独立实现互证）
+
+契约给的是**创作值**；Codex 播放时又叠了两个变换，本运行时现在照做：
+
+1. **idle 放慢 6 倍。** App 端（`ChatGPT.app` 内 `app.asar`，宠物组件）：`her = [280,110,110,140,140,320]`，`ger = her.map(frameDurationMs * 6)`，而 `uer('idle')` 返回的是 `ger`。TUI 端（`codex-rs/tui/src/pets/model.rs::idle_animation`）直接写的就是 1680/660/660/840/840/1920。两处一致，所以 280 是**创作**时长，动画实际播的是 6 倍。
+2. **任何非 idle 状态 = 整行播 3 遍，再落进 idle 段并从那里循环。** App：`uer` 返回 `frames: [...row, ...row, ...row, ...ger], loopStartIndex: 3 * row.length`；TUI：`app_state_animation` 同样是三遍 + `idle_animation().frames`，测试名就叫 `app_running_animation_repeats_then_settles_into_idle`。
+
+本实现落在 `AnimationResolver` 第 3 层：`repeats` 遍之后交给 idle 轨（用剩余时长取帧），因此不需要"播完标记"——`animationPlaysOnce` 与 `settledState` 随之删除。
+
+**与 Codex 无法对齐的两处，均为有意保留**：拖动中的 locomotion 持续循环（Codex 的拖动是另一种状态机，且拖到一半改为发呆不合理）；`waving`/`jumping` 仍是本项目的手势层（点击问候），不套用三遍+沉降。
 
 ### 3.2 轨道分类与驱动源
 
@@ -156,13 +167,15 @@ agent-pet-runtime/
 | `running` | 7 | loop | "active task work or processing, **not literal foot-running**" |
 | `waitingInput` | 6 | loop | "expectant asking pose for approval, help, or user input" |
 | `waitingApproval` | 6 | loop | 同上——atlas 只有一个 waiting 姿态 |
-| `completed` | 4 `jumping` | **once → idle** | "anticipation, lift, peak, descent, and settle"——唯一适合表达"做好了"的行 |
-| `failed` | 5 | **once → idle** | "readable error, sad, or deflated reaction" |
+| `completed` | 8 `review` | 3 遍 → idle | Codex 自己的映射：回合完成时播 review（"focused inspection of completed output"）并发 "Ready" |
+| `failed` | 5 | 3 遍 → idle | "readable error, sad, or deflated reaction"；3 遍之后落进 idle 就是"停止哭丧" |
 | `paused` / `unknown` | 0 | loop | 无可展示信息 |
 
 **`waving`（row 3）不由任何 AgentState 选择。** 契约说它是 "greeting or attention gesture"——那是对**用户**的反应，不是对 Agent 的。本 runtime 用它作为**点击宠物时的问候动作**。
 
-`completed` 与 `failed` 都是 one-shot：播完落到下面的层，而不是冻结在最后一帧。否则任务失败后你会得到一个永远哭丧着脸的宠物。
+`completed` 与 `failed` 走 §3.1a 的播放形状：整行三遍，然后落进 idle 段循环。**没有任何状态会冻结在最后一帧**，也不需要"once"特例——沉降本身就是停止表达。
+
+**reduced motion**：系统要求 + 设置允许时，每一层都退化为所选中帧的第 0 帧（App 的 `uer(e, true)` 就是 `frames:[n[0]]`）。此前 `respectsReduceMotion` 只是个无人读取的设置项，现已接通。
 
 ### 3.4 注视方向（V2 row 9–10）——原方案标为 [未验证] 的问题
 
@@ -524,7 +537,8 @@ Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可
 
 - **正文 == 标签 → 只画一行，否则两行**：Codex 用同样的字符串比较决定终端里占一行还是两行（`notification_height`）。running 的回退正文是 "Thinking"，所以它总是两行。
 - **生命周期从设置时刻起算，状态不变就不重新计时**：渲染循环 60fps，若每帧重打时间戳，一条消息会被无限续命。过期即不再显示，直到状态再次变化。
-- **正文只填 waiting 与 failed**（工具名 / 错误文本，都来自事件元数据）。Codex 唯一填正文的 kind 是 review（助手消息预览），这里留空：事件的 `summary` 在 running 时是用户 prompt，把用户输入摆到悬浮窗上不是本项目的取舍；要补上助手预览就得让 hook 携带模型输出，那会推翻"桥只转发元数据"的既定决策（见 §6.2 与 `CLAUDE.local.md`）。
+- **正文来源**（2026-09-13 修订）：`review` 填助手消息预览——Claude Code 的 `Stop` 自带 `last_assistant_message`（该字段存在的目的就是让 hook 不必去读 transcript），归一化时按 Codex 的 `agent_turn_preview` 处理：折叠空白、截到 200 个字符（按 grapheme 截，emoji 不会被劈开）。`waiting`/`failed` 填工具名 / 错误文本。`running` 仍然不填：那里的 `summary` 是用户 prompt，把用户输入摆到悬浮窗上不是本项目的取舍。
+- **预览只进内存，绝不落盘**：`last_assistant_message` 不在事件日志白名单里（`EventCapture.capturableKeys`），测试断言它既不在名单、也不会出现在记录中。抓包里它只以 `_omitted_keys` 的名字出现。
 - **画在精灵上方，窗口向上生长、原点不动**：等价于 Codex 在精灵上方预留终端行，而不是盖在 transcript 上。窗口高度 = 默认 156pt + 31pt（一行）或 46pt（两行）；`hitTest` 只认精灵区域，点提示文字不会拖动宠物。
 - **与动画的关系**：Codex 用 notification 同时驱动动画（running/waiting/review/failed 行）；本项目的动画已由 Activity Engine 的状态表驱动，提示元素只补文字与生命周期，不再重复驱动动画。
 

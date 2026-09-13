@@ -112,10 +112,14 @@ struct PetsView: View {
                         .frame(height: 240)
                         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
 
-                    Picker("Animation", selection: $previewTrack) {
+                    // No title above the segments: in a pane this narrow the
+                    // label wraps, and the track names already say what this
+                    // is. The accessibility label keeps the meaning.
+                    Picker("Preview animation", selection: $previewTrack) {
                         ForEach(previewTracks, id: \.self) { Text($0).tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    .labelsHidden()
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(pet.name).font(.title2)

@@ -80,3 +80,29 @@ struct PetNotificationTests {
         #expect(PetNotificationKind.forState(.unknown) == nil)
     }
 }
+
+@Suite("Notification previews")
+struct NotificationPreviewTests {
+
+    @Test("whitespace is collapsed and trimmed, as Codex does")
+    func tidiesText() {
+        #expect(PetNotification.preview(of: "  a \n\n b\tc  ") == "a b c")
+        #expect(PetNotification.preview(of: "   \n\t ") == nil)
+        #expect(PetNotification.preview(of: "") == nil)
+    }
+
+    @Test("a long message is cut at two hundred characters")
+    func bounded() {
+        let text = String(repeating: "x", count: 500)
+        #expect(PetNotification.preview(of: text)?.count == 200)
+        #expect(PetNotification.preview(of: text, limit: 10)?.count == 10)
+    }
+
+    @Test("cutting counts characters, so an emoji survives whole")
+    func graphemeSafe() {
+        let text = String(repeating: "🐈", count: 250)
+        let preview = PetNotification.preview(of: text)
+        #expect(preview?.count == 200)
+        #expect(preview?.hasSuffix("🐈") == true)
+    }
+}
