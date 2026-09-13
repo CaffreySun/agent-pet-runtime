@@ -42,3 +42,7 @@ capture*.json
 .idea/
 *.swp
 *~
+
+# Personal Claude Code context. Loads alongside CLAUDE.md; stays local.
+# https://code.claude.com/docs/en/memory
+CLAUDE.local.md
