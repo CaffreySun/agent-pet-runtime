@@ -1,4 +1,4 @@
-name: Release
+name: release
 
 on:
   push:
@@ -18,11 +18,6 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
 
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      sha256: ${{ steps.package.outputs.sha256 }}
-      url: ${{ steps.package.outputs.url }}
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,11 +27,10 @@ jobs:
         id: version
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          # Tags are vX.Y.Z; the bundle wants X.Y.Z.
-          VERSION="${TAG#v}"
-          echo "tag=$TAG"           >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
-          echo "Releasing $TAG as $VERSION"
+          # Tags are vX.Y.Z; the bundle and the cask both want X.Y.Z.
+          echo "tag=$TAG"                     >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}"             >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
 
       - name: Test before shipping
         # A release that fails its own tests is worse than no release.
@@ -48,134 +42,96 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: ./Scripts/build-app.sh
 
-      - name: Package
+      - name: Ad-hoc sign and package
         id: package
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          NAME="AgentPet-${VERSION}.zip"
-          cd build
+          APP="build/AgentPet.app"
+
+          # Ad-hoc: enough for a downloaded copy to run, and enough to keep a
+          # stable bundle identity across launches. A Developer ID would remove
+          # the Gatekeeper warning entirely; until then the cask strips the
+          # quarantine attribute on install.
+          codesign --force --deep --sign - "$APP"
+
           # ditto preserves the bundle's symlinks and metadata; zip(1) does not.
-          ditto -c -k --sequesterRsrc --keepParent AgentPet.app "$NAME"
-          CHECKSUM=$(shasum -a 256 "$NAME" | awk '{print $1}')
-          echo "sha256=$CHECKSUM" >> "$GITHUB_OUTPUT"
-          echo "url=https://github.com/${{ github.repository }}/releases/download/v${VERSION}/${NAME}" >> "$GITHUB_OUTPUT"
-          echo "packaged $NAME"
-          echo "sha256 $CHECKSUM"
+          ZIP="AgentPet-${VERSION}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+
+          SHA256=$(shasum -a 256 "$ZIP" | awk '{print $1}')
+          echo "zip=$ZIP"           >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256"     >> "$GITHUB_OUTPUT"
+          echo "packaged $ZIP"
+          echo "sha256   $SHA256"
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
-          gh release create "$TAG" \
-            "build/AgentPet-${VERSION}.zip" \
-            --title "Agent Pet Runtime ${VERSION}" \
-            --generate-notes \
-            --verify-tag || \
-          gh release upload "$TAG" "build/AgentPet-${VERSION}.zip" --clobber
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${{ steps.package.outputs.zip }}" --clobber
+          else
+            gh release create "$TAG" "${{ steps.package.outputs.zip }}" \
+              --title "Agent Pet Runtime ${{ steps.version.outputs.version }}" \
+              --generate-notes \
+              --verify-tag
+          fi
 
-      - name: Upload the bundle as a build artifact
+      - name: Upload as a build artifact
         uses: actions/upload-artifact@v4
         with:
           name: AgentPet-${{ steps.version.outputs.version }}
-          path: build/AgentPet-${{ steps.version.outputs.version }}.zip
+          path: ${{ steps.package.outputs.zip }}
           retention-days: 30
 
-  homebrew:
-    name: Update the Homebrew formula
-    needs: release
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # Skipped rather than failed when the tap token is absent, so a release
-    # still succeeds for anyone who has not set one up.
-    if: ${{ needs.release.result == 'success' }}
-
-    steps:
-      - name: Check for a tap token
-        id: guard
+      - name: Sync the Homebrew cask
         env:
-          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # A deploy key with write access to the tap repository.
+          TAP_SSH_KEY: ${{ secrets.TAP_SSH_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::notice::HOMEBREW_TAP_TOKEN is not set; skipping the formula update."
-            echo "           See the release section of the README to enable it."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
+          # Not a failure when unset: the release still shipped, and the
+          # checksum is printed so the cask can be updated by hand.
+          if [ -z "$TAP_SSH_KEY" ]; then
+            echo "::notice::TAP_SSH_KEY is not set; skipping the cask update."
+            echo "          URL:    https://github.com/${{ github.repository }}/releases/download/v${VERSION}/AgentPet-${VERSION}.zip"
+            echo "          SHA256: ${SHA256}"
+            exit 0
           fi
 
-      - name: Check out the tap
-        if: steps.guard.outputs.available == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: tap
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes"
 
-      - name: Rewrite the formula
-        if: steps.guard.outputs.available == 'true'
-        env:
-          VERSION: ${{ needs.release.outputs.version }}
-          SHA256: ${{ needs.release.outputs.sha256 }}
-          URL: ${{ needs.release.outputs.url }}
-        run: |
-          # This tap keeps formulae at the repository root, alongside the
-          # others, rather than in a Formula/ directory.
-          cat > tap/agent-pet-runtime.rb <<RUBY
-          class AgentPetRuntime < Formula
-            desc "macOS desktop pet that reacts to what your CLI agents are doing"
-            homepage "https://github.com/${{ github.repository }}"
-            url "${URL}"
-            sha256 "${SHA256}"
-            license "MIT"
-            version "${VERSION}"
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            # A prebuilt app bundle, not a source build: the runtime is a GUI
-            # app and a shim, and compiling Swift on every install would be a
-            # poor experience for something you might install on a whim.
-            depends_on :macos
+          rm -rf /tmp/taptap
+          git clone --quiet git@github.com:dncore/homebrew-agent-pet-runtime.git /tmp/taptap
+          cd /tmp/taptap
 
-            def install
-              prefix.install "AgentPet.app"
-              # The shim has to be reachable on PATH too: the hook commands the
-              # app writes point at wherever it found the binary.
-              bin.install_symlink prefix/"AgentPet.app/Contents/MacOS/agentpet-hook"
-            end
+          # The cask lives in this repository as a template so it can be
+          # reviewed and edited like any other file, rather than assembled
+          # inside the workflow where nobody would notice it changing.
+          sed -e "s/__VERSION__/${VERSION}/" -e "s/__SHA256__/${SHA256}/" \
+            "$GITHUB_WORKSPACE/homebrew/agent-pet-runtime.rb.template" \
+            > Casks/agent-pet-runtime.rb
 
-            def caveats
-              <<~EOS
-                Agent Pet Runtime lives in the menu bar. Launch it with:
-                  open "#{opt_prefix}/AgentPet.app"
+          # A placeholder left behind would ship a cask pointing nowhere.
+          if grep -q "__" Casks/agent-pet-runtime.rb; then
+            echo "::error::the cask still contains unsubstituted placeholders"
+            exit 1
+          fi
 
-                Then connect an agent:
-                  "#{opt_prefix}/AgentPet.app/Contents/MacOS/AgentPet" --configure claude-code
-              EOS
-            end
-
-            test do
-              # The shim must run and must never fail, whatever the state.
-              assert_match version.to_s, shell_output(
-                "#{prefix}/AgentPet.app/Contents/MacOS/agentpet-hook --version"
-              )
-            end
-          end
-          RUBY
-
-          # Strip the heredoc indentation Ruby would otherwise keep.
-          sed -i 's/^          //' tap/agent-pet-runtime.rb
-
-      - name: Commit and push
-        if: steps.guard.outputs.available == 'true'
-        run: |
-          cd tap
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add agent-pet-runtime.rb
-          if git diff --staged --quiet; then
-            echo "formula already current"
+          git add Casks/agent-pet-runtime.rb
+          if git diff --cached --quiet; then
+            echo "cask already current for ${VERSION}"
           else
-            git commit -m "agent-pet-runtime ${VERSION}"
-            git push
-            echo "pushed formula for ${VERSION}"
+            git commit -m "Agent Pet Runtime cask v${VERSION}"
+            git push origin master
+            echo "cask updated to ${VERSION}"
           fi

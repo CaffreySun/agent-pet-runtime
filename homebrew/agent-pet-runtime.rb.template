@@ -1,0 +1,55 @@
+# typed: strict
+# frozen_string_literal: true
+
+cask "agent-pet-runtime" do
+  version "__VERSION__"
+  sha256 "__SHA256__"
+
+  url "https://github.com/dncore/agent-pet-runtime/releases/download/v#{version}/AgentPet-#{version}.zip"
+  name "Agent Pet Runtime"
+  desc "Desktop pet that reacts to what your CLI coding agents are doing"
+  homepage "https://github.com/dncore/agent-pet-runtime"
+
+  depends_on :macos
+
+  app "AgentPet.app"
+
+  # Quit the running pet before the bundle is replaced. Without this the old
+  # binary keeps running from memory and keeps holding the bridge socket, so
+  # hook events would keep going to a process whose files are gone.
+  preflight_steps do
+    run "/usr/bin/osascript",
+        args:         ["-e", 'tell application "Agent Pet Runtime" to quit'],
+        must_succeed: false
+  end
+
+  # The app is ad-hoc signed, not notarised, so macOS quarantines it on
+  # download and Gatekeeper reports it as damaged. Stripping the attribute on
+  # install is what makes a downloaded copy behave like a built one.
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/AgentPet.app"]
+  end
+
+  uninstall quit: "com.dncore.agentpet"
+
+  zap trash: [
+    "~/Library/Application Support/AgentPetRuntime",
+    "~/Library/Preferences/com.dncore.agentpet.plist",
+  ]
+
+  caveats <<~EOS
+    Agent Pet Runtime is ad-hoc signed rather than notarised. If Gatekeeper
+    still objects:
+      xattr -dr com.apple.quarantine "/Applications/AgentPet.app"
+    or right-click the app, choose Open, then Open again.
+
+    It lives in the menu bar. Connect an agent before it will react to
+    anything:
+      "#{appdir}/AgentPet.app/Contents/MacOS/AgentPet" --configure claude-code
+
+    Uninstalling does not remove the hooks it wrote into your agents'
+    configuration files. Remove those first, or they will keep running a
+    shim that is no longer installed:
+      "#{appdir}/AgentPet.app/Contents/MacOS/AgentPet" --unconfigure claude-code
+  EOS
+end

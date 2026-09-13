@@ -23,7 +23,20 @@ Claude Code 弹权限请求，它抬爪子。任务做完，它庆祝一下再�
 
 ## 安装
 
-尚未打包发布。从源码构建：
+```bash
+brew tap dncore/agent-pet-runtime
+brew install --cask agent-pet-runtime
+```
+
+应用是 ad-hoc 签名、未公证，所以 cask 会在安装时移除 macOS 的 quarantine 属性。
+如果仍被 Gatekeeper 拦截：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/AgentPet.app"
+```
+
+<details>
+<summary>或者从源码构建</summary>
 
 ```bash
 git clone https://github.com/dncore/agent-pet-runtime.git
@@ -34,6 +47,14 @@ open build/AgentPet.app
 ```
 
 需要 macOS 14+ 与 Swift 6.1+（Xcode 16.4 或更新）。
+
+</details>
+
+cask 由
+[`homebrew/agent-pet-runtime.rb.template`](homebrew/agent-pet-runtime.rb.template)
+在每次 release 时生成，推送到
+[dncore/homebrew-agent-pet-runtime](https://github.com/dncore/homebrew-agent-pet-runtime)。
+**要改就改这里的模板，不要改 tap。**
 
 ---
 
