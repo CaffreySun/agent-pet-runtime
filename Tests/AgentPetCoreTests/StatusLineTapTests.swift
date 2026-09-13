@@ -188,6 +188,24 @@ struct StatusLineTapTests {
                 "a guarded wrapper is still recognised as ours when re-installing")
     }
 
+    @Test("a command that cannot survive a shell command line is refused")
+    func refusesNulByte() throws {
+        // Everything about the wrapped command is the user's own shell code,
+        // and is meant to stay that way — except a NUL, which would truncate
+        // it as far as the shell is concerned and break their prompt on every
+        // render. Better to install nothing than to write that.
+        let harness = try Harness(settings: #"{ "statusLine": "echo \u0000oops" }"#)
+        defer { harness.cleanup() }
+
+        #expect(throws: ConfigurationError.self) {
+            try harness.tap.configure(shimPath: "/bin/agentpet-hook")
+        }
+        // The file is untouched — still the user's own string, NUL and all —
+        // and nothing was recorded as installed.
+        #expect(harness.object()["statusLine"] as? String == "echo \u{0}oops")
+        #expect(harness.tap.state() == .notInstalled)
+    }
+
     @Test("a status line stored as a plain string is still recognised")
     func plainStringStatusLine() throws {
         let harness = try Harness(settings: #"{ "statusLine": "my-hud" }"#)

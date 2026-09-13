@@ -234,6 +234,13 @@ func reducedStatusPayload(_ input: Data) -> Data? {
 /// Runs the displaced status-line command with the same input, passing its
 /// output through untouched.
 ///
+/// `bash -c`, because that command is shell code by contract: Claude Code
+/// would run it — with this shell environment, this user, every render — and
+/// the point of the tap is that nothing about it changes. It is read from the
+/// user's own `~/.claude/settings.json`, is never derived from anything that
+/// arrives over the socket, and is passed as a single argv element rather
+/// than interpolated into a string we built.
+///
 /// `posix_spawn`, not `Foundation.Process`: measured on this machine, Process
 /// costs about 65 ms per spawn before the child even starts — 2.15 ms against
 /// 66.78 ms for the same trivial command — and that delay lands on the user's
