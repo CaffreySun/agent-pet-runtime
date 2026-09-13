@@ -9,7 +9,59 @@ import Foundation
 /// without a screen.
 enum CommandLineTool {
 
+    static let helpText = """
+    Agent Pet Runtime — a desktop pet for your CLI agents.
+
+    USAGE
+      AgentPet                        Run the pet (menu bar only)
+      AgentPet <command> [options]
+
+    AGENTS
+      --status                        Show each agent's detection and integration
+      --configure <agent-id>          Install hooks for an agent
+      --unconfigure <agent-id>        Remove exactly the hooks it wrote
+
+      Agents: claude-code, grok, codex, pi
+
+    DIAGNOSTICS
+      --diagnose                      Report what is discoverable, and why
+      --diagnose --export-frames <dir>  Write every animation frame to <dir>
+      --selftest                      Render each state and measure the output
+      --log-events <path>             Capture events (off unless asked; see below)
+
+    OTHER
+      --pet <id>                      Start with a specific pet
+      --open-manager                  Open the manager window at launch
+      --verbose                       Log each event as it arrives
+      --verbose-draw                  Log every redraw (very noisy)
+      --help                          Show this
+      --version                       Show the version
+
+    NOTES
+      Nothing is uploaded. The runtime reads session ids, working
+      directories, and event names — never prompts, model output, or source.
+
+      --log-events writes a diagnostic capture and is off by default. It
+      records only the fields diagnosis needs, dropping tool arguments, tool
+      output, and transcript paths. Files are written owner-only (0600).
+
+      Configuring an agent is transactional: snapshot, back up, edit, verify,
+      and restore on any failure. Running it twice changes nothing.
+    """
+
+    /// Flags that print something and exit.
+    static let informationalFlags = ["--help", "-h", "--version"]
+
     static func run(arguments: [String]) -> Int32 {
+        if arguments.contains("--help") || arguments.contains("-h") {
+            print(helpText)
+            return 0
+        }
+        if arguments.contains("--version") {
+            print(version())
+            return 0
+        }
+
         let root = BridgeSocketLocation.applicationSupportDirectory
         let transaction = ConfigTransaction(
             backupDirectory: root.appendingPathComponent("backups")
@@ -148,6 +200,17 @@ enum CommandLineTool {
     }
 
     // MARK: - Helpers
+
+    /// The bundle's version, falling back when run straight from SwiftPM.
+    static func version() -> String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+        switch (short, build) {
+        case let (short?, build?): return "Agent Pet Runtime \(short) (\(build))"
+        case let (short?, nil):    return "Agent Pet Runtime \(short)"
+        default:                   return "Agent Pet Runtime 0.1.0-dev"
+        }
+    }
 
     static func shimPath() -> String {
         let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()

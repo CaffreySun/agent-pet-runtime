@@ -11,7 +11,7 @@ if CommandLine.arguments.contains("--diagnose") {
 
 // Headless operations, so everything the manager window does is also
 // scriptable — and verifiable without a screen.
-let headlessFlags = ["--status", "--configure", "--unconfigure"]
+let headlessFlags = ["--status", "--configure", "--unconfigure", "--help", "-h", "--version"]
 if headlessFlags.contains(where: { CommandLine.arguments.contains($0) }) {
     application.setActivationPolicy(.prohibited)
     exit(CommandLineTool.run(arguments: CommandLine.arguments))

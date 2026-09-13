@@ -70,11 +70,28 @@ jobs:
           plutil -lint build/AgentPet.app/Contents/Info.plist
 
       - name: Smoke-test the app
+        # A hard timeout as well as the job's: a diagnostic that blocks should
+        # fail this step in a minute, not consume the whole job's budget.
+        timeout-minutes: 3
         run: |
           # Catches a crash in the view hierarchy without needing a display.
-          ./build/AgentPet.app/Contents/MacOS/AgentPet --selftest || {
-            echo "::warning::--selftest failed; this is expected on a runner with no displays"
-          }
+          # On a runner with no pets this reports SKIPPED and exits 0.
+          if ! ./build/AgentPet.app/Contents/MacOS/AgentPet --selftest; then
+            echo "::warning::--selftest failed, which can happen on a runner with no displays"
+          fi
+
+      - name: Diagnostic flags must not block
+        timeout-minutes: 2
+        run: |
+          # These are what CI and bug reports run. Any of them hanging is a
+          # defect, and a runner with no user is exactly where it shows up.
+          for flag in --diagnose --status --help; do
+            if ! ./build/AgentPet.app/Contents/MacOS/AgentPet "$flag" >/dev/null 2>&1; then
+              echo "::error::$flag exited non-zero"
+              exit 1
+            fi
+          done
+          echo "diagnostic flags all returned"
 
   lint:
     name: Check for leaked personal data
