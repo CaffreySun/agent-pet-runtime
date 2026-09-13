@@ -194,6 +194,27 @@ func reducedStatusPayload(_ input: Data) -> Data? {
     if let size = window?["context_window_size"] as? NSNumber { reduced["window"] = size.intValue }
     if let tokens = window?["total_input_tokens"] as? NSNumber { reduced["tokens"] = tokens.intValue }
 
+    if let model = root["model"] as? [String: Any],
+       let name = model["display_name"] as? String, !name.isEmpty {
+        reduced["model"] = name
+    }
+    if let effort = root["effort"] as? [String: Any],
+       let level = effort["level"] as? String, !level.isEmpty {
+        reduced["effort"] = level
+    }
+    if let cost = root["cost"] as? [String: Any],
+       let usd = cost["total_cost_usd"] as? NSNumber {
+        reduced["cost_usd"] = usd.doubleValue
+    }
+
+    let limits = root["rate_limits"] as? [String: Any]
+    if let five = (limits?["five_hour"] as? [String: Any])?["used_percentage"] as? NSNumber {
+        reduced["limit_5h"] = five.doubleValue
+    }
+    if let seven = (limits?["seven_day"] as? [String: Any])?["used_percentage"] as? NSNumber {
+        reduced["limit_7d"] = seven.doubleValue
+    }
+
     // Repository name when there is one, else the project directory: the
     // closest thing to a task title that does not require reading a transcript.
     let workspace = root["workspace"] as? [String: Any]
@@ -212,32 +233,76 @@ func reducedStatusPayload(_ input: Data) -> Data? {
 
 /// Runs the displaced status-line command with the same input, passing its
 /// output through untouched.
+///
+/// `posix_spawn`, not `Foundation.Process`: measured on this machine, Process
+/// costs about 65 ms per spawn before the child even starts — 2.15 ms against
+/// 66.78 ms for the same trivial command — and that delay lands on the user's
+/// status line every time it renders. The shim exists to be invisible; an
+/// invisible process cannot cost 65 milliseconds.
 func runWrapped(_ command: String, stdin input: Data) -> Int32 {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/bash")
-    process.arguments = ["-c", command]
-    process.standardOutput = FileHandle.standardOutput
-    process.standardError = FileHandle.standardError
+    var fds: [Int32] = [-1, -1]
+    guard pipe(&fds) == 0 else { return 0 }
 
-    let pipe = Pipe()
-    process.standardInput = pipe
+    var actions: posix_spawn_file_actions_t?
+    posix_spawn_file_actions_init(&actions)
+    defer { posix_spawn_file_actions_destroy(&actions) }
+    // The child reads the payload from us; it keeps our stdout and stderr, so
+    // Claude Code captures exactly what the original command would have
+    // printed.
+    posix_spawn_file_actions_adddup2(&actions, fds[0], STDIN_FILENO)
+    posix_spawn_file_actions_addclose(&actions, fds[0])
+    posix_spawn_file_actions_addclose(&actions, fds[1])
 
-    do {
-        try process.run()
-    } catch {
+    var argv: [UnsafeMutablePointer<CChar>?] = [
+        strdup("/bin/bash"), strdup("-c"), strdup(command), nil,
+    ]
+    defer { argv.forEach { free($0) } }
+
+    var pid: pid_t = 0
+    let spawned = posix_spawn(&pid, "/bin/bash", &actions, nil, argv, environ)
+    close(fds[0])
+    guard spawned == 0 else {
+        close(fds[1])
         return 0
     }
 
-    // Written off the main path: a payload larger than the pipe buffer would
-    // otherwise wait for a reader that has not started yet.
-    let handle = pipe.fileHandleForWriting
-    DispatchQueue.global().async {
-        try? handle.write(contentsOf: input)
-        try? handle.close()
+    if input.count <= 48 * 1024 {
+        // A status-line payload is a few kilobytes and a pipe holds 64: the
+        // common case writes inline, before the child can be waiting.
+        writePayload(fds[1], input)
+        close(fds[1])
+    } else {
+        // Bigger than the pipe buffer, and the command may not read stdin at
+        // all, so this waits on a queue rather than on the user's status line.
+        let fd = fds[1]
+        DispatchQueue.global().async {
+            writePayload(fd, input)
+            close(fd)
+        }
     }
 
-    process.waitUntilExit()
-    return process.terminationStatus
+    var status: Int32 = 0
+    while waitpid(pid, &status, 0) == -1 {
+        if errno != EINTR { return 0 }
+    }
+    return (status & 0x7F) == 0 ? (status >> 8) & 0xFF : 0
+}
+
+/// Writes the whole buffer, tolerating short writes. Used for the payload a
+/// wrapped status-line command reads from its stdin.
+func writePayload(_ fd: Int32, _ data: Data) {
+    var offset = 0
+    data.withUnsafeBytes { raw in
+        guard let base = raw.baseAddress else { return }
+        while offset < data.count {
+            let written = write(fd, base.advanced(by: offset), data.count - offset)
+            if written <= 0 {
+                if errno == EINTR { continue }
+                return
+            }
+            offset += written
+        }
+    }
 }
 
 func resolveSocketURL() -> URL {

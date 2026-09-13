@@ -7,15 +7,79 @@ import Foundation
 /// nothing else, some want only the sessions that need them.
 public struct MessagePanelConfig: Codable, Sendable, Equatable {
 
+    /// How wide the panel may be, as a percentage of the pet's own width.
+    ///
+    /// A percentage rather than points because the pet is what it sits beside:
+    /// 200% is "twice the pet", whatever size that pet draws at.
+    public static let minimumWidthPercent: Double = 100
+    public static let maximumWidthPercent: Double = 200
+
     /// Whether the panel stays up while sessions are idle, or only appears
     /// when something is actually happening.
     public var alwaysVisible: Bool
     /// Display order, left to right within a row.
     public var items: [Item]
+    /// Panel width as a percentage of the pet's width, 100–200.
+    public var widthPercent: Double
+    /// Where the rows sit inside the panel.
+    public var alignment: Alignment
 
-    public init(alwaysVisible: Bool = true, items: [Item] = Kind.allCases.map { Item($0) }) {
+    public init(
+        alwaysVisible: Bool = true,
+        items: [Item] = Kind.allCases.map { Item($0) },
+        widthPercent: Double = MessagePanelConfig.maximumWidthPercent,
+        alignment: Alignment = .left
+    ) {
         self.alwaysVisible = alwaysVisible
         self.items = items
+        self.widthPercent = widthPercent
+        self.alignment = alignment
+    }
+
+    /// Decoded field by field, for the same reason `AppConfig` is: a config
+    /// written by the previous release has no `widthPercent` and would fail
+    /// the whole decode — and the stores refuse to half-read a file, so the
+    /// user's panel would come back as defaults.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = MessagePanelConfig()
+        alwaysVisible = try container.decodeIfPresent(Bool.self, forKey: .alwaysVisible)
+            ?? defaults.alwaysVisible
+        widthPercent = Self.clampWidth(
+            try container.decodeIfPresent(Double.self, forKey: .widthPercent) ?? defaults.widthPercent
+        )
+        alignment = try container.decodeIfPresent(Alignment.self, forKey: .alignment)
+            ?? defaults.alignment
+
+        var decoded = try container.decodeIfPresent([Item].self, forKey: .items) ?? defaults.items
+        // A kind this config has never heard of — one added since it was
+        // written — joins the end of the list rather than being invisible.
+        // The manager has no way to *remove* an item, only to switch it off,
+        // so an absent kind means "older file", not "user's choice".
+        for kind in Kind.allCases where !decoded.contains(where: { $0.kind == kind }) {
+            decoded.append(Item(kind))
+        }
+        items = decoded
+    }
+
+    public static func clampWidth(_ percent: Double) -> Double {
+        min(max(percent, minimumWidthPercent), maximumWidthPercent)
+    }
+
+    public enum Alignment: String, Codable, Sendable, CaseIterable, Identifiable {
+        case left
+        case center
+        case right
+
+        public var id: String { rawValue }
+
+        public var title: String {
+            switch self {
+            case .left:   return "Left"
+            case .center: return "Centre"
+            case .right:  return "Right"
+            }
+        }
     }
 
     public struct Item: Codable, Sendable, Equatable, Identifiable {
@@ -34,8 +98,11 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
         case agent
         case session
         case task
+        case model
         case tool
         case context
+        case cost
+        case limits
         case message
 
         public var id: String { rawValue }
@@ -46,8 +113,11 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
             case .agent:   return "Agent"
             case .session: return "Session"
             case .task:    return "Task"
+            case .model:   return "Model"
             case .tool:    return "Current tool"
             case .context: return "Context used"
+            case .cost:    return "Session cost"
+            case .limits:  return "Rate limits"
             case .message: return "Status message"
             }
         }
@@ -57,9 +127,20 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
             case .agent:   return "Which agent the session belongs to."
             case .session: return "The last six characters of the session id."
             case .task:    return "The session's name, or its repository or project directory."
+            case .model:   return "The model serving the session, and its reasoning effort."
             case .tool:    return "The tool the session is using, while it is working."
             case .context: return "How full the session's context window is. Needs the status line tap."
+            case .cost:    return "Estimated session cost, as Claude Code reports it."
+            case .limits:  return "How much of the 5-hour and 7-day usage windows is gone. Needs the status line tap."
             case .message: return "The same wording the pet has always used: Running, Needs input, Ready, Blocked."
+            }
+        }
+
+        /// Items only a status-line tap can fill.
+        public var needsStatusLine: Bool {
+            switch self {
+            case .context, .cost, .limits, .model: return true
+            case .agent, .session, .task, .tool, .message: return false
             }
         }
     }

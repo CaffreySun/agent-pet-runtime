@@ -75,6 +75,28 @@ struct SettingsView: View {
                 .help("On: the panel is there whenever a session is known. "
                       + "Off: it appears only while something is actually happening.")
 
+            LabeledContent("Width") {
+                HStack(spacing: 8) {
+                    Slider(value: widthPercentBinding, in: 100...200, step: 5)
+                        .frame(minWidth: 120)
+                    TextField("", value: widthPercentBinding, format: .number.precision(.fractionLength(0)))
+                        .frame(width: 46)
+                        .multilineTextAlignment(.trailing)
+                    Text("%")
+                    Stepper("", value: widthPercentBinding, in: 100...200, step: 5)
+                        .labelsHidden()
+                }
+            }
+            .help("Panel width as a percentage of the pet's own width. 200% is twice the pet.")
+
+            Picker("Align", selection: binding(\.messagePanel.alignment)) {
+                ForEach(MessagePanelConfig.Alignment.allCases) { alignment in
+                    Text(alignment.title).tag(alignment)
+                }
+            }
+            .pickerStyle(.segmented)
+            .help("Where the rows sit inside the panel. The pet itself does not move.")
+
             ForEach(Array(model.config.messagePanel.items.enumerated()), id: \.element.kind) { index, item in
                 HStack(spacing: 8) {
                     Toggle(item.kind.title, isOn: itemEnabledBinding(index))
@@ -121,17 +143,29 @@ struct SettingsView: View {
     private var contextTapSummary: String {
         switch model.contextTap {
         case .notInstalled:
-            return "Context usage is not available yet: Claude Code only reports it to its "
-                + "status line. Enabling wraps your status line — the runtime reads the "
-                + "numbers, then runs your own command unchanged."
+            return "Model, context, cost, and rate limits are not available yet: Claude Code "
+                + "reports them only to its status line. Enabling wraps your status line — "
+                + "the runtime reads those numbers, then runs your own command unchanged. "
+                + "It takes effect immediately, and removing it puts your command back."
         case .installed(let original):
             return original == nil || original!.isEmpty
-                ? "Reading context usage from Claude Code’s status line."
-                : "Reading context usage from Claude Code’s status line, and running yours through it unchanged."
+                ? "Reading model, context, cost, and rate limits from Claude Code’s status line."
+                : "Reading model, context, cost, and rate limits from Claude Code’s status line, "
+                + "and running yours through it unchanged."
         case .drifted:
             return "The status line in ~/.claude/settings.json is no longer the one the runtime "
                 + "installed — something else changed it. Re-enabling wraps whatever is there now."
         }
+    }
+
+    private var widthPercentBinding: Binding<Double> {
+        Binding(
+            get: { model.config.messagePanel.widthPercent },
+            set: { newValue in
+                model.config.messagePanel.widthPercent = MessagePanelConfig.clampWidth(newValue)
+                model.saveConfig()
+            }
+        )
     }
 
     private func itemEnabledBinding(_ index: Int) -> Binding<Bool> {

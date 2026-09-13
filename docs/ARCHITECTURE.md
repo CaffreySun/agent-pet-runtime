@@ -570,9 +570,14 @@ Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可
 | `agent` | 显示名 | `AgentProfiles.displayName` |
 | `session` | session id **后六位** | `AgentActivity.sessionID` |
 | `task` | 会话名 > 仓库名 > 目录名 | 状态栏 tap（名字/仓库）或 `focusTarget`（cwd） |
+| `model` | 模型显示名，有 effort 时拼 `· level` | 状态栏 tap |
 | `tool` | 当前工具，**仅 `running` 时显示** | 规则的 `toolNameField`（**不是** `summary`） |
 | `context` | 百分比 + 荧光绿横条（#39FF14） | 状态栏 tap；无 tap 则该项不画 |
+| `cost` | 会话估计花费 `$x.xx` | 状态栏 tap |
+| `limits` | `5h 41% · 7d 13%` | 状态栏 tap |
 | `message` | §6.4 的标签（+ 正文） | 每个会话自己的状态 |
+
+**字号、宽度、对齐（2026-09-14 追加）**：行高 18pt，agent 11.5pt semibold、其余 10.5pt、session 用等宽；面板宽度 = 宠物宽度的百分比（设置里 100–200%，滑杆 + 数值框 + 加减按钮，默认 200%），文字可宽于宠物本体；对齐可选左/中/右——**对齐只动行内文字，不动宠物**（窗口始终以精灵为轴左右对称生长）。
 
 规则与理由：
 
@@ -581,8 +586,9 @@ Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可
 - **idle 行有寿命**：终端被关掉时不会有 `SessionEnd`，一行"闲置会话"如果常驻，就会在宠物旁边飘一辈子。闲置行（`state == .idle`）在 `max(updatedAt, context.capturedAt)` 之后 10 分钟消失；状态栏还在报数的会话因此一直可见（它确实还活着）。
 - **`alwaysVisible=false`** 时，面板仅在存在非 idle 会话时出现；出现后显示全部行。
 - **窗口横向也要长**：面板最宽 520pt（超出则截断文本），窗口以精灵为轴左右对称加宽，底边不动——这样宠物在屏幕上纹丝不动。位置持久化存的是**还原到默认宽度时的原点**，否则宽面板一次、窄面板一次地退出会把宠物一步步挪走。
-- **配置**（`AppConfig.messagePanel`）：`alwaysVisible` + 有序 `items`（开关与顺序即数组顺序）。`AppConfig` 改为逐字段 `decodeIfPresent`：合成解码会让"旧版本写下的配置文件缺新键"变成整份配置解码失败，而 store 拒绝半读——结果就是用户的所有设置被静默重置。
+- **配置**（`AppConfig.messagePanel`）：`alwaysVisible` + 有序 `items`（开关与顺序即数组顺序）+ `widthPercent` + `alignment`。两处逐字段 `decodeIfPresent`：`AppConfig` 与 `MessagePanelConfig` 各自实现——合成解码会让"旧版本写下的配置文件缺新键"变成整份配置解码失败，而 store 拒绝半读，结果就是用户的所有设置被静默重置。**新增 item kind 时不需要迁移**：解码时把 items 里不存在的 kind 追加到末尾（管理器只能开关、不能删除条目，所以"缺失"只可能意味着"旧文件"）。
 - **重建时机**：每次事件 + 至多每秒一次（状态机会按时钟老化，只在事件时重建会错过它）。管理器不参与：[`MainWindow` 的 1s ticker] 只刷管理器的副本，宠物自己走这条路径。
+- **诊断行与画面同源**：`--verbose` 的 `[pet] panel:` 行用与绘制相同的 `MessagePanelLayout.items(for:config:)` 构造，不会打印用户已关掉的项。
 
 ### 6.6 状态栏 tap：上下文用量的唯一来源（2026-09-14）
 
@@ -600,6 +606,23 @@ statusLine.command = "<shim>" --agent claude-code --statusline --original <base6
 - **敏感度**：`session_name` 是用户自己起的名字（`/rename`），显示在用户自己的屏幕上，但不进任何日志（不在 `EventCapture.capturableKeys`，也不在 shim 的归约之外）。
 - **事务与可撤销**：走与 hook 相同的 `ConfigTransaction`；`entriesPresent` 检查"现在文件里的命令是否仍是我们写的那条"；若用户后来自己改了状态栏则显示 drifted，卸载时**不动别人的东西**。记录里 `statusLine.original` 保存原命令用于还原；没有原命令时卸载会把 `statusLine` 键整个删掉（不留空壳）。
 - **幂等与去嵌套**：重装时先解包——识别依据是 `--original` 的 base64 内容而不是 shim 路径，所以 app 换位置后重装得到的是"包住原命令的新 wrapper"，而不是"wrapper 套 wrapper"。
+- **自毁保护（2026-09-14）**：wrapper 是 `if [ -x <shim> ]; then …; else <原命令>; fi`。用户 `brew uninstall` 把 app（连同 shim）删掉时，状态栏自动退回他们自己的命令——否则他们的提示符会试图执行一个不存在的路径。fallback 单独成行而不是跟在 `;` 后面：原命令以 `#` 注释结尾时会把后面的东西一起吞掉。
+- **字段范围（对齐官方文档）**：tap 之后 `SessionContext` 覆盖 `context_window.used_percentage/context_window_size/total_input_tokens`、`model.display_name`、`effort.level`、`cost.total_cost_usd`、`rate_limits.five_hour/seven_day.used_percentage`、`session_name`、`workspace.repo.name/project_dir`。**不取**：`transcript_path`（绝不）、`prompt_id`、`cost` 的时长/行数、`rate_limits.*.resets_at`、`prompt_cache.*`、`workspace.added_dirs/git_worktree/host/owner`、`exceeds_200k_tokens`、`thinking`、`fast_mode`、`output_style`、`version`。`session_name` 可能是 AI 生成的会话标题（模型输出）——与助手预览同一决策：只进内存、上屏，不落盘。
+- **成本（实测 2026-09-14，release，arm64）**：裸命令 `sh -c` 6.21ms/次；经 wrapper（shim + bash + 管道）8.19ms/次，即 **tap 只加约 2ms**（hook 事件本身约 7.3ms，同量级）。Claude Code 每次渲染都会调用、300ms 去抖；这个数字必须守住。**注意**：`Foundation.Process` 在本机每次 spawn 要 ~65ms（同一命令 `posix_spawn` 2.15ms / `Process` 66.78ms）——最初版本用 Process 直接给状态栏加了 68ms，已改为 `posix_spawn` + 管道。谁再改这里，先跑基准。
+- **生效时机**：Claude Code 会热重载设置——文档原话 "reloads settings automatically and runs your script as soon as you save the file"，改 `command` 会立即用新命令重跑一次。因此 enable/disable 不需要重启会话。
+
+### 6.7 其他 agent 的状态行能力（2026-09-14 调研，逐本机二进制取证）
+
+面板里 tap 才能提供的项（model/context/cost/limits）在各 agent 上的可得性，按本机安装的具体版本来确认，不靠文档转述：
+
+| Agent | 版本 | 机制 | 结论 |
+|---|---|---|---|
+| Claude Code | 2.1.268 | `statusLine.command`，stdin 传 JSON（§6.6） | **已实现**：tap 直接读取 |
+| Grok Build | 1.0.24 | `[ui.status_line]`，`type = "command"` 时**同一套 JSON 契约**（二进制内置示例：`echo '{"session_id":"t",...,"context_window":{"used_percentage":25}}' \| ./statusline.sh`），300ms 去抖、启动时读取 `config.toml` | **可对接但未接线**：契约与我们 shim 的 `--statusline` 完全一致（`--agent grok` 即可），但安装需要安全地改写 TOML（`ConfigTransaction` 只懂 JSON），且该用户当前 `[ui.status_line]` 未启用（`type="builtin"` 项无法"包裹"，只能替换）。留待需要时做 |
+| Codex | codex-cli 0.153.4 | `tui.status_line = [...]` 只有**内置项**（`context-used` 等，无自定义命令）；`notify` hook 的 payload 不含任何 token 数据 | **不可得**：唯一的替代是读 rollout/transcript，本项目不读 |
+| Pi | @earendil-works/pi-coding-agent | 扩展 API 暴露 `ctx.getContextUsage()`、`ctx.sessionManager.getEntries()`（token 统计）、`ctx.model`（类型定义原文："Context usage on ctx.getContextUsage(), token stats on ctx.sessionManager.getEntries(), model info on ctx.model"） | **可得但要写扩展**：需要一个 Pi 扩展把 `getContextUsage()` 通过 shim（`--agent pi`）转发给 bridge；未实现 |
+
+三者共同的**不做**：不读 transcript、不读 rollout 文件、不猜窗口大小——这正是 Claude Code 的 `used_percentage` 值得专门包一层的原因（网关模型窗口只有它知道）。
 
 ---
 

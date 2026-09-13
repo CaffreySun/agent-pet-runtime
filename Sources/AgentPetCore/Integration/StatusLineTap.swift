@@ -178,10 +178,28 @@ public struct StatusLineTap: Sendable {
     // MARK: - Commands
 
     /// The command written into `statusLine`.
+    ///
+    /// Wrapped in a guard on the shim's own existence, on its own lines: the
+    /// day this app is deleted — `brew uninstall`, a dragged-to-the-trash
+    /// bundle — the shim goes with it, and without the guard the user's shell
+    /// would try to run a path that no longer exists and their status line
+    /// would break. With it, their own command takes over as if the tap had
+    /// never been there.
+    ///
+    /// The fallback sits on its own line rather than after a `;`, because a
+    /// command ending in a `#` comment would otherwise swallow whatever
+    /// followed it.
     public static func wrapperCommand(shimPath: String, original: String?) -> String {
+        let quoted = HookSetup.shellQuoted(shimPath)
         let encoded = Data((original ?? "").utf8).base64EncodedString()
-        return "\(HookSetup.shellQuoted(shimPath)) --agent claude-code "
-            + "\(modeFlag) \(originalFlag) \(encoded)"
+        let fallback = (original?.isEmpty == false) ? original! : ":"
+        return """
+        if [ -x \(quoted) ]; then
+        \(quoted) --agent claude-code \(modeFlag) \(originalFlag) \(encoded)
+        else
+        \(fallback)
+        fi
+        """
     }
 
     /// The command `wrapper` wraps, or nil when `wrapper` is not one of ours.
@@ -195,8 +213,12 @@ public struct StatusLineTap: Sendable {
               let range = wrapper.range(of: "\(originalFlag) "),
               wrapper.contains(modeFlag)
         else { return nil }
-        let encoded = wrapper[range.upperBound...].trimmingCharacters(in: .whitespaces)
-        guard let data = Data(base64Encoded: encoded) else { return nil }
+        // Only the payload token: a guarded wrapper carries more shell after
+        // it, and decoding all of that as base64 would fail and leave the
+        // wrapper looking like someone else's command.
+        let encoded = wrapper[range.upperBound...]
+            .prefix { !$0.isWhitespace }
+        guard let data = Data(base64Encoded: String(encoded)) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 

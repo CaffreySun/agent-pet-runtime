@@ -108,8 +108,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // between used to reach the engine but not the manager's view of the
         // world, since `model` was still nil when the bridge delivered it.
         buildModel()
-        startBridge()
-        replaySpooledEvents()
+        // A diagnostic run takes none of this: binding the socket would steal
+        // the running pet's events for as long as the self-test lasts, and
+        // replaying the spool would consume—and delete—a user's undelivered
+        // events into a process that is about to exit.
+        if !HeadlessMode.isActive {
+            startBridge()
+            replaySpooledEvents()
+        }
         rebuildMenu()
         checkForUpdatesInBackground()
 
@@ -382,8 +388,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         FileHandle.standardError.write(Data("[pet] panel: \(text)\n".utf8))
     }
 
-    /// Grows the window upward when the panel appears, and sideways when it
-    /// needs the room.
+    /// Grows the window upward when the panel appears, and sideways to the
+    /// width the settings ask for.
     ///
     /// The pet does not move: the window is re-centred on the sprite, so the
     /// pet keeps its place on screen and the panel takes space *above* it,
@@ -392,9 +398,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// downward would move the pet every time a session went to work.
     private func resizeWindow(for panel: MessagePanel, config: MessagePanelConfig) {
         guard let window else { return }
-        let desired = MessagePanelLayout.desiredSize(for: panel, config: config)
-        let width = max(PetWindow.defaultSize.width, desired.width)
-        let height = PetWindow.defaultSize.height + desired.height
+        let plan = MessagePanelLayout.plan(for: panel, config: config)
+        let width = plan.rows.isEmpty
+            ? PetWindow.defaultSize.width
+            : MessagePanelLayout.panelWidth(for: config)
+        let height = PetWindow.defaultSize.height + plan.height
 
         let frame = window.frame
         guard abs(frame.width - width) > 0.5 || abs(frame.height - height) > 0.5 else { return }
