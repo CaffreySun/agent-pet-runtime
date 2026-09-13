@@ -195,7 +195,7 @@ struct IntegrationServiceTests {
 
         let allowedTopLevel: Set<String> = [
             "agentID", "integrationVersion", "status",
-            "configuredAt", "lastValidatedAt", "shimPath", "entries",
+            "configuredAt", "lastValidatedAt", "lastEventAt", "shimPath", "entries",
         ]
         #expect(Set(object.keys).subtracting(allowedTopLevel).isEmpty,
                 "unexpected top-level keys: \(Set(object.keys).subtracting(allowedTopLevel))")
@@ -221,22 +221,67 @@ struct IntegrationServiceTests {
         let outcome = try configurator(harness).configure(
             shimPath: "/bin/agentpet-hook", replacing: nil, now: Date()
         )
-        let evaluator = IntegrationHealthEvaluator(freshnessWindow: 30)
+        try harness.store.save(outcome.record)
+        let evaluator = IntegrationHealthEvaluator()
         let now = Date()
 
         let silent = evaluator.health(
             record: outcome.record, isDetected: true, lastEventAt: nil,
-            entriesPresent: true, now: now
+            entriesPresent: true
         )
-        #expect(silent == .degraded, "configured but silent is not healthy")
+        #expect(silent == .degraded, "hooks that have never fired are unproven")
 
         let live = evaluator.health(
             record: outcome.record, isDetected: true, lastEventAt: now.addingTimeInterval(-5),
-            entriesPresent: true, now: now
+            entriesPresent: true
         )
         #expect(live == .connected)
 
         harness.service.recordEvent(agentID: "claude-code", at: now)
         #expect(harness.service.lastEventAt["claude-code"] == now)
+    }
+
+    @Test("the fact that events arrive survives a restart")
+    func eventTimePersists() throws {
+        // The app is restarted — and `brew upgrade` stops it outright — with
+        // agent sessions still open. If the only evidence that the pipeline
+        // works died with the process, the card came back saying "no events
+        // have arrived recently" about a session that had reported seconds
+        // before the restart.
+        let harness = try Harness(settings: "{}")
+        defer { harness.cleanup() }
+
+        let outcome = try configurator(harness).configure(
+            shimPath: "/bin/agentpet-hook", replacing: nil, now: Date()
+        )
+        try harness.store.save(outcome.record)
+
+        // Whole seconds on purpose: the record is ISO8601 on disk, which has
+        // no sub-second field, and the display never asks for one.
+        let eventTime = Date(timeIntervalSince1970: 1_700_000_000)
+        harness.service.recordEvent(agentID: "claude-code", at: eventTime)
+
+        let restarted = AgentIntegrationService(
+            store: IntegrationStore(directory: harness.root.appendingPathComponent("integrations")),
+            detector: AgentDetector(specifications: [], readVersions: false)
+        )
+        #expect(restarted.lastEventAt.isEmpty, "a new process starts with no events in memory")
+        #expect(restarted.lastEventDate(agentID: "claude-code") == eventTime)
+
+        // And the record still says only what it is allowed to say.
+        let record = restarted.recordFor(agentID: "claude-code")
+        #expect(record.lastEventAt == eventTime)
+        #expect(record.isConfigured, "recording an event must not disturb the integration")
+    }
+
+    @Test("an unconfigured agent does not grow a record just for being noisy")
+    func noRecordForUnconfiguredAgents() throws {
+        let harness = try Harness(settings: "{}")
+        defer { harness.cleanup() }
+
+        harness.service.recordEvent(agentID: "grok", at: Date())
+        #expect(!FileManager.default.fileExists(
+            atPath: harness.store.url(for: "grok").path
+        ), "there is no card to keep accurate, and no file to leave behind")
     }
 }

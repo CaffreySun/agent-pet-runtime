@@ -85,20 +85,28 @@ struct BridgeEndToEndTests {
     }
 
     /// Runs the shim the way an agent would: argv plus a payload on stdin.
+    ///
+    /// The spool is always redirected to a throwaway directory, so a test that
+    /// deliberately runs the shim with no runtime listening cannot leave
+    /// files in the user's real Application Support directory.
     @discardableResult
     private func runShim(
         socket: URL,
         agent: String,
         event: String,
         payload: String,
+        spool: URL? = nil,
         extraArguments: [String] = []
     ) throws -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ShimBinary.path!)
         process.arguments = ["--agent", agent, "--event", event] + extraArguments
 
+        let spoolDirectory = spool ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
         var environment = ProcessInfo.processInfo.environment
         environment["AGENTPET_SOCKET"] = socket.path
+        environment["AGENTPET_SPOOL"] = spoolDirectory.path
         process.environment = environment
 
         let input = Pipe()
@@ -230,6 +238,62 @@ struct BridgeEndToEndTests {
 
         let status = try runShim(socket: dead, agent: "claude-code", event: "Stop", payload: "{}")
         #expect(status == 0)
+    }
+
+    @Test("an event that outlives the runtime is written down, not lost")
+    func undeliveredEventIsSpooled() throws {
+        // The upgrade path: `brew upgrade --cask` stops the old app, the
+        // hooks keep firing into nothing, and the next launch has to find out
+        // what it missed.
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        let dead = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-does-not-exist-\(UUID().uuidString).sock")
+        let status = try runShim(
+            socket: dead, agent: "claude-code", event: "PreToolUse",
+            payload: #"{"session_id":"mid-turn","cwd":"/tmp/p","tool_name":"Bash","tool_input":{"command":"secret"}}"#,
+            spool: spool
+        )
+        #expect(status == 0, "the agent still sees a clean exit")
+        #expect(EventSpool.pendingCount(in: spool) == 1)
+
+        // ...and the next launch gets a usable event out of it.
+        var replayed: [BridgeEnvelope] = []
+        EventSpool.drain(from: spool) { replayed.append($0) }
+        let envelope = try #require(replayed.first)
+        let payload = try #require(envelope.payloadUTF8)
+        // The key name survives only as an omission marker; the command the
+        // user's agent ran does not survive at all.
+        #expect(!payload.contains("secret"),
+                "the spool is on disk, so it is held to the log's allowlist")
+        #expect(payload.contains("tool_name"))
+
+        let engine = ActivityEngine(clock: ManualActivityClock())
+        for event in EventNormalizer(profiles: AgentProfiles.all).normalize(envelope) {
+            engine.ingest(event)
+        }
+        #expect(engine.currentFocus()?.state == .running)
+        #expect(engine.currentFocus()?.sessionID == "mid-turn")
+    }
+
+    @Test("nothing is spooled while the runtime is listening")
+    func liveEventsAreNotSpooled() async throws {
+        let box = EnvelopeBox()
+        let (server, socket) = try makeServer(box)
+        defer { server.stop() }
+
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        try runShim(socket: socket, agent: "claude-code", event: "Stop",
+                    payload: #"{"session_id":"a"}"#, spool: spool)
+
+        #expect(await waitForEnvelopes(box, count: 1))
+        #expect(EventSpool.pendingCount(in: spool) == 0,
+                "a delivered event must not also be waiting for the next launch")
     }
 
     @Test("an empty payload is delivered rather than dropped")

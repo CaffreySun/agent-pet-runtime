@@ -189,6 +189,90 @@ struct MultiSessionScenarioTests {
         #expect(engine.currentFocus()?.state == .failed)
     }
 
+    // MARK: - Coming back from a restart
+
+    /// The reported symptom: the app is quit, or `brew upgrade` stops it while
+    /// replacing the bundle, and what comes back knows nothing about sessions
+    /// that were mid-turn seconds earlier. With one session that is a mute
+    /// pet; with several it is worse — a subset reports in as each one happens
+    /// to fire its next hook, and the picture the manager builds is neither
+    /// empty nor true.
+    private func spoolDirectory() throws -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-restart-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// Replays the spool into a fresh engine, exactly as the app does at launch.
+    private func relaunch(draining directory: URL) -> ActivityEngine {
+        let (engine, _) = makeEngine()
+        EventSpool.drain(from: directory) { envelope in
+            for event in normalizer.normalize(envelope) { engine.ingest(event) }
+        }
+        return engine
+    }
+
+    @Test("a session that was mid-turn during a restart is not forgotten")
+    func restartKeepsSingleSession() throws {
+        let spool = try spoolDirectory()
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        // The runtime is not running; the session carries on without it.
+        EventSpool.write(envelope("UserPromptSubmit", session: "a", extra: [
+            "prompt": "build the thing",
+        ]), to: spool)
+        EventSpool.write(envelope("PreToolUse", session: "a", at: 1, extra: [
+            "tool_name": "Bash",
+        ]), to: spool)
+
+        let engine = relaunch(draining: spool)
+        #expect(engine.currentFocus()?.state == .running)
+        #expect(engine.currentFocus()?.sessionID == "a")
+        #expect(engine.currentFocus()?.title == "Bash")
+    }
+
+    @Test("with several sessions, what needs the user still wins after a restart")
+    func restartKeepsSeveralSessions() throws {
+        let spool = try spoolDirectory()
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        EventSpool.write(envelope("PreToolUse", session: "a", extra: [
+            "tool_name": "Bash",
+        ]), to: spool)
+        EventSpool.write(envelope("UserPromptSubmit", session: "b", at: 1), to: spool)
+        EventSpool.write(envelope("PermissionRequest", session: "b", at: 2, extra: [
+            "tool_name": "Write",
+        ]), to: spool)
+
+        let engine = relaunch(draining: spool)
+        #expect(engine.allActivities().count == 2, "both sessions were open at the restart")
+        #expect(engine.currentFocus()?.sessionID == "b")
+        #expect(engine.currentFocus()?.state == .waitingApproval,
+                "an approval that arrived during the restart is still the user's turn")
+    }
+
+    @Test("a replayed event is honest about its age")
+    func replayedEventsExpireByTheirOwnClock() throws {
+        let spool = try spoolDirectory()
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        // An event from an hour before the relaunch. Replaying it must not
+        // light the pet up as if the work were happening now.
+        EventSpool.write(envelope("PreToolUse", session: "a", extra: [
+            "tool_name": "Bash",
+        ]), to: spool)
+
+        let (engine, clock) = makeEngine()
+        clock.advance(by: 3600)
+        EventSpool.drain(from: spool) { envelope in
+            for event in normalizer.normalize(envelope) { engine.ingest(event) }
+        }
+
+        #expect(engine.currentFocus()?.state != .running,
+                "an hour-old 'working' event is not current work")
+    }
+
     @Test("a whole trace with several sessions ends in a sensible state")
     func realisticTrace() {
         let (engine, clock) = makeEngine()

@@ -81,25 +81,27 @@ final class AgentPetModel: ObservableObject {
     /// should never be two different answers.
     var onPetsChanged: (([PetLibrary.Entry]) -> Void)?
 
+    /// Full refresh, including detection — which spawns a `--version` process
+    /// per agent, so it runs when the manager opens rather than on a timer.
     func refreshAgents() {
         let profiles = AgentIntegrationRegistry.all(transaction: transaction)
         let detector = AgentDetector(specifications: profiles.map(\.detection))
-        agentStatuses = profiles.map { profile in
-            let detection = detector.detect(profile.detection)
-            let record = integrationService.recordFor(agentID: profile.agentID)
-            let present = profile.configurator.map { $0.entriesPresent(in: record) } ?? false
-            let last = integrationService.lastEventAt[profile.agentID]
-            let health = IntegrationHealthEvaluator().health(
-                record: record,
-                isDetected: detection.isDetected,
-                lastEventAt: last,
-                entriesPresent: present,
-                now: Date()
-            )
-            return AgentStatus(
-                profile: profile, detection: detection, record: record,
-                health: health, lastEventAt: last
-            )
+        agentStatuses = profiles.map { integrationService.status(
+            for: $0, detection: detector.detect($0.detection)
+        ) }
+    }
+
+    /// Re-derives health from the facts that change between full refreshes —
+    /// whether events have arrived, and whether our hooks are still in the
+    /// config file. Detection results are reused.
+    ///
+    /// Without this the card is a photograph: it was computed when the window
+    /// opened, so it kept saying "no events have arrived recently" while event
+    /// after event filled the Activity tab beside it.
+    func refreshAgentHealth() {
+        guard !agentStatuses.isEmpty else { return }
+        agentStatuses = agentStatuses.map {
+            integrationService.status(for: $0.profile, detection: $0.detection)
         }
     }
 

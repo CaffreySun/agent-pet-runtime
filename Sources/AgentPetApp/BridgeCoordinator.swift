@@ -67,19 +67,9 @@ final class BridgeCoordinator {
         let server = BridgeServer(
             socketURL: socketURL,
             handler: { [weak self] envelope in
-                // Hop to the main actor with only Sendable data in hand.
-                let normalized = self?.normalizer.normalize(envelope) ?? []
-                let description = RecentEvent(
-                    agentID: envelope.agentID,
-                    eventName: envelope.eventName,
-                    kind: normalized.first?.kind,
-                    sessionID: normalized.first?.sessionID ?? "-",
-                    at: envelope.receivedAt
-                )
-                Task { @MainActor [weak self] in
-                    self?.capture(envelope)
-                    self?.handle(normalized, description: description)
-                }
+                // The envelope is Sendable; everything else happens on the
+                // main actor, in arrival order.
+                Task { @MainActor [weak self] in self?.deliver(envelope) }
             },
             diagnostic: { message in
                 Task { @MainActor [weak self] in
@@ -99,6 +89,24 @@ final class BridgeCoordinator {
             status.error = "\(error)"
         }
         onStatusChange?()
+    }
+
+    /// Feeds one envelope through the normal path.
+    ///
+    /// Used by the socket and by the replay of events that arrived while the
+    /// app was down, so a replayed event cannot be treated — or counted —
+    /// differently from a live one. Running both here, on the main actor,
+    /// also keeps replayed events in the order they happened.
+    func deliver(_ envelope: BridgeEnvelope) {
+        let events = normalizer.normalize(envelope)
+        capture(envelope)
+        handle(events, description: RecentEvent(
+            agentID: envelope.agentID,
+            eventName: envelope.eventName,
+            kind: events.first?.kind,
+            sessionID: events.first?.sessionID ?? "-",
+            at: envelope.receivedAt
+        ))
     }
 
     func stop() {

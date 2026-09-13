@@ -91,6 +91,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: AgentPetModel
 
+    /// Called once a second while the window is on screen, so the manager
+    /// shows the engine's current view rather than the one it had when the
+    /// last event arrived.
+    var onTick: (() -> Void)?
+
+    private var ticker: Timer?
+
     init(model: AgentPetModel) {
         self.model = model
     }
@@ -108,6 +115,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                 "[pet] manager open: activation policy regular, menu bar visible\n".utf8
             ))
         }
+        startTicking()
 
         if let window {
             window.makeKeyAndOrderFront(nil)
@@ -133,11 +141,29 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        stopTicking()
         NSApp.setActivationPolicy(.accessory)
         if CommandLine.arguments.contains("--verbose") {
             FileHandle.standardError.write(Data(
                 "[pet] manager closed: back to accessory, menu bar hidden\n".utf8
             ))
         }
+    }
+
+    /// One second is the resolution of "state ages out", and it also keeps
+    /// the relative timestamps and the `showing` marker honest.
+    private func startTicking() {
+        guard ticker == nil else { return }
+        onTick?()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onTick?() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        ticker = timer
+    }
+
+    private func stopTicking() {
+        ticker?.invalidate()
+        ticker = nil
     }
 }

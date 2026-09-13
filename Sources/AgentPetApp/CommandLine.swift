@@ -41,6 +41,10 @@ enum CommandLineTool {
       Nothing is uploaded. The runtime reads session ids, working
       directories, and event names — never prompts, model output, or source.
 
+      Events that arrive while the app is not running are held in
+      pending-events/ and replayed at the next launch, reduced to those same
+      fields. Files are written owner-only (0600) and removed as they are read.
+
       --log-events writes a diagnostic capture and is off by default. It
       records only the fields diagnosis needs, dropping tool arguments, tool
       output, and transcript paths. Files are written owner-only (0600).
@@ -91,7 +95,6 @@ enum CommandLineTool {
         let profiles = AgentIntegrationRegistry.all(transaction: transaction)
         let detector = AgentDetector(specifications: profiles.map(\.detection))
         let evaluator = IntegrationHealthEvaluator()
-        let now = Date()
 
         print("Agent integrations")
         print("")
@@ -99,9 +102,11 @@ enum CommandLineTool {
             let detection = detector.detect(profile.detection)
             let record = store.record(for: profile.agentID)
             let present = profile.configurator.map { $0.entriesPresent(in: record) } ?? false
+            // The persisted timestamp is the same evidence the app's card is
+            // built from, so this command agrees with it instead of hedging.
             let health = evaluator.health(
                 record: record, isDetected: detection.isDetected,
-                lastEventAt: nil, entriesPresent: present, now: now
+                lastEventAt: record.lastEventAt, entriesPresent: present
             )
 
             let marker = detection.isDetected ? "●" : "○"
@@ -112,14 +117,16 @@ enum CommandLineTool {
                 print("      version:     \(version)")
             }
             print("      hooks:       \(record.entries.count)")
+            print("      last event:  \(record.lastEventAt.map(Self.timestamp) ?? "never")")
             print("      configurable:\(profile.configurator == nil ? " no" : " yes")")
         }
-
-        print("")
-        print("Note: health reads \"Degraded\" here because this command has no live")
-        print("      event stream to judge freshness against. The app shows Connected")
-        print("      once events actually arrive.")
         return 0
+    }
+
+    private static func timestamp(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = .current
+        return formatter.string(from: date)
     }
 
     // MARK: - Configure

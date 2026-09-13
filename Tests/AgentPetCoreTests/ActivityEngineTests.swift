@@ -376,15 +376,26 @@ struct StaleExpiryTests {
     func runningGoesUnknown() {
         let (engine, clock) = makeEngine()
         engine.ingest(event(.working, agent: "codex", session: "a"))
-        clock.advance(by: 31)
+        clock.advance(by: 301)
         #expect(engine.currentFocus()?.state == .unknown)
+    }
+
+    @Test("a long tool call is still work, not silence")
+    func longToolCallIsNotStale() {
+        // The regression this exists for: a single Bash tool or subagent runs
+        // for minutes with no hook in between. At the old thirty seconds the
+        // pet gave up on a job that was plainly still running.
+        let (engine, clock) = makeEngine()
+        engine.ingest(event(.working, agent: "codex", session: "a"))
+        clock.advance(by: 240)
+        #expect(engine.currentFocus()?.state == .running)
     }
 
     @Test("a silent session is left alone before its timeout")
     func notYetStale() {
         let (engine, clock) = makeEngine()
         engine.ingest(event(.working, agent: "codex", session: "a"))
-        clock.advance(by: 29)
+        clock.advance(by: 299)
         #expect(engine.currentFocus()?.state == .running)
     }
 
@@ -410,7 +421,7 @@ struct StaleExpiryTests {
     func unknownGoesIdle() {
         let (engine, clock) = makeEngine()
         engine.ingest(event(.working, agent: "codex", session: "a"))
-        clock.advance(by: 31)
+        clock.advance(by: 301)
         #expect(engine.currentFocus()?.state == .unknown)
         clock.advance(by: 61)
         #expect(engine.currentFocus()?.state == .idle)
@@ -429,11 +440,11 @@ struct StaleExpiryTests {
         let (engine, clock) = makeEngine()
         engine.ingest(event(.working, agent: "codex", session: "a"))
         for _ in 0..<5 {
-            clock.advance(by: 20)
+            clock.advance(by: 260)
             engine.ingest(event(.working, agent: "codex", session: "a", at: clock.now))
         }
         #expect(engine.currentFocus()?.state == .running, "repeated activity keeps the session live")
-        clock.advance(by: 31)
+        clock.advance(by: 301)
         #expect(engine.currentFocus()?.state == .unknown)
     }
 }

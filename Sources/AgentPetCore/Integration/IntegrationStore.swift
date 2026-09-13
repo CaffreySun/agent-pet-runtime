@@ -107,6 +107,16 @@ public final class AgentIntegrationService: @unchecked Sendable {
     /// Set by the app whenever an event arrives, so health can reflect reality.
     public var lastEventAt: [String: Date] = [:]
 
+    /// When each agent's timestamp was last written to disk. The in-memory
+    /// value above is always current; the file only has to be close enough
+    /// that a restart does not lose the fact that events do arrive.
+    private var lastPersistedAt: [String: Date] = [:]
+
+    /// An event timestamp is written to disk at most this often per agent.
+    /// A working turn emits several events per second, and none of them is
+    /// worth its own atomic file write.
+    public static let lastEventPersistInterval: TimeInterval = 10
+
     public init(
         store: IntegrationStore,
         detector: AgentDetector,
@@ -117,16 +127,34 @@ public final class AgentIntegrationService: @unchecked Sendable {
         self.evaluator = evaluator
     }
 
-    public func statuses(transaction: ConfigTransaction, now: Date = Date()) -> [AgentStatus] {
+    public func statuses(transaction: ConfigTransaction) -> [AgentStatus] {
         AgentIntegrationRegistry.all(transaction: transaction).map { profile in
-            status(for: profile, now: now)
+            status(for: profile)
         }
     }
 
-    public func status(for profile: AgentIntegrationProfile, now: Date = Date()) -> AgentStatus {
-        let detection = detector.detect(profile.detection)
+    public func status(for profile: AgentIntegrationProfile) -> AgentStatus {
+        assemble(profile: profile, detection: detector.detect(profile.detection))
+    }
+
+    /// The same status, for callers that have already run detection.
+    ///
+    /// The manager re-evaluates health on a timer and on every event, and
+    /// detection spawns a `--version` process — so the expensive half is
+    /// passed in rather than repeated.
+    public func status(
+        for profile: AgentIntegrationProfile,
+        detection: DetectionResult
+    ) -> AgentStatus {
+        assemble(profile: profile, detection: detection)
+    }
+
+    private func assemble(
+        profile: AgentIntegrationProfile,
+        detection: DetectionResult
+    ) -> AgentStatus {
         let record = store.record(for: profile.agentID)
-        let lastEvent = lastEventAt[profile.agentID]
+        let lastEvent = lastEventDate(agentID: profile.agentID)
 
         // Only meaningful when we can actually check the file.
         var present = true
@@ -138,8 +166,7 @@ public final class AgentIntegrationService: @unchecked Sendable {
             record: record,
             isDetected: detection.isDetected,
             lastEventAt: lastEvent,
-            entriesPresent: present,
-            now: now
+            entriesPresent: present
         )
 
         return AgentStatus(
@@ -202,6 +229,38 @@ public final class AgentIntegrationService: @unchecked Sendable {
 
     public func recordEvent(agentID: String, at date: Date = Date()) {
         lastEventAt[agentID] = date
+        persistLastEvent(agentID: agentID, at: date)
+    }
+
+    /// The most recent event from an agent, this launch or any earlier one.
+    ///
+    /// Both halves matter: the in-memory half is exact and current, the
+    /// persisted half is what survives a restart — which is the whole point,
+    /// since the app is restarted (or upgraded, which stops it) with agent
+    /// sessions still open.
+    public func lastEventDate(agentID: String) -> Date? {
+        let persisted = store.record(for: agentID).lastEventAt
+        switch (lastEventAt[agentID], persisted) {
+        case let (memory?, disk?): return max(memory, disk)
+        case let (memory?, nil):   return memory
+        case let (nil, disk?):     return disk
+        case (nil, nil):           return nil
+        }
+    }
+
+    private func persistLastEvent(agentID: String, at date: Date) {
+        if let last = lastPersistedAt[agentID],
+           date.timeIntervalSince(last) < Self.lastEventPersistInterval {
+            return
+        }
+        lastPersistedAt[agentID] = date
+
+        var record = store.record(for: agentID)
+        // Only agents with an integration have a card to be accurate about,
+        // and an unconfigured agent has no file to write to anyway.
+        guard record.isConfigured else { return }
+        record.lastEventAt = date
+        try? store.save(record)
     }
 
     /// Direct access for callers that have already run detection and do not

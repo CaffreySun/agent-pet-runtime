@@ -55,7 +55,7 @@
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**关键差异**：Agent 从不连接我们。它们 `fork/exec` 一个 shim，shim 主动写 socket。App 未运行时，事件被静默丢弃（§3.7 of SPEC-REVIEW）。
+**关键差异**：Agent 从不连接我们。它们 `fork/exec` 一个 shim，shim 主动写 socket。App 未运行时，shim 把事件**减字段后落盘**（spool），下次启动回放（§5.4）；在此之前这里是"静默丢弃"，代价是升级/重启后宠物对正在运行的会话一无所知。
 
 ---
 
@@ -305,13 +305,15 @@ completionDwell = 4.0s   // completed 状态至少展示 4s 才可让位给更�
 
 | 当前状态 | 静默阈值 | 超时后转为 |
 |---|---|---|
-| `running` | 30s | `unknown` |
+| `running` | **5min** | `unknown` |
 | `unknown` | 60s | `idle` |
 | `waitingInput` | 不超时 | — （用户可能离开很久） |
 | `waitingApproval` | 5min | `unknown` |
 | `completed` | `completionDwell` | `idle` |
 | `failed` | 10min | `idle` |
 | `idle` | — | — |
+
+**`running` 为什么是 5 分钟而不是 30 秒（2026-09-14 修正）**：hook 只在工具调用前后触发，而**单次** Bash 工具可以跑 2 分钟（默认超时上限 10 分钟）、子 Agent 可以跑更久，中间一个事件都没有。30 秒的阈值意味着宠物在 Agent 明明还在干活时放弃动画——这是"宠物不准"的直接来源。代价：会话在回合中被杀（终端被关且没有 `SessionEnd`）时，会以 `running` 多演 5 分钟才沉降。两害相权取其轻。
 
 ### 4.6 Session 去重
 
@@ -475,6 +477,23 @@ dedupeKey = hash(agentID, eventName, sessionID, payloadEventID)
 ```
 同 (agentID, sessionID, eventName) 在 500ms 内只接受第一条
 ```
+
+### 5.4 未送达事件（spool）——2026-09-14 新增
+
+**问题**：`quit` 后重启、或 `brew upgrade --cask`（先 TERM 掉旧 App 再替换 bundle）期间，hook 照常触发但 socket 不存在，事件被丢弃。结果是宠物重启后对"几秒前还在回合中的会话"一无所知，要等那个会话的下一个 hook 才知道——长工具调用是几分钟之后，多会话时更是只有一部分会陆续报到。用户报告为"重启/升级后无法准确获取 agent 状态，activity 只能抓到部分 session"。
+
+**方案**：shim 投递失败时把事件写进 spool，App 启动时回放。
+
+| 属性 | 取值 | 理由 |
+|---|---|---|
+| 位置 | `~/Library/Application Support/AgentPetRuntime/pending-events/` | 与 socket 同目录，测试可用 `AGENTPET_SPOOL` 覆盖 |
+| 内容 | `EventCapture.sanitizedPayload` 减字段后的信封 | **落盘 = 必须过日志同一条白名单**：session_id、cwd、tool_name、notification_type 等；prompt、tool_input/response、last_assistant_message 一律不写 |
+| 权限 | 文件 0600、目录 0700 | 与事件日志同一标准（不用 `Data.write(.atomic)`：原子写会先建临时文件，权限是 umask 而不是我们的） |
+| 上限 | 200 条，超出删最旧 | 文件名前缀是 16 位零填充毫秒时间戳（**不能用 `%016d`**：该格式读 32 位参数，毫秒时间戳会被截断成负数，排序反转、剪枝删掉最新的） |
+| 回放 | 启动时 drain，按 `receivedAt` 升序 | 与实时事件走同一条 `BridgeCoordinator.deliver`，因此计数、`--log-events`、归一化行为完全一致；读完即删 |
+| 语义 | 回放事件保留**原始时间戳** | 引擎的静默超时按事件自身年龄计算：一小时前的 `working` 回放出来会立刻过期，而不是把宠物点亮 |
+
+回放与实时事件在时间上可能交错：同一个 session 若实时事件先到，旧的回放事件会被引擎乱序保护丢弃（§4.6）——结局仍然是最新状态胜出。
 
 ---
 
@@ -672,18 +691,23 @@ Agent 自己会写配置（Claude Code 的 settings.json 存了大量状态）�
 
 **不写入**：API Key、OAuth token、prompt 内容、模型配置。
 
-### 8.6 持久化状态 vs 派生状态
+### 8.6 持久化状态 vs 派生状态（2026-09-14 修正 health 判据）
 
 ```
 持久化（写 integrations/<agent>.json）:
     notConfigured | configured | configureFailed
+    lastEventAt   ← 唯一持久化的运行时事实：最后一次收到事件的时间戳（限流写，≥10s/次）
 
 派生（每次从现实重新计算，不持久化）:
     detected      ← 可执行文件在哪
-    connected     ← lastEventAt 在 30s 内
-    degraded      ← configured 但 lastEventAt 超过 30s
-    disconnected  ← configured 但配置文件里我们的条目已消失
+    connected     ← configured + 条目在位 + 曾经收到过事件（本次或历史）
+    degraded      ← configured + 条目在位 + 至今一个事件都没收到
+    disconnected  ← configured + 条目在位 + 配置文件里我们的条目已消失
 ```
+
+**判据是"证据"，不是"新鲜度"**：hook 只在回合前后触发，空闲的 Agent 安静几分钟到几小时都正常。原来的判据是"30 秒内有过事件"，于是用户每次停下来读回答，卡片就报 `Degraded — no events have arrived recently`；重启后（时间戳只在内存里）更是必然误报。因此 `lastEventAt` 落盘、`Degraded` 只保留"装好 hook 后从未收到过任何事件"这一种真正需要处理的情况，"最后事件时间"作为**事实**显示在行内，而不是结论。
+
+`Degraded` 的文案据此改为可操作的："Hooks are installed, but no event has ever reached the pet. Agents read their hooks at startup, so restart it once."
 
 UI 显示的组合状态：
 
@@ -691,10 +715,12 @@ UI 显示的组合状态：
 |---|---|---|
 | — | 未检测到 | `Not Detected` |
 | notConfigured | detected | `Detected` + [Configure] |
-| configured | connected | `Connected` ● |
-| configured | degraded | `Degraded` ● (黄) |
+| configured | connected | `Connected` ●（行内显示最后事件时间） |
+| configured | degraded | `Degraded` ● (黄) + 提示重启 Agent |
 | configured | disconnected | `Needs Attention` ! + [Reconfigure] |
 | configureFailed | — | `Error` + [Fix] |
+
+管理窗口打开期间，卡片和 Activity 列表由 1s ticker 驱动重新求值（复用已有的 detection 结果，不重复 spawn `--version`）；此前卡片只是"打开那一刻的快照"，会在事件不断到达时继续显示"没有事件"。
 
 ---
 
@@ -712,7 +738,7 @@ enum RuntimeConstants {
     static let completionDwell : TimeInterval = 4.0
 
     // 静默超时
-    static let runningStale    : TimeInterval = 30
+    static let runningStale    : TimeInterval = 300   // 单次工具调用可以跑好几分钟
     static let unknownStale    : TimeInterval = 60
     static let approvalStale   : TimeInterval = 300
     static let failedStale     : TimeInterval = 600
@@ -722,8 +748,12 @@ enum RuntimeConstants {
     static let dedupeWindow    : TimeInterval = 0.5
     static let shimTimeout     : TimeInterval = 0.1
 
+    // 未送达事件
+    static let spoolMaxEvents  : Int = 200
+    static let spoolDirectory  = "pending-events"
+
     // 集成
-    static let connectedWindow : TimeInterval = 30
+    static let lastEventPersistInterval : TimeInterval = 10   // 时间戳落盘的限流窗口
     static let maxBackups      : Int = 10
 
     // 校验

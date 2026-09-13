@@ -27,6 +27,12 @@ public struct IntegrationRecord: Codable, Sendable, Equatable {
     public var status: IntegrationStatus
     public var configuredAt: Date?
     public var lastValidatedAt: Date?
+    /// When an event last arrived from this agent, across all launches.
+    ///
+    /// Persisted for one reason: health has to survive a restart. Kept only
+    /// as a timestamp — never what the event was — and updated at most every
+    /// few seconds so a burst of tool calls cannot become a burst of writes.
+    public var lastEventAt: Date?
     /// The shim path used at install time, kept even after the shim moves.
     public var shimPath: String?
     public var entries: [WrittenEntry]
@@ -39,6 +45,7 @@ public struct IntegrationRecord: Codable, Sendable, Equatable {
         status: IntegrationStatus = .notConfigured,
         configuredAt: Date? = nil,
         lastValidatedAt: Date? = nil,
+        lastEventAt: Date? = nil,
         shimPath: String? = nil,
         entries: [WrittenEntry] = []
     ) {
@@ -47,6 +54,7 @@ public struct IntegrationRecord: Codable, Sendable, Equatable {
         self.status = status
         self.configuredAt = configuredAt
         self.lastValidatedAt = lastValidatedAt
+        self.lastEventAt = lastEventAt
         self.shimPath = shimPath
         self.entries = entries
     }
@@ -100,20 +108,29 @@ public enum IntegrationHealth: Sendable, Equatable {
 
 /// Derives display health. Kept separate from the stored record so it can be
 /// recomputed on every menu refresh.
+///
+/// Health answers one question: **has this integration been shown to work?**
+/// It deliberately does not ask "how recent was the last event". Hooks fire
+/// around turns — at the start of a prompt, per tool call, at the end of a
+/// turn — so an idle agent is silent for minutes or hours while everything is
+/// fine. Judging that silence as degradation made a working setup report
+/// "Degraded: no events have arrived recently" every time the user stopped to
+/// read the answer, and after a restart it did so with certainty, because the
+/// evidence lived only in memory.
+///
+/// So the evidence is now: has an event ever arrived (persisted, so it
+/// survives relaunches), are our hook entries still in the config file, and is
+/// the agent even installed. `lastEventAt` is still shown — as a fact, on the
+/// card's "Last event" row — rather than as a verdict.
 public struct IntegrationHealthEvaluator: Sendable {
-    /// An event this recent means the pipeline is working end to end.
-    public var freshnessWindow: TimeInterval
 
-    public init(freshnessWindow: TimeInterval = 30) {
-        self.freshnessWindow = freshnessWindow
-    }
+    public init() {}
 
     public func health(
         record: IntegrationRecord,
         isDetected: Bool,
         lastEventAt: Date?,
         entriesPresent: Bool,
-        now: Date,
         failure: String? = nil
     ) -> IntegrationHealth {
         if let failure { return .failed(failure) }
@@ -121,7 +138,6 @@ public struct IntegrationHealthEvaluator: Sendable {
         if !isDetected { return .notDetected }
         guard record.isConfigured else { return .detected }
         if !entriesPresent { return .disconnected }
-        guard let lastEventAt else { return .degraded }
-        return now.timeIntervalSince(lastEventAt) <= freshnessWindow ? .connected : .degraded
+        return lastEventAt == nil ? .degraded : .connected
     }
 }

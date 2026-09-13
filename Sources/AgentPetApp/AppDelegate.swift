@@ -94,8 +94,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         controller.start()
-        startBridge()
+        // The model exists before the bridge does: an event that arrived in
+        // between used to reach the engine but not the manager's view of the
+        // world, since `model` was still nil when the bridge delivered it.
         buildModel()
+        startBridge()
+        replaySpooledEvents()
         rebuildMenu()
         checkForUpdatesInBackground()
 
@@ -148,6 +152,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridge.start()
     }
 
+    /// Replays events that arrived while the app was not running.
+    ///
+    /// A quit-and-relaunch — and above all a `brew upgrade --cask`, which
+    /// stops the old app before replacing it — used to leave the pet with
+    /// amnesia: a session that was mid-turn seconds before the restart was
+    /// invisible until its next hook, which for a long tool is minutes away.
+    /// The shim writes those events down; this hands them to the same path a
+    /// live event takes, oldest first, before anything else is shown.
+    private func replaySpooledEvents() {
+        let replayed = EventSpool.drain { [weak self] envelope in
+            self?.bridge.deliver(envelope)
+        }
+        guard replayed > 0, CommandLine.arguments.contains("--verbose") else { return }
+        FileHandle.standardError.write(Data(
+            "[pet] replayed \(replayed) event(s) that arrived while the app was not running\n".utf8
+        ))
+    }
+
     private func buildModel() {
         let model = AgentPetModel(
             root: BridgeSocketLocation.applicationSupportDirectory,
@@ -191,6 +213,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.currentPetID = selectedPetID
         self.model = model
         self.managerWindow = MainWindowController(model: model)
+        // While the manager is open it has to be true *now*: the engine
+        // expires states on a clock and moves focus without any event, so a
+        // list that only refreshed on events could sit there contradicting
+        // the pet beside it on screen.
+        managerWindow?.onTick = { [weak self] in
+            self?.pushActivities()
+            self?.model?.refreshAgentHealth()
+        }
         pushActivities()
     }
 
