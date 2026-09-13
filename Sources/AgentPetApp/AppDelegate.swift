@@ -357,7 +357,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "🐾"
+
+        // The menu bar shows the pet itself: a template image, so AppKit can
+        // invert it for dark menu bars and for the highlight when the menu is
+        // open. One ink colour and alpha — a colour icon would go unreadable
+        // on one theme or the other. The emoji stands in only when the bundle
+        // has no icon (running from SwiftPM, say).
+        if let image = NSImage(named: "StatusIcon") {
+            image.isTemplate = true
+            item.button?.image = image
+            item.button?.imagePosition = .imageOnly
+        } else {
+            item.button?.title = "🐾"
+        }
         statusItem = item
     }
 

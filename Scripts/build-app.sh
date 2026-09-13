@@ -39,6 +39,13 @@ else
     echo "    no icon found; run Scripts/generate-icon.swift to make one" >&2
 fi
 
+# The menu bar icon: a template image, so AppKit can invert it for dark menu
+# bars and highlights. Both scales, or Retina displays get a blurry one.
+if [ -f "$ROOT/Resources/StatusIcon.png" ]; then
+    install -m 0644 "$ROOT/Resources/StatusIcon.png"    "$APP/Contents/Resources/StatusIcon.png"
+    install -m 0644 "$ROOT/Resources/StatusIcon@2x.png" "$APP/Contents/Resources/StatusIcon@2x.png"
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
