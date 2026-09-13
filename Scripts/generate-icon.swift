@@ -68,8 +68,9 @@ func squirclePath() -> CGPath {
 func drawIcon(in context: CGContext) {
     let shape = squirclePath()
 
-    // Background: a warm-to-cool diagonal, so the pet reads as friendly rather
-    // than as a system utility.
+    // Background: warm paper, not the blue the app used to wear. A white paw
+    // on a blue gradient is Baidu's mark at a glance; a light tile carrying
+    // dark paw prints is the menu bar's own emoji, and belongs to nothing else.
     context.saveGState()
     context.addPath(shape)
     context.clip()
@@ -78,8 +79,8 @@ func drawIcon(in context: CGContext) {
     let gradient = CGGradient(
         colorsSpace: space,
         colors: [
-            CGColor(red: 0.36, green: 0.44, blue: 0.96, alpha: 1),
-            CGColor(red: 0.55, green: 0.36, blue: 0.92, alpha: 1),
+            CGColor(red: 0.99, green: 0.97, blue: 0.92, alpha: 1),
+            CGColor(red: 0.94, green: 0.90, blue: 0.84, alpha: 1),
         ] as CFArray,
         locations: [0, 1]
     )!
@@ -94,7 +95,7 @@ func drawIcon(in context: CGContext) {
     let highlight = CGGradient(
         colorsSpace: space,
         colors: [
-            CGColor(red: 1, green: 1, blue: 1, alpha: 0.22),
+            CGColor(red: 1, green: 1, blue: 1, alpha: 0.55),
             CGColor(red: 1, green: 1, blue: 1, alpha: 0),
         ] as CFArray,
         locations: [0, 1]
@@ -107,47 +108,82 @@ func drawIcon(in context: CGContext) {
     )
     context.restoreGState()
 
-    // Paw print, centred on the content square.
-    let centre = CGPoint(x: canvas / 2, y: canvas / 2)
-    let ink = CGColor(red: 1, green: 1, blue: 1, alpha: 0.97)
-
+    // Two paw prints walking across the tile, back foot first — the menu bar
+    // emoji's arrangement, drawn rather than borrowed: the glyph itself is
+    // Apple's artwork and has no business being baked into a shipped bundle.
+    let ink = CGColor(red: 0.20, green: 0.17, blue: 0.15, alpha: 1)
     context.setFillColor(ink)
 
-    // Main pad: wider than tall, sitting below centre.
-    let padWidth = contentSize * 0.44
-    let padHeight = contentSize * 0.36
-    let pad = CGPath(
-        roundedRect: CGRect(
-            x: centre.x - padWidth / 2,
-            y: centre.y - padHeight * 0.92,
-            width: padWidth,
-            height: padHeight
-        ),
-        cornerWidth: padHeight * 0.46,
-        cornerHeight: padHeight * 0.46,
-        transform: nil
-    )
+    let centre = CGPoint(x: canvas / 2, y: canvas / 2)
+    drawPaw(in: context, centre: CGPoint(x: centre.x - contentSize * 0.185,
+                                         y: centre.y + contentSize * 0.185),
+            size: contentSize * 0.340, rotationDegrees: -18)
+    drawPaw(in: context, centre: CGPoint(x: centre.x + contentSize * 0.185,
+                                         y: centre.y - contentSize * 0.190),
+            size: contentSize * 0.385, rotationDegrees: 12)
+}
+
+/// One cat paw: a heart-topped pad with four toes in an arc above it.
+///
+/// `size` is the pad's width; the toes extend beyond it. Drawn around the
+/// context's current transform so a rotation can tilt the whole print.
+func drawPaw(in context: CGContext, centre: CGPoint, size: Double, rotationDegrees: Double) {
+    context.saveGState()
+    context.translateBy(x: centre.x, y: centre.y)
+    context.rotate(by: CGFloat(rotationDegrees * .pi / 180))
+
+    // Pad. A rounded box reads as a bear's paw — the emoji's is a cat's:
+    // two rounded lobes at the top with a shallow notch between them, and a
+    // broad round base.
+    let w = size
+    let h = size * 0.80
+    let pad = CGMutablePath()
+    pad.move(to: CGPoint(x: -w * 0.48, y: h * 0.02))
+    pad.addCurve(to: CGPoint(x: -w * 0.28, y: h * 0.50),           // up the left side
+                 control1: CGPoint(x: -w * 0.54, y: h * 0.28),
+                 control2: CGPoint(x: -w * 0.46, y: h * 0.50))
+    pad.addCurve(to: CGPoint(x: -w * 0.02, y: h * 0.58),           // left lobe
+                 control1: CGPoint(x: -w * 0.22, y: h * 0.66),
+                 control2: CGPoint(x: -w * 0.10, y: h * 0.68))
+    pad.addCurve(to: CGPoint(x: w * 0.02, y: h * 0.58),            // the notch
+                 control1: CGPoint(x: -w * 0.01, y: h * 0.50),
+                 control2: CGPoint(x: w * 0.01, y: h * 0.50))
+    pad.addCurve(to: CGPoint(x: w * 0.28, y: h * 0.50),            // right lobe
+                 control1: CGPoint(x: w * 0.10, y: h * 0.68),
+                 control2: CGPoint(x: w * 0.22, y: h * 0.66))
+    pad.addCurve(to: CGPoint(x: w * 0.48, y: h * 0.02),            // down the right side
+                 control1: CGPoint(x: w * 0.46, y: h * 0.50),
+                 control2: CGPoint(x: w * 0.54, y: h * 0.28))
+    pad.addCurve(to: CGPoint(x: 0, y: -h * 0.56),                  // the broad base
+                 control1: CGPoint(x: w * 0.48, y: -h * 0.38),
+                 control2: CGPoint(x: w * 0.26, y: -h * 0.56))
+    pad.addCurve(to: CGPoint(x: -w * 0.48, y: h * 0.02),
+                 control1: CGPoint(x: -w * 0.26, y: -h * 0.56),
+                 control2: CGPoint(x: -w * 0.48, y: -h * 0.38))
+    pad.closeSubpath()
     context.addPath(pad)
     context.fillPath()
 
-    // Four toes above the pad, the outer pair set lower so they read as an arc.
-    //
-    // Placed by explicit offsets rather than by angle: an even angular spread
-    // crowds the middle pair together and they merge into one blob, which
-    // stops looking like a paw at small sizes.
-    let toeRadius = contentSize * 0.060
+    // Four toes, the outer pair set lower so they read as an arc. Placed by
+    // explicit offsets rather than by angle: an even angular spread crowds the
+    // middle pair together and they merge into one blob at small sizes.
+    let toeRadius = size * 0.140
     let toes: [(x: Double, y: Double)] = [
-        (-0.200, 0.045), (-0.070, 0.115), (0.070, 0.115), (0.200, 0.045),
+        (-0.430, 0.590), (-0.155, 0.800), (0.155, 0.800), (0.430, 0.590),
     ]
     for toe in toes {
-        let x = centre.x + CGFloat(toe.x) * contentSize
-        let y = centre.y + CGFloat(toe.y) * contentSize
+        let toeWidth = toeRadius * (abs(toe.x) > 0.3 ? 1.70 : 1.58)
+        let toeHeight = toeRadius * 2.05
         context.addEllipse(in: CGRect(
-            x: x - toeRadius, y: y - toeRadius * 0.94,
-            width: toeRadius * 2, height: toeRadius * 1.88
+            x: CGFloat(toe.x) * w - toeWidth / 2,
+            y: CGFloat(toe.y) * h - toeHeight / 2,
+            width: toeWidth,
+            height: toeHeight
         ))
         context.fillPath()
     }
+
+    context.restoreGState()
 }
 
 func write(_ image: CGImage, to url: URL) {
