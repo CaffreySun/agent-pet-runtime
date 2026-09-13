@@ -265,12 +265,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set("\(origin.x),\(origin.y)", forKey: Self.positionKey)
     }
 
+    /// Explains that no pet was found.
+    ///
+    /// Modal only when there is somebody to dismiss it. A `runModal` on a
+    /// machine with no user — a CI runner, most obviously — blocks forever, and
+    /// the app appears to hang rather than to report a missing pet.
     private func presentNoPets() {
+        let searchPaths = PetLibrary.searchPaths.map(\.path)
+
+        guard !HeadlessMode.isActive else {
+            FileHandle.standardError.write(Data("""
+                [pet] no pet packages found. Looked in:
+                \(searchPaths.map { "        \($0)" }.joined(separator: "\n"))
+
+                """.utf8))
+            return
+        }
+
         let alert = NSAlert()
         alert.messageText = "No pet packages found"
         alert.informativeText = """
             Looked in:
-            \(PetLibrary.searchPaths.map { "  \($0.path)" }.joined(separator: "\n"))
+            \(searchPaths.map { "  \($0)" }.joined(separator: "\n"))
             """
         alert.alertStyle = .informational
         alert.runModal()

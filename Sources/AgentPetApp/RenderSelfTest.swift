@@ -42,6 +42,16 @@ enum RenderSelfTest {
         print("Render self-test")
         print("")
 
+        // With no pet installed there is nothing to render, and that is an
+        // environment fact rather than a defect. Reported distinctly so a CI
+        // run on a bare machine does not look like a broken build.
+        guard controller.loadedProfile != nil else {
+            print("  – skipped: no pet packages are installed")
+            print("")
+            print("SKIPPED")
+            return 0
+        }
+
         var failures = 0
         let states: [AgentState] = [.idle, .running, .waitingInput, .waitingApproval,
                                     .completed, .failed, .paused, .unknown]
