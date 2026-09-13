@@ -314,6 +314,9 @@ corrected specification.
 | Pet Manager: list Codex's pets, preview, pick one | done — read-only; pets are installed with Codex's own tooling |
 | Agent Integrations: detect, configure, remove | Claude Code only |
 | Activity Center, Settings, diagnostics export | done |
+| Session panel: one row per session, configurable items | done |
+| Context usage from Claude Code's status line | done — opt-in, wraps your existing status line |
+| Survives restarts and upgrades mid-turn | done — undelivered events are replayed at the next launch |
 | Grok / Codex / Pi configuration | not built — their formats need their own configurators |
 | Window focusing | opens the project folder; hooks carry no terminal identity |
 
