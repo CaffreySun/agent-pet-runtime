@@ -280,7 +280,10 @@ enum RenderSelfTest {
         send(.waitingApproval, agent: "claude-code", session: "cafebabe-2222", at: 0,
              tool: "Write",
              context: SessionContext(usedPercent: 72, totalTokens: 144_000,
-                                     windowSize: 200_000, capturedAt: now))
+                                     windowSize: 200_000, modelName: "Opus 4.6",
+                                     effortLevel: "high", costUSD: 3.42,
+                                     fiveHourPercent: 41, sevenDayPercent: 12,
+                                     capturedAt: now))
         send(.working, agent: "codex", session: "deadbeef-1111", at: 1, tool: "Bash")
 
         let panel = view.currentPanel
@@ -320,24 +323,51 @@ enum RenderSelfTest {
         }
 
         // Positions and sizes, as the window sees them.
-        let desired = MessagePanelLayout.desiredSize(
-            for: panel, config: view.currentPanelConfig
-        )
+        let plan = MessagePanelLayout.plan(for: panel, config: view.currentPanelConfig)
+        let configuredWidth = MessagePanelLayout.panelWidth(for: view.currentPanelConfig)
         let withPanel = contentHash(view)
-        if desired.height > 0, view.spriteRect.height < view.bounds.height {
-            print("  ✓ the pet keeps its place: \(Int(desired.height))pt reserved above it")
+        if plan.height > 0, view.spriteRect.height < view.bounds.height {
+            print("  ✓ the pet keeps its place: \(Int(plan.height))pt reserved above it")
         } else {
             print("  ✗ the panel was drawn over the pet instead of beside it")
             failures += 1
         }
 
         if let window = view.window,
-           abs(window.frame.height - (PetWindow.defaultSize.height + desired.height)) < 1,
-           window.frame.width >= desired.width - 1 {
-            print("  ✓ the window grew to \(Int(window.frame.width))x\(Int(window.frame.height)) for the panel")
+           abs(window.frame.height - (PetWindow.defaultSize.height + plan.height)) < 1,
+           abs(window.frame.width - configuredWidth) < 1 {
+            print("  ✓ the window is \(Int(window.frame.width))x\(Int(window.frame.height)) "
+                  + "— the width the settings asked for")
         } else {
-            print("  ✗ the window did not grow: "
-                  + "\(view.window.map { "\($0.frame.width)x\($0.frame.height)" } ?? "no window")")
+            print("  ✗ the window is wrong: "
+                  + "\(view.window.map { "\($0.frame.width)x\($0.frame.height)" } ?? "no window") "
+                  + "wanting \(configuredWidth) wide")
+            failures += 1
+        }
+
+        // The width and alignment settings have to reach the picture. Width is
+        // checked as arithmetic — the window-level check above already went
+        // through the real resize path — and alignment by what is drawn.
+        var narrow = view.currentPanelConfig
+        narrow.widthPercent = 110
+        let narrowWidth = MessagePanelLayout.panelWidth(for: narrow)
+        if abs(narrowWidth - PetWindow.defaultSize.width * 1.1) <= 1,
+           MessagePanelLayout.panelWidth(for: view.currentPanelConfig) > narrowWidth {
+            print("  ✓ the width setting is a percentage of the pet: 110% → \(Int(narrowWidth))pt")
+        } else {
+            print("  ✗ the width setting does not follow the pet's width")
+            failures += 1
+        }
+
+        var rightAligned = view.currentPanelConfig
+        rightAligned.alignment = .right
+        view.show(panel, config: rightAligned)
+        let rightHash = contentHash(view)
+        view.show(panel, config: view.currentPanelConfig)
+        if rightHash != withPanel {
+            print("  ✓ the alignment setting moves the rows")
+        } else {
+            print("  ✗ alignment changed nothing")
             failures += 1
         }
 
@@ -354,6 +384,22 @@ enum RenderSelfTest {
             print("  ✓ the usage bar is actually painted")
         } else {
             print("  ✗ turning the context item off changed nothing")
+            failures += 1
+        }
+
+        // The other status-line items draw from the same reading.
+        var withoutStatusItems = view.currentPanelConfig
+        for index in withoutStatusItems.items.indices
+        where [.model, .cost, .limits].contains(withoutStatusItems.items[index].kind) {
+            withoutStatusItems.items[index].isEnabled = false
+        }
+        view.show(panel, config: withoutStatusItems)
+        let withoutModelHash = contentHash(view)
+        view.show(panel, config: view.currentPanelConfig)
+        if withoutModelHash != withoutContextHash, withoutModelHash != withPanel {
+            print("  ✓ the model, cost, and rate-limit items are painted too")
+        } else {
+            print("  ✗ the model / cost / limits items made no difference")
             failures += 1
         }
 

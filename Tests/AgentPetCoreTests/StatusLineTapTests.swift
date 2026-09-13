@@ -157,6 +157,37 @@ struct StatusLineTapTests {
         #expect(StatusLineTap.originalCommand(wrappedIn: nil) == nil)
     }
 
+    @Test("deleting the app gives the user their status line back")
+    func wrapperSurvivesAUninstalledApp() throws {
+        // The side effect worth designing against: the shim lives inside the
+        // app bundle, so `brew uninstall` while the tap is on would leave a
+        // status line pointing at a path that no longer exists. The wrapper
+        // guards on the shim and falls back to the user's own command.
+        let wrapped = StatusLineTap.wrapperCommand(
+            shimPath: "/Applications/AgentPet.app/Contents/MacOS/agentpet-hook",
+            original: "printf 'HUD'"
+        )
+        #expect(wrapped.contains("[ -x "), "the wrapper must test for the shim before running it")
+        #expect(wrapped.contains("printf 'HUD'"), "and carry the original command as its fallback")
+
+        // Actually run it, with the shim missing: the fallback must produce
+        // the user's output and a clean exit.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", wrapped]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        try process.run()
+        let printed = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        #expect(String(decoding: printed, as: UTF8.self) == "HUD")
+        #expect(process.terminationStatus == 0)
+        #expect(StatusLineTap.originalCommand(wrappedIn: wrapped) == "printf 'HUD'",
+                "a guarded wrapper is still recognised as ours when re-installing")
+    }
+
     @Test("a status line stored as a plain string is still recognised")
     func plainStringStatusLine() throws {
         let harness = try Harness(settings: #"{ "statusLine": "my-hud" }"#)

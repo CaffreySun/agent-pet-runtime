@@ -231,7 +231,7 @@ struct MessagePanelConfigTests {
         #expect(config.messagePanel.alwaysVisible)
     }
 
-    @Test("a config round-trips through the store")
+    @Test("a config round-trips through the store, new items joining at the end")
     func roundTrip() throws {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("agentpet-config-\(UUID().uuidString)/config.json")
@@ -243,7 +243,13 @@ struct MessagePanelConfigTests {
         try AppConfigStore(url: url).save(config)
 
         let reloaded = AppConfigStore(url: url).load()
-        #expect(reloaded.messagePanel == config.messagePanel)
+        #expect(!reloaded.messagePanel.alwaysVisible)
+        // The user's two entries stay where they put them, switched off as
+        // they left them; every kind they have never seen joins the end.
+        #expect(Array(reloaded.messagePanel.items.prefix(2)) == config.messagePanel.items)
+        #expect(reloaded.messagePanel.items.dropFirst(2).map(\.kind)
+            == MessagePanelConfig.Kind.allCases.filter { $0 != .context && $0 != .agent })
+        #expect(reloaded.messagePanel.items.dropFirst(2).allSatisfy { $0.isEnabled })
     }
 }
 
@@ -275,6 +281,33 @@ struct SessionContextTests {
         // A session before its first message reports nulls; that is no context,
         // not an empty one.
         #expect(SessionContext.fromStatusPayload(["session_id": "abc"], at: now) == nil)
+    }
+
+    @Test("model, cost, and limits read the way a person would write them")
+    func labels() {
+        let full = SessionContext(
+            modelName: "Opus 4.6", effortLevel: "high", costUSD: 3.4216,
+            fiveHourPercent: 41.4, sevenDayPercent: 12.5, capturedAt: now
+        )
+        #expect(full.modelLabel == "Opus 4.6 · high")
+        #expect(full.costLabel == "$3.42")
+        #expect(full.limitsLabel == "5h 41% · 7d 13%")
+
+        // A model with no effort setting says just its name.
+        let plain = SessionContext(modelName: "deepseek-flash", capturedAt: now)
+        #expect(plain.modelLabel == "deepseek-flash")
+        #expect(plain.costLabel == nil)
+        #expect(plain.limitsLabel == nil)
+
+        // Past ten dollars the cents are noise.
+        #expect(SessionContext(costUSD: 42.7, capturedAt: now).costLabel == "$42.7")
+
+        // A session before any API response has no cost and no limits, and
+        // must not show "$0.00" as if it had been measured.
+        #expect(SessionContext(usedPercent: 5, capturedAt: now).costLabel == nil)
+
+        // One window known is still worth showing.
+        #expect(SessionContext(sevenDayPercent: 61.2, capturedAt: now).limitsLabel == "7d 61%")
     }
 
     @Test("a later reading fills in what it knows and keeps what it does not")

@@ -178,21 +178,28 @@ to fit it, so the pet itself never moves.
 The row is a session: one line per open session, sessions of the same agent
 kept together, the one the pet is showing first. Each row can carry the agent's
 name, the last six characters of the session id, the session's name or project,
-the tool it is currently using, how full its context window is, and the status
-message above. Every item can be toggled and reordered in the manager's
-Settings, and the panel can be set to stay up or to appear only while something
-is happening. The second line of the status message is what the event knows:
-which tool an approval is waiting on, what failed, and — when a turn finishes —
-a preview of the assistant's last message, which Claude Code hands to hooks as
-`last_assistant_message` and Codex shows the same way. It is tidied like
-Codex's (whitespace collapsed, cut to 200 characters), it stays in memory, and
-it never reaches a log file. Nothing you typed is ever shown.
+the model (with its reasoning effort), the tool it is currently using, how full
+its context window is, the session's estimated cost, how much of the 5-hour and
+7-day usage windows is gone, and the status message above. Every item can be
+toggled and reordered in the manager's Settings; the panel can be set to stay
+up or to appear only while something is happening; its width is a percentage of
+the pet's own width (100–200%, slider, number field, and stepper) so it can be
+wider than the pet; and the rows can be aligned left, centred, or right — the
+pet itself never moves. The second line of the status message is what the event
+knows: which tool an approval is waiting on, what failed, and — when a turn
+finishes — a preview of the assistant's last message, which Claude Code hands
+to hooks as `last_assistant_message` and Codex shows the same way. It is tidied
+like Codex's (whitespace collapsed, cut to 200 characters), it stays in memory,
+and it never reaches a log file. Nothing you typed is ever shown.
 
-**Context usage** is the one figure hooks do not carry — Claude Code reports it
-only to its status line. Settings offers to tap that: the runtime receives the
-status-line JSON, keeps the reduced few fields, and runs the status line you
-already had through it untouched. It is off until you turn it on, it is
-removed with one button, and it never reads a transcript.
+**Model, context, cost, and rate limits** are what hooks do not carry — Claude
+Code reports them only to its status line. Settings offers to tap that: the
+runtime receives the status-line JSON, keeps the reduced few fields, and runs
+the status line you already had through it untouched. It is off until you turn
+it on, it takes effect immediately, one button puts your command back, it costs
+about 2 ms per render, and it never reads a transcript. If the app is ever
+deleted while the tap is on, the wrapper notices the shim is gone and hands the
+status line back to your own command.
 
 ---
 
@@ -269,7 +276,7 @@ whole of the network surface — nothing else here talks to anything.
 ## Development
 
 ```bash
-swift build && swift test        # 398 tests
+swift build && swift test        # 400 tests
 swift run AgentPet               # run it
 
 swift run AgentPet --diagnose                      # what pets are discoverable, and why

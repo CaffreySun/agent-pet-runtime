@@ -327,14 +327,27 @@ struct BridgeEndToEndTests {
         {
           "session_id": "6b1e4c2a-0000-0000-0000-000000000000",
           "session_name": "payment refactor",
+          "prompt_id": "9d2c7f10-0000-0000-0000-000000000000",
           "transcript_path": "/Users/someone/.claude/projects/p/6b1e4c2a.jsonl",
+          "model": { "id": "claude-opus-4-6", "display_name": "Opus 4.6" },
+          "effort": { "level": "high" },
+          "workspace": {
+            "current_dir": "/Users/someone/work/checkout",
+            "git_worktree": "payments",
+            "repo": { "host": "github.com", "owner": "acme", "name": "checkout" }
+          },
           "context_window": {
             "used_percentage": 61.5,
             "context_window_size": 200000,
             "total_input_tokens": 123000
           },
-          "workspace": { "repo": { "name": "checkout" } },
-          "cost": { "total_cost_usd": 3.5 }
+          "cost": { "total_cost_usd": 3.5, "total_duration_ms": 900000,
+                    "total_lines_added": 210, "total_lines_removed": 40 },
+          "rate_limits": {
+            "five_hour": { "used_percentage": 41, "resets_at": 1789300000 },
+            "seven_day": { "used_percentage": 12, "resets_at": 1789900000 }
+          },
+          "prompt_cache": { "warm": true, "hit_ratio": 0.93, "ttl": "1h" }
         }
         """
         let hud = "cat > /dev/null; printf 'HUD-OK'"
@@ -347,18 +360,30 @@ struct BridgeEndToEndTests {
         let envelope = try #require(box.envelopes.first)
         #expect(envelope.eventName == "Statusline")
         let reduced = try #require(envelope.payloadUTF8)
-        #expect(reduced.contains("61.5"))
-        #expect(reduced.contains("payment refactor"))
-        #expect(reduced.contains("checkout"))
-        #expect(!reduced.contains("transcript_path"),
-                "the status payload carries paths and costs; the socket gets the allowlist")
-        #expect(!reduced.contains("cost"))
+        // What the panel can draw…
+        for kept in ["61.5", "payment refactor", "checkout", "Opus 4.6", "high",
+                     "cost_usd", "limit_5h", "limit_7d"] {
+            #expect(reduced.contains(kept), "the reduced payload lost \(kept)")
+        }
+        // …and what nothing outside this process gets to see.
+        for leaked in ["transcript_path", "prompt_id", "prompt_cache", "git_worktree",
+                       "total_duration_ms", "total_lines_added", "resets_at",
+                       "\"owner\"", "\"host\""] {
+            #expect(!reduced.contains(leaked), "the reduced payload leaked \(leaked)")
+        }
 
         let events = EventNormalizer(profiles: AgentProfiles.all).normalize(envelope)
         let event = try #require(events.first)
         #expect(event.kind == .contextUpdate)
         #expect(event.context?.usedPercent == 61.5)
         #expect(event.context?.sessionName == "payment refactor")
+        #expect(event.context?.modelName == "Opus 4.6")
+        #expect(event.context?.effortLevel == "high")
+        #expect(event.context?.costUSD == 3.5)
+        #expect(event.context?.fiveHourPercent == 41)
+        #expect(event.context?.sevenDayPercent == 12)
+        // The raw key it came from must not survive; the reduced one must.
+        #expect(!reduced.contains("\"total_cost_usd\""))
     }
 
     @Test("the wrapped status line still runs when the runtime is not")
