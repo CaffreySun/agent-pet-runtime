@@ -10,6 +10,9 @@ public enum AgentEventKind: String, Codable, Sendable, Equatable, CaseIterable {
     case completed
     case failed
     case sessionClosed
+    /// A status-line reading: tokens used, session name, project. It describes
+    /// a session, it does not change one — see `AgentEvent.context`.
+    case contextUpdate
 }
 
 public struct FocusTarget: Codable, Sendable, Equatable {
@@ -43,10 +46,23 @@ public struct AgentEvent: Sendable, Equatable {
     public let confidence: EventConfidence
 
     /// Short human-readable context, e.g. the tool being run.
+    ///
+    /// For some events this is the user's own prompt — which is why it is
+    /// never the source of the panel's "current tool" and never goes on a
+    /// floating panel. See `toolName`.
     public let summary: String?
     public let detail: String?
+    /// The tool an event names, when the rule says which field holds it.
+    ///
+    /// Separate from `summary` on purpose: `summary` is whatever the rule
+    /// thought was interesting, while this is only ever a tool name — the one
+    /// kind of summary that is safe to draw beside the pet.
+    public let toolName: String?
     public let projectPath: URL?
     public let focusTarget: FocusTarget?
+
+    /// Status-line readings ride along as their own kind of event.
+    public let context: SessionContext?
 
     /// Best-effort unique id from the agent's payload, used for deduplication.
     public let eventID: String?
@@ -59,8 +75,10 @@ public struct AgentEvent: Sendable, Equatable {
         confidence: EventConfidence,
         summary: String? = nil,
         detail: String? = nil,
+        toolName: String? = nil,
         projectPath: URL? = nil,
         focusTarget: FocusTarget? = nil,
+        context: SessionContext? = nil,
         eventID: String? = nil
     ) {
         self.agentID = agentID
@@ -70,15 +88,18 @@ public struct AgentEvent: Sendable, Equatable {
         self.confidence = confidence
         self.summary = summary
         self.detail = detail
+        self.toolName = toolName
         self.projectPath = projectPath
         self.focusTarget = focusTarget
+        self.context = context
         self.eventID = eventID
     }
 }
 
 public extension AgentEventKind {
     /// The state this event puts a session into. `sessionClosed` removes the
-    /// session instead, so it has no state.
+    /// session instead, and a context update has no state of its own — it
+    /// describes a session rather than moving it.
     var resultingState: AgentState? {
         switch self {
         case .sessionStarted:   return .idle
@@ -87,7 +108,7 @@ public extension AgentEventKind {
         case .waitingApproval:  return .waitingApproval
         case .completed:        return .completed
         case .failed:           return .failed
-        case .sessionClosed:    return nil
+        case .sessionClosed, .contextUpdate: return nil
         }
     }
 

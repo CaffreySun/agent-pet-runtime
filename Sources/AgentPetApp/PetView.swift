@@ -1,39 +1,29 @@
 import AgentPetCore
 import AppKit
 
-/// Draws the current sprite frame, the message beside it, and handles dragging.
+/// Draws the current sprite frame, the session panel above it, and handles
+/// dragging.
 ///
 /// Deliberately dumb: it knows how to put one `CGImage` on screen, how to draw
-/// a short message above it, and how to be dragged. All decisions about *which*
-/// frame and *which* message belong on screen live in `AgentPetCore`, so the
-/// preview in a manager window and the desktop pet cannot drift apart.
+/// a row of short labels above it, and how to be dragged. All decisions about
+/// *which* frame and *which* rows belong on screen live in `AgentPetCore`, so
+/// the preview in a manager window and the desktop pet cannot drift apart.
 final class PetView: NSView {
 
     private var image: CGImage?
-    private var notification: PetNotification?
+    private var panel: MessagePanel = .empty
+    private var panelConfig = MessagePanelConfig()
 
-    /// Height reserved above the sprite when a message is showing.
-    ///
-    /// Codex reserves one terminal row for a message whose two lines are the
-    /// same and two rows otherwise; at desktop scale that is one or two lines
-    /// of text plus padding.
-    static let messageLineHeight: CGFloat = 15
-    static let messagePadding: CGFloat = 6
-    /// Room for the little tail that points at the pet.
-    static let messageTailHeight: CGFloat = 4
-
-    /// How tall the message area must be for a given notification.
-    static func messageHeight(for notification: PetNotification?) -> CGFloat {
-        guard let notification else { return 0 }
-        let lines: CGFloat = notification.showsDetail ? 2 : 1
-        return lines * messageLineHeight + messagePadding * 2 + messageTailHeight
+    /// How tall the panel strip must be for a panel.
+    static func panelHeight(for panel: MessagePanel, config: MessagePanelConfig) -> CGFloat {
+        MessagePanelLayout.plan(for: panel, config: config).height
     }
 
-    /// The part of the view the sprite occupies. The message, when present,
+    /// The part of the view the sprite occupies. The panel, when present,
     /// takes the strip above it, so the pet itself never moves — the window
-    /// grows upward instead.
+    /// grows upward (and, for a wide panel, sideways) instead.
     var spriteRect: CGRect {
-        let inset = Self.messageHeight(for: notification)
+        let inset = Self.panelHeight(for: panel, config: panelConfig)
         return CGRect(
             x: bounds.minX, y: bounds.minY,
             width: bounds.width, height: max(0, bounds.height - inset)
@@ -97,17 +87,19 @@ final class PetView: NSView {
         needsDisplay = true
     }
 
-    /// Sets the message drawn above the pet. The window height follows from
-    /// this, so the owner is told when it changes.
-    func show(_ notification: PetNotification?) {
-        guard notification != self.notification else { return }
-        self.notification = notification
+    /// Sets the panel drawn above the pet. The window size follows from this,
+    /// so the owner is told when it changes.
+    func show(_ panel: MessagePanel, config: MessagePanelConfig) {
+        guard panel != self.panel || config != self.panelConfig else { return }
+        self.panel = panel
+        self.panelConfig = config
         needsDisplay = true
     }
 
     /// What is currently set to be drawn. Read by the render self-test.
     var currentImage: CGImage? { image }
-    var currentNotification: PetNotification? { notification }
+    var currentPanel: MessagePanel { panel }
+    var currentPanelConfig: MessagePanelConfig { panelConfig }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let image, let context = NSGraphicsContext.current?.cgContext else { return }
@@ -131,86 +123,167 @@ final class PetView: NSView {
         context.draw(image, in: target)
         context.restoreGState()
 
-        if let notification {
-            drawMessage(notification, spriteRect: sprite, in: context)
+        let plan = MessagePanelLayout.plan(for: panel, config: panelConfig)
+        if !plan.rows.isEmpty {
+            drawPanel(plan, spriteRect: sprite)
         }
     }
 
-    // MARK: - Message
+    // MARK: - Panel
 
-    /// Draws the status line and, when it says something the label does not,
-    /// the detail beneath it — the same shape Codex gives its notification.
-    private func drawMessage(
-        _ notification: PetNotification,
-        spriteRect: CGRect,
-        in context: CGContext
-    ) {
-        let height = Self.messageHeight(for: notification)
+    /// Draws the session rows in the strip above the pet.
+    private func drawPanel(_ plan: MessagePanelLayout.Plan, spriteRect: CGRect) {
+        let height = plan.height
         let area = CGRect(
             x: bounds.minX, y: bounds.maxY - height, width: bounds.width, height: height
         )
         let bubble = area.insetBy(dx: 2, dy: 0)
         let bodyRect = CGRect(
             x: bubble.minX, y: bubble.minY,
-            width: bubble.width, height: bubble.height - Self.messageTailHeight
+            width: bubble.width, height: bubble.height - MessagePanelLayout.tailHeight
         )
 
         // A tail centred on the pet, pointing down at it.
         let tailWidth: CGFloat = 10
         let tail = CGMutablePath()
-        tail.move(to: CGPoint(x: spriteRect.midX - tailWidth / 2, y: bubble.minY + Self.messageTailHeight))
+        tail.move(to: CGPoint(
+            x: spriteRect.midX - tailWidth / 2,
+            y: bubble.minY + MessagePanelLayout.tailHeight
+        ))
         tail.addLine(to: CGPoint(x: spriteRect.midX, y: bubble.minY))
-        tail.addLine(to: CGPoint(x: spriteRect.midX + tailWidth / 2, y: bubble.minY + Self.messageTailHeight))
+        tail.addLine(to: CGPoint(
+            x: spriteRect.midX + tailWidth / 2,
+            y: bubble.minY + MessagePanelLayout.tailHeight
+        ))
 
         let shape = CGMutablePath()
-        shape.addRoundedRect(
-            in: bodyRect, cornerWidth: 6, cornerHeight: 6
-        )
+        shape.addRoundedRect(in: bodyRect, cornerWidth: 6, cornerHeight: 6)
         shape.addPath(tail)
 
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.saveGState()
         context.addPath(shape)
         context.setFillColor(NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor)
         context.fillPath()
-
         context.addPath(shape)
         context.setStrokeColor(NSColor.separatorColor.cgColor)
         context.setLineWidth(1)
         context.strokePath()
         context.restoreGState()
 
-        let textArea = bodyRect.insetBy(dx: 6, dy: Self.messagePadding - 2)
-        let label = Self.messageText(
-            notification.kind.label,
-            font: .systemFont(ofSize: 10, weight: .semibold),
-            color: .labelColor
-        )
-        if notification.showsDetail {
-            let rows = textArea.height / 2
-            let labelRect = CGRect(
-                x: textArea.minX, y: textArea.maxY - rows, width: textArea.width, height: rows
+        // Rows run downward from the top of the bubble.
+        var rowTop = bodyRect.maxY - MessagePanelLayout.padding
+        for row in plan.rows {
+            let rowRect = CGRect(
+                x: bodyRect.minX,
+                y: rowTop - MessagePanelLayout.rowHeight,
+                width: bodyRect.width,
+                height: MessagePanelLayout.rowHeight
             )
-            let detailRect = CGRect(
-                x: textArea.minX, y: textArea.minY, width: textArea.width, height: rows
-            )
-            label.draw(in: labelRect)
-            Self.messageText(
-                notification.body,
-                font: .systemFont(ofSize: 9),
-                color: .secondaryLabelColor
-            ).draw(in: detailRect)
-        } else {
-            label.draw(in: textArea)
+            drawRow(row, in: rowRect)
+            rowTop = rowRect.minY - MessagePanelLayout.rowSpacing
         }
     }
 
-    private static func messageText(
+    private func drawRow(_ row: MessagePanelLayout.Row, in rowRect: CGRect) {
+        for (item, frame) in MessagePanelLayout.frames(for: row, in: rowRect.width) {
+            let rect = CGRect(
+                x: rowRect.minX + frame.minX,
+                y: rowRect.minY,
+                width: frame.width,
+                height: MessagePanelLayout.rowHeight
+            )
+            switch item.kind {
+            case .context:
+                drawContext(item, in: rect)
+            case .message:
+                drawMessage(item, in: rect, isFocused: row.isFocused)
+            case .agent:
+                Self.text(item.primary, font: MessagePanelLayout.agentFont)
+                    .draw(in: rect.insetBy(dx: 0, dy: 2.5))
+            case .session:
+                Self.text(item.primary, font: MessagePanelLayout.sessionFont,
+                          color: .secondaryLabelColor)
+                    .draw(in: rect.insetBy(dx: 0, dy: 3))
+            default:
+                Self.text(item.primary, font: MessagePanelLayout.itemFont,
+                          color: .secondaryLabelColor)
+                    .draw(in: rect.insetBy(dx: 0, dy: 3))
+            }
+        }
+    }
+
+    /// The usage bar and its number.
+    ///
+    /// A bar rather than a ring: rows are one line tall, and a ring that small
+    /// reads as a dot. The filled part is fluorescent green on purpose — it is
+    /// the one number here that changes on its own and is worth noticing from
+    /// across the room.
+    private func drawContext(_ item: MessagePanelLayout.Item, in rect: CGRect) {
+        var textOrigin = rect.minX
+        if let context = item.context, let fraction = MessagePanelLayout.usageFraction(context) {
+            let bar = CGRect(
+                x: rect.minX,
+                y: rect.midY - MessagePanelLayout.contextBarSize.height / 2,
+                width: MessagePanelLayout.contextBarSize.width,
+                height: MessagePanelLayout.contextBarSize.height
+            )
+            NSColor.separatorColor.withAlphaComponent(0.6).setFill()
+            NSBezierPath(roundedRect: bar, xRadius: 3, yRadius: 3).fill()
+
+            let filled = CGRect(
+                x: bar.minX, y: bar.minY,
+                width: max(2, bar.width * CGFloat(fraction)), height: bar.height
+            )
+            MessagePanelLayout.usageColor.setFill()
+            NSBezierPath(roundedRect: filled, xRadius: 3, yRadius: 3).fill()
+            textOrigin = bar.maxX + 5
+        }
+
+        let textRect = CGRect(
+            x: textOrigin, y: rect.minY,
+            width: max(0, rect.maxX - textOrigin), height: rect.height
+        )
+        Self.text(item.primary, font: MessagePanelLayout.itemFont,
+                  color: .secondaryLabelColor)
+            .draw(in: textRect.insetBy(dx: 0, dy: 3))
+    }
+
+    /// The wording the pet has always used, now one row among several.
+    private func drawMessage(
+        _ item: MessagePanelLayout.Item,
+        in rect: CGRect,
+        isFocused: Bool
+    ) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let string = NSMutableAttributedString(
+            string: item.primary,
+            attributes: [
+                .font: MessagePanelLayout.messageFont,
+                .foregroundColor: isFocused ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                .paragraphStyle: paragraph,
+            ]
+        )
+        if let body = item.secondary {
+            string.append(NSAttributedString(
+                string: " — \(body)",
+                attributes: [
+                    .font: MessagePanelLayout.itemFont,
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+        }
+        string.draw(in: rect.insetBy(dx: 0, dy: 2.5))
+    }
+
+    private static func text(
         _ string: String,
         font: NSFont,
-        color: NSColor
+        color: NSColor = .labelColor
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
         paragraph.lineBreakMode = .byTruncatingTail
         return NSAttributedString(string: string, attributes: [
             .font: font, .foregroundColor: color, .paragraphStyle: paragraph,

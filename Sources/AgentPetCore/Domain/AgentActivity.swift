@@ -11,7 +11,13 @@ public struct AgentActivity: Sendable, Equatable, Identifiable {
     public internal(set) var confidence: EventConfidence
     public internal(set) var title: String?
     public internal(set) var detail: String?
+    /// The last tool this session was seen using. Set only from events whose
+    /// rule names a tool field, so a prompt that lands in `title` can never
+    /// masquerade as one.
+    public internal(set) var toolName: String?
     public internal(set) var focusTarget: FocusTarget?
+    /// What the session's status line reported, when one is tapped.
+    public internal(set) var context: SessionContext?
     public let startedAt: Date
     public internal(set) var updatedAt: Date
 
@@ -27,7 +33,9 @@ public struct AgentActivity: Sendable, Equatable, Identifiable {
         confidence: EventConfidence,
         title: String? = nil,
         detail: String? = nil,
+        toolName: String? = nil,
         focusTarget: FocusTarget? = nil,
+        context: SessionContext? = nil,
         startedAt: Date,
         updatedAt: Date,
         enteredStateAt: Date
@@ -39,7 +47,9 @@ public struct AgentActivity: Sendable, Equatable, Identifiable {
         self.confidence = confidence
         self.title = title
         self.detail = detail
+        self.toolName = toolName
         self.focusTarget = focusTarget
+        self.context = context
         self.startedAt = startedAt
         self.updatedAt = updatedAt
         self.enteredStateAt = enteredStateAt

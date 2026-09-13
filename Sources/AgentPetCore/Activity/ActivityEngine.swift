@@ -71,6 +71,20 @@ public final class ActivityEngine {
     public func ingest(_ event: AgentEvent) -> AgentActivity? {
         let key = SessionKey(agentID: event.agentID, sessionID: event.sessionID)
 
+        // A status-line reading describes a session rather than moving it, so
+        // it takes its own path before deduplication and ordering: it never
+        // touches the state, the aging clock, or the timeouts. Letting it
+        // refresh `updatedAt` would mean a `running` session whose turn the
+        // user interrupted stayed "working" forever, because the status line
+        // keeps rendering at the prompt.
+        //
+        // Keyed on the kind, not on the presence of a context: an event can
+        // carry both, and a state change that arrived with a reading attached
+        // is still a state change.
+        if event.kind == .contextUpdate, let context = event.context {
+            return applyContext(context, event: event, key: key)
+        }
+
         if isDuplicate(event, key: key) {
             droppedEventCount += 1
             return activities[key]
@@ -106,6 +120,10 @@ public final class ActivityEngine {
             }
             if let summary = event.summary { existing.title = summary }
             if let detail = event.detail { existing.detail = detail }
+            if let tool = event.toolName { existing.toolName = tool }
+            if let context = event.context {
+                existing.context = existing.context?.merging(context) ?? context
+            }
 
             existing.state = newState
             existing.confidence = event.confidence
@@ -123,7 +141,43 @@ public final class ActivityEngine {
             confidence: event.confidence,
             title: event.summary,
             detail: event.detail,
+            toolName: event.toolName,
             focusTarget: event.focusTarget,
+            context: event.context,
+            startedAt: event.at,
+            updatedAt: event.at,
+            enteredStateAt: event.at
+        )
+        arrivalOrder[key] = nextArrival
+        nextArrival += 1
+        activities[key] = activity
+        return activity
+    }
+
+    /// Attaches a status-line reading to the session it belongs to.
+    ///
+    /// A reading is also proof that the session exists, so one arriving for a
+    /// session nothing else has reported creates it — `idle`, because a status
+    /// line says what a session *is*, not what it is doing. That is what lets
+    /// the panel show every open session after a restart rather than only the
+    /// ones that happened to fire a hook.
+    private func applyContext(
+        _ context: SessionContext,
+        event: AgentEvent,
+        key: SessionKey
+    ) -> AgentActivity? {
+        if var existing = activities[key] {
+            existing.context = existing.context?.merging(context) ?? context
+            activities[key] = existing
+            return existing
+        }
+
+        let activity = AgentActivity(
+            agentID: event.agentID,
+            sessionID: event.sessionID,
+            state: .idle,
+            confidence: event.confidence,
+            context: context,
             startedAt: event.at,
             updatedAt: event.at,
             enteredStateAt: event.at
@@ -215,6 +269,15 @@ public final class ActivityEngine {
 
         setFocus(candidate, at: now)
         return candidate
+    }
+
+    /// Every session the pet could be showing, best first.
+    ///
+    /// The same order focus is decided by, exposed so the message panel lists
+    /// sessions in the order the pet itself cares about — the blocked session
+    /// above the working one — instead of the order they happened to arrive.
+    public func rankedActivities() -> [AgentActivity] {
+        rankedCandidates(now: clock.now)
     }
 
     /// Ranked best-first, fully deterministic.

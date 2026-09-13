@@ -13,9 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var library: [PetLibrary.Entry] = []
     private var selectedPetID: String?
-    /// Last message written to the verbose log, so the frame loop does not
+    /// Last panel written to the verbose log, so the frame loop does not
     /// repeat it sixty times a second.
-    private var lastLoggedMessage: PetNotification?
+    private var lastLoggedPanel: MessagePanel?
 
     /// Set when a check finds a newer release, so both menus can say so.
     private var availableUpdate: UpdateCheck.Release?
@@ -49,8 +49,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMainMenu()
         buildWindow()
         buildStatusItem()
+        let panelConfig = { [weak self] in
+            self?.model?.config.messagePanel ?? MessagePanelConfig()
+        }
+        // The panel speaks in display names; the registry is where they live.
+        let agentNames = Dictionary(
+            uniqueKeysWithValues: AgentProfiles.all.map { ($0.agentID, $0.displayName) }
+        )
+        controller.panelConfig = panelConfig
+        controller.agentNames = { agentNames }
+
         var firstFrame = true
-        controller.onFrame = { [weak self] image, notification in
+        controller.onFrame = { [weak self] image, panel in
             if firstFrame, CommandLine.arguments.contains("--verbose") {
                 firstFrame = false
                 FileHandle.standardError.write(Data(
@@ -59,9 +69,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard let self else { return }
             self.petView.show(image)
-            self.petView.show(notification)
-            self.resizeWindow(for: notification)
-            self.logMessageChange(notification)
+            self.petView.show(panel, config: panelConfig())
+            self.resizeWindow(for: panel, config: panelConfig())
+            self.logPanelChange(panel)
         }
 
         library = PetLibrary.discover()
@@ -125,7 +135,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridge.onEvent = { [weak self] event in
             guard let self else { return }
             self.controller.ingest(event)
-            self.model?.noteEvent(agentID: event.agentID)
+            // A status-line reading is not the hook pipeline working; counting
+            // it as one would make a broken install of hooks look healthy to
+            // the agent card.
+            if event.kind != .contextUpdate {
+                self.model?.noteEvent(agentID: event.agentID)
+            }
             self.pushActivities()
 
             if CommandLine.arguments.contains("--verbose") {
@@ -347,25 +362,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return PetWindow.defaultOrigin(on: screen)
     }
 
-    /// Grows the window upward when a message appears, and shrinks it back.
-    private func logMessageChange(_ notification: PetNotification?) {
-        guard notification != lastLoggedMessage else { return }
-        lastLoggedMessage = notification
-        guard CommandLine.arguments.contains("--verbose") else { return }
-        let text = notification.map { "\($0.kind.label) — \($0.body)" } ?? "cleared"
-        FileHandle.standardError.write(Data("[pet] message: \(text)\n".utf8))
-    }
+    /// Logs what the panel says, once per change, for the frame loop's sake.
     ///
-    /// The origin is left alone, so the pet does not move: the message takes
-    /// space *above* it, exactly as Codex reserves rows above its sprite
-    /// rather than drawing over the transcript.
-    private func resizeWindow(for notification: PetNotification?) {
+    /// Built from the same layout the view draws, so the line reports what is
+    /// on screen rather than every field that happens to exist — a diagnostic
+    /// that shows items the user turned off is worse than none.
+    private func logPanelChange(_ panel: MessagePanel) {
+        guard panel != lastLoggedPanel else { return }
+        lastLoggedPanel = panel
+        guard CommandLine.arguments.contains("--verbose") else { return }
+        let config = model?.config.messagePanel ?? MessagePanelConfig()
+        let text = panel.rows.isEmpty
+            ? "cleared"
+            : panel.rows.map { row in
+                MessagePanelLayout.items(for: row, config: config).map { item in
+                    item.secondary.map { "\(item.primary) — \($0)" } ?? item.primary
+                }.joined(separator: " · ")
+            }.joined(separator: " | ")
+        FileHandle.standardError.write(Data("[pet] panel: \(text)\n".utf8))
+    }
+
+    /// Grows the window upward when the panel appears, and sideways when it
+    /// needs the room.
+    ///
+    /// The pet does not move: the window is re-centred on the sprite, so the
+    /// pet keeps its place on screen and the panel takes space *above* it,
+    /// exactly as Codex reserves rows above its sprite rather than drawing
+    /// over the transcript. The bottom edge is what stays put — growing
+    /// downward would move the pet every time a session went to work.
+    private func resizeWindow(for panel: MessagePanel, config: MessagePanelConfig) {
         guard let window else { return }
-        let height = PetWindow.defaultSize.height + PetView.messageHeight(for: notification)
-        guard abs(window.frame.height - height) > 0.5 else { return }
+        let desired = MessagePanelLayout.desiredSize(for: panel, config: config)
+        let width = max(PetWindow.defaultSize.width, desired.width)
+        let height = PetWindow.defaultSize.height + desired.height
+
+        let frame = window.frame
+        guard abs(frame.width - width) > 0.5 || abs(frame.height - height) > 0.5 else { return }
         window.setFrame(
-            NSRect(origin: window.frame.origin,
-                   size: NSSize(width: PetWindow.defaultSize.width, height: height)),
+            NSRect(
+                x: frame.midX - width / 2,
+                y: frame.minY,
+                width: width,
+                height: height
+            ),
             display: true
         )
     }
@@ -389,8 +428,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func savePosition() {
-        guard let origin = window?.frame.origin else { return }
-        UserDefaults.standard.set("\(origin.x),\(origin.y)", forKey: Self.positionKey)
+        guard let frame = window?.frame else { return }
+        // Stored as the origin the window would have at its resting width, so
+        // the saved point is the sprite's anchor rather than the frame's
+        // corner. Otherwise a wide panel at one quit and a narrow one at the
+        // next would walk the pet sideways a little on every relaunch.
+        let anchorX = frame.minX + (frame.width - PetWindow.defaultSize.width) / 2
+        UserDefaults.standard.set("\(anchorX),\(frame.minY)", forKey: Self.positionKey)
     }
 
     /// Explains that no pet was found.

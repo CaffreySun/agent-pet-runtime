@@ -152,7 +152,7 @@ enum RenderSelfTest {
 
         failures += checkDraggable(view: view)
         failures += checkBehaviourLayers(controller: controller, view: view)
-        failures += checkMessageElement(controller: controller, view: view)
+        failures += checkMessagePanel(controller: controller, view: view)
 
         print("")
         print(failures == 0 ? "PASS" : "FAIL (\(failures) problem(s))")
@@ -244,57 +244,129 @@ enum RenderSelfTest {
         return failures
     }
 
-    /// Verifies the message beside the pet, ported from Codex's notification.
+    /// Verifies the message panel beside the pet: the rows, the space they
+    /// reserve, the window that grows for them, and the usage bar.
     ///
-    /// The message must change the picture, must take space *above* the pet
-    /// rather than over it, and must make the window grow to fit — the three
-    /// ways this feature can be silently absent.
-    private static func checkMessageElement(controller: PetController, view: PetView) -> Int {
+    /// Driven by real events through the real engine — the panel is a view of
+    /// the activity list, and a test that hand-built the rows would prove
+    /// nothing about whether sessions reach it.
+    private static func checkMessagePanel(controller: PetController, view: PetView) -> Int {
         print("")
-        print("Message element")
+        print("Message panel")
         var failures = 0
+        let now = Date()
+        let confidence = EventConfidence(level: .high, source: "selftest")
 
-        controller.previewState(.waitingApproval)
-        guard let message = view.currentNotification else {
-            print("  ✗ a waiting agent shows no message")
-            controller.clearPreview()
+        func send(
+            _ kind: AgentEventKind, agent: String, session: String, at offset: TimeInterval,
+            tool: String? = nil, context: SessionContext? = nil
+        ) {
+            controller.ingest(AgentEvent(
+                agentID: agent,
+                sessionID: session,
+                kind: kind,
+                at: now.addingTimeInterval(offset),
+                confidence: confidence,
+                toolName: tool,
+                focusTarget: .openingDirectory(URL(fileURLWithPath: "/tmp/project")),
+                context: context
+            ))
+        }
+
+        // Two agents, one of them blocked — the case the whole panel exists
+        // for. The blocked one arrives first so the focus lands on it without
+        // waiting out the engine's anti-flicker hold, which is deliberately
+        // three seconds long and not something a test should sleep through.
+        send(.waitingApproval, agent: "claude-code", session: "cafebabe-2222", at: 0,
+             tool: "Write",
+             context: SessionContext(usedPercent: 72, totalTokens: 144_000,
+                                     windowSize: 200_000, capturedAt: now))
+        send(.working, agent: "codex", session: "deadbeef-1111", at: 1, tool: "Bash")
+
+        let panel = view.currentPanel
+        guard panel.rows.count == 2 else {
+            print("  ✗ expected a row per session, got \(panel.rows.count)")
+            controller.resetActivities()
             return failures + 1
         }
-        if message.kind.label == "Needs input" {
-            print("  ✓ a waiting agent shows “\(message.kind.label)” beside the pet")
+        print("  ✓ \(panel.rows.count) sessions, one row each")
+
+        // The blocked session is the one whose row is marked as being shown.
+        if let focused = panel.rows.first(where: { $0.isFocused }),
+           focused.agentName == "Claude Code" {
+            print("  ✓ the blocked session is the row the pet is showing")
         } else {
-            print("  ✗ unexpected wording: \(message.kind.label)")
+            print("  ✗ the wrong session is marked as shown")
             failures += 1
         }
 
-        let withMessage = contentHash(view)
-        let height = PetView.messageHeight(for: message)
-        if height > 0, view.spriteRect.height < view.bounds.height {
-            print("  ✓ the pet keeps its place: \(Int(height))pt reserved above it")
+        let claude = panel.rows.first { $0.agentID == "claude-code" }
+        if claude?.sessionSuffix == "e-2222", claude?.message?.label == "Needs input",
+           claude?.context?.usedPercent == 72, claude?.task == "project" {
+            print("  ✓ the row carries the session suffix, wording, context, and project")
         } else {
-            print("  ✗ the message was drawn over the pet instead of beside it")
+            print("  ✗ row contents are wrong: "
+                  + "\(claude.map { "\($0.sessionSuffix) / \($0.message?.label ?? "-") / \($0.task ?? "-")" } ?? "missing")")
+            failures += 1
+        }
+
+        // A tool is only "current" while the session is working.
+        let codex = panel.rows.first { $0.agentID == "codex" }
+        if codex?.tool == "Bash", claude?.tool == nil {
+            print("  ✓ the tool is shown while working, and dropped when blocked")
+        } else {
+            print("  ✗ tool visibility is wrong")
+            failures += 1
+        }
+
+        // Positions and sizes, as the window sees them.
+        let desired = MessagePanelLayout.desiredSize(
+            for: panel, config: view.currentPanelConfig
+        )
+        let withPanel = contentHash(view)
+        if desired.height > 0, view.spriteRect.height < view.bounds.height {
+            print("  ✓ the pet keeps its place: \(Int(desired.height))pt reserved above it")
+        } else {
+            print("  ✗ the panel was drawn over the pet instead of beside it")
             failures += 1
         }
 
         if let window = view.window,
-           abs(window.frame.height - (PetWindow.defaultSize.height + height)) < 1 {
-            print("  ✓ the window grew to fit the message")
+           abs(window.frame.height - (PetWindow.defaultSize.height + desired.height)) < 1,
+           window.frame.width >= desired.width - 1 {
+            print("  ✓ the window grew to \(Int(window.frame.width))x\(Int(window.frame.height)) for the panel")
         } else {
             print("  ✗ the window did not grow: "
-                  + "\(view.window.map { "\($0.frame.height)" } ?? "no window")")
+                  + "\(view.window.map { "\($0.frame.width)x\($0.frame.height)" } ?? "no window")")
             failures += 1
         }
 
-        view.show(nil as PetNotification?)
-        let withoutMessage = contentHash(view)
-        if withMessage != withoutMessage {
-            print("  ✓ the message is actually painted")
+        // The context item is only drawn when a status line has reported one:
+        // taking it away must change the picture.
+        var withoutContext = view.currentPanelConfig
+        if let index = withoutContext.items.firstIndex(where: { $0.kind == .context }) {
+            withoutContext.items[index].isEnabled = false
+        }
+        view.show(panel, config: withoutContext)
+        let withoutContextHash = contentHash(view)
+        view.show(panel, config: view.currentPanelConfig)
+        if withoutContextHash != withPanel {
+            print("  ✓ the usage bar is actually painted")
         } else {
-            print("  ✗ the message made no difference to the render")
+            print("  ✗ turning the context item off changed nothing")
             failures += 1
         }
 
-        controller.clearPreview()
+        // And an empty panel must give the space back.
+        controller.resetActivities()
+        let cleared = contentHash(view)
+        if cleared != withPanel, view.spriteRect.height == view.bounds.height {
+            print("  ✓ clearing the sessions takes the panel down")
+        } else {
+            print("  ✗ the panel outlived its sessions")
+            failures += 1
+        }
+
         return failures
     }
 

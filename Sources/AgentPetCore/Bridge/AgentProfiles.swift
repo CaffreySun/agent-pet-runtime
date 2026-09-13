@@ -37,6 +37,7 @@ public enum AgentProfiles {
                 matches: ["PermissionRequest"],
                 kind: .waitingApproval,
                 summaryField: "tool_name",
+                toolNameField: "tool_name",
                 sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
             ),
@@ -45,6 +46,7 @@ public enum AgentProfiles {
                 matches: ["Notification"],
                 kind: .waitingApproval,
                 summaryField: "message",
+                toolNameField: "tool_name",
                 sessionIDField: "session_id",
                 workingDirectoryField: "cwd",
                 whenNotificationType: "permission_prompt"
@@ -63,6 +65,7 @@ public enum AgentProfiles {
                 matches: ["PreToolUse"],
                 kind: .working,
                 summaryField: "tool_name",
+                toolNameField: "tool_name",
                 sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
             ),
@@ -70,6 +73,7 @@ public enum AgentProfiles {
                 matches: ["PostToolUse"],
                 kind: .working,
                 summaryField: "tool_name",
+                toolNameField: "tool_name",
                 sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
             ),
@@ -149,6 +153,20 @@ public enum AgentProfiles {
                 kind: .sessionClosed,
                 sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
+            ),
+
+            // --- Description, not state. ---
+
+            // Arrives only when the status-line tap is installed (see
+            // StatusLineTap): Claude Code runs the status-line command with
+            // its own JSON, the shim reduces it to this handful of fields, and
+            // the session id is the same one the hooks use. It tells the panel
+            // how full a context window is and what the session is called —
+            // facts hooks never carry — and deliberately changes no state.
+            NormalizationRule(
+                matches: ["Statusline"],
+                kind: .contextUpdate,
+                sessionIDField: "session_id"
             ),
 
             // Deliberately absent: `Notification` carrying `idle_prompt`,
