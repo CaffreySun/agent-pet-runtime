@@ -200,7 +200,17 @@ final class AgentPetModel: ObservableObject {
     func usePet(_ pet: InstalledPet) {
         onUsePet?(pet)
         currentPetID = pet.id
+        rememberPetSelection(petID: pet.id)
         statusMessage = "“\(pet.metadata.displayName)” is now on the desktop."
+    }
+
+    /// Records which pet the desktop is showing, so the next launch restores it.
+    ///
+    /// Takes an id rather than an `InstalledPet` because the menu bar picks
+    /// pets straight out of the library — a pet found in `~/.codex/pets` that
+    /// was never imported here still has to be remembered.
+    func rememberPetSelection(petID: String) {
+        config.pet.defaultPetID = petID
     }
 
     /// Set by the app to switch the desktop pet.
