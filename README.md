@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Resources/AppIcon-512.png" width="132" alt="Two cat paw prints on an orange tile">
+  <img src="Resources/AppIcon-512.png" width="132" alt="Agent Pet Runtime: a round-faced pet inside a golden ring, on orange">
 </p>
 
 # Agent Pet Runtime
