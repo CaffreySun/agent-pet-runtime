@@ -116,11 +116,11 @@ agent-pet-runtime/
 
 ### 3.1 播放参数是逐帧毫秒，不是帧率
 
-原方案只给了每行**帧数**，据此实现是错的。契约给出**每一帧的毫秒时长**，且**不均匀**（下表的 idle 已按 Codex 的播放值，见 §3.1a）：
+原方案只给了每行**帧数**，据此实现是错的。契约给出**每一帧的毫秒时长**，且**不均匀**：
 
 | 行 | 帧时长 |
 |---|---|
-| 0 `idle` | **1680, 660, 660, 840, 840, 1920 ms**（契约写作 280, 110, … 的 6 倍） |
+| 0 `idle` | **280, 110, 110, 140, 140, 320 ms** |
 | 1 `running-right` | 120 ×7，末帧 220 |
 | 2 `running-left` | 120 ×7，末帧 220 |
 | 3 `waving` | 140 ×3，末帧 280 |
@@ -139,7 +139,7 @@ agent-pet-runtime/
 
 契约给的是**创作值**；Codex 播放时又叠了两个变换，本运行时现在照做：
 
-1. **idle 放慢 6 倍。** App 端（`ChatGPT.app` 内 `app.asar`，宠物组件）：`her = [280,110,110,140,140,320]`，`ger = her.map(frameDurationMs * 6)`，而 `uer('idle')` 返回的是 `ger`。TUI 端（`codex-rs/tui/src/pets/model.rs::idle_animation`）直接写的就是 1680/660/660/840/840/1920。两处一致，所以 280 是**创作**时长，动画实际播的是 6 倍。
+1. **idle：Codex 的表是 6 倍慢速，本项目不跟。** App 端确实有 `ger = her.map(frameDurationMs * 6)`（TUI 的 `idle_animation` 同样是 1680/660/… 一档），但那个慢速版本在 Codex 里只是**状态播完后的沉降尾巴**——宠物的常态是"有任务"，idle 很少被看到。本项目的桌面宠物**大部分时间就处于 idle**：照搬 ×6 会让常驻呼吸变成 0.6fps，实测反馈"比其他状态慢、像卡住"（2026-09-13）。因此 idle 播放契约创作值 280/110/110/140/140/320，与其它状态同一节奏量级。
 2. **一次性状态 = 整行播 3 遍，再落进 idle 段并从那里循环。** App：`uer` 返回 `frames: [...row, ...row, ...row, ...ger], loopStartIndex: 3 * row.length`；TUI：`app_state_animation` 同样是三遍 + `idle_animation().frames`，测试名就叫 `app_running_animation_repeats_then_settles_into_idle`。
 
 本实现落在 `AnimationResolver` 第 3 层：`repeats > 1` 的轨道播完那几遍后交给 idle 轨（用剩余时长取帧），因此不需要"播完标记"。**但 `repeats = 1` 的轨道（running / waiting）是"持续状态"，整行一直循环**——这是对 Codex 组合的一个有意偏离，理由是实测：Codex 里 running/waiting 是*通知*，随状态更新不断重设，而本项目的状态可以持续几十分钟；照搬"三遍后沉降"会让宠物在 agent 明显还在干活时三秒就进入慢速呼吸，看起来像睡着了（用户实测反馈，2026-09-13）。"播三遍再沉降"保留给真正的一次性状态（completed → review、failed）。

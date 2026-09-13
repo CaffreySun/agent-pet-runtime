@@ -142,9 +142,8 @@ session as Claude Code.
 
 The published pet contract defines nine standard animation rows plus sixteen
 gaze poses, each with **per-frame timings in milliseconds**. They are not
-uniform: the authored `idle` is `280, 110, 110, 140, 140, 320` — a breath, with
-the ends held two to three times as long as the middle — and Codex plays it six
-times slower, which is what this runtime plays too. A single frame rate cannot
+uniform: `idle` runs `280, 110, 110, 140, 140, 320` — a breath, with the ends
+held two to three times as long as the middle. A single frame rate cannot
 reproduce any of it, so the runtime stores a duration per frame.
 
 Working and waiting loop their rows for as long as the state lasts — a pet

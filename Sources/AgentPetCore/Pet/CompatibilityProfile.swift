@@ -55,13 +55,18 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
     /// beat to land on rather than ending abruptly.
     public var tracks: [AnimationTrack] {
         var all: [AnimationTrack] = [
-            // The contract's authored idle is 280, 110, 110, 140, 140, 320 ms;
-            // Codex plays it six times slower, and those are the numbers here.
-            // The middle frames are still quick and the ends still held — a
-            // breath, not an even cycle, and not a nervous one.
+            // 280, 110, 110, 140, 140, 320 — the middle frames are quick and
+            // the ends are held, which is a breath, not an even cycle.
+            //
+            // Codex's own tables multiply these six times over, but that slow
+            // version is only ever glimpsed: in the app it is the settle tail
+            // that follows a state, and the pet that sits on the desktop here
+            // is idle most of the time. Playing a resting pet at 0.6 frames a
+            // second reads as broken, not calm — reported from use on
+            // 2026-09-13, after this runtime had ported the slow version.
             AnimationTrack(
                 name: "idle", row: 0,
-                frameDurations: [1.680, 0.660, 0.660, 0.840, 0.840, 1.920],
+                frameDurations: [0.280, 0.110, 0.110, 0.140, 0.140, 0.320],
                 loop: .loop, kind: .state
             ),
             AnimationTrack(

@@ -14,20 +14,19 @@ private func track(_ name: String, _ profile: CompatibilityProfile = .openAICode
 @Suite("Contract frame timings")
 struct ContractTimingTests {
 
-    /// Every value here is copied from the published animation-row table, with
-    /// idle in the six-times-slower form Codex plays it in (the app's
-    /// `her.map(frameDurationMs * 6)`, the TUI's `idle_animation`). The point
-    /// of the table is that timings are *not* uniform, so a single frame rate
-    /// cannot reproduce any of these rows.
+    /// Every value here is copied from the published animation-row table.
+    /// The point of the table is that timings are *not* uniform, so a single
+    /// frame rate cannot reproduce any of these rows.
     @Test("idle holds its ends and quickens its middle")
     func idleTimings() {
         let idle = track("idle")
-        #expect(idle.frameDurations == [1.680, 0.660, 0.660, 0.840, 0.840, 1.920])
+        #expect(idle.frameDurations == [0.280, 0.110, 0.110, 0.140, 0.140, 0.320])
         // The first and last frames are held far longer than the middle ones.
         #expect(idle.frameDurations.first! > idle.frameDurations[1] * 2)
         #expect(idle.frameDurations.last! > idle.frameDurations[3] * 2)
-        // And the whole cycle is the calm one: nearly six seconds, not one.
-        #expect(abs(idle.duration - 6.6) < 0.0001)
+        // And the cycle is a breath — about a second, like the other rows'
+        // passes, not the six-second settle Codex only shows after a state.
+        #expect(abs(idle.duration - 1.10) < 0.0001)
     }
 
     @Test("row durations match the published table")
@@ -76,13 +75,13 @@ struct FrameAdvanceTests {
 
     @Test("a frame is held for its own duration, not a shared one")
     func perFrameDurations() {
-        let idle = track("idle")   // 1680, 660, 660, 840, 840, 1920
+        let idle = track("idle")   // 280, 110, 110, 140, 140, 320
         #expect(idle.frameIndex(at: 0).index == 0)
-        #expect(idle.frameIndex(at: 1.679).index == 0)
-        #expect(idle.frameIndex(at: 1.680).index == 1)
-        #expect(idle.frameIndex(at: 2.339).index == 1)
-        #expect(idle.frameIndex(at: 2.340).index == 2)
-        #expect(idle.frameIndex(at: 3.000).index == 3)
+        #expect(idle.frameIndex(at: 0.279).index == 0)
+        #expect(idle.frameIndex(at: 0.280).index == 1)
+        #expect(idle.frameIndex(at: 0.389).index == 1)
+        #expect(idle.frameIndex(at: 0.390).index == 2)
+        #expect(idle.frameIndex(at: 0.500).index == 3)
     }
 
     @Test("the final frame is held for its own longer duration")

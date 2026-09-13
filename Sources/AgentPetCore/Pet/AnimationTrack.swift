@@ -29,11 +29,13 @@ public enum TrackKind: String, Codable, Sendable, CaseIterable {
 /// frames nearly three times as long as its middle ones. A single fps cannot
 /// express that, and approximating it makes the pet breathe wrong.
 ///
-/// The idle row is also the one place the published table and Codex's playback
-/// disagree: Codex multiplies those six durations by six before playing them
-/// (the app's `ger = her.map(frameDurationMs * 6)`, the TUI's
-/// `idle_animation`), so the calm loop is a slow breath, not a fast blink. The
-/// profile below stores what is played, not what is authored.
+/// The idle row is also the one place Codex's tables and this profile
+/// disagree: Codex multiplies those six durations by six (the app's
+/// `ger = her.map(frameDurationMs * 6)`, the TUI's `idle_animation`), which
+/// makes a breath six seconds long. That version is a settle tail there — a
+/// thing glimpsed after a state, not the resting face of the pet — and a
+/// desktop pet is idle most of the time, so this profile plays the authored
+/// timings.
 ///
 /// `repeats` is the other half of Codex's playback shape, and it separates
 /// two kinds of state. A **moment** — a task finishing, a failure — plays its
