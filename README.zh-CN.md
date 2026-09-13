@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Resources/AppIcon-512.png" width="132" alt="Two cat paw prints on an orange tile">
+</p>
+
 # Agent Pet Runtime
 
 [English](README.md) · **简体中文**

@@ -68,9 +68,9 @@ func squirclePath() -> CGPath {
 func drawIcon(in context: CGContext) {
     let shape = squirclePath()
 
-    // Background: warm paper, not the blue the app used to wear. A white paw
-    // on a blue gradient is Baidu's mark at a glance; a light tile carrying
-    // dark paw prints is the menu bar's own emoji, and belongs to nothing else.
+    // Background: a lively orange, which is a cat's colour and nothing else's.
+    // The icon used to be a white paw on blue — Baidu's mark at a glance. Warm
+    // ground plus dark prints is the menu bar emoji's own arrangement.
     context.saveGState()
     context.addPath(shape)
     context.clip()
@@ -79,8 +79,8 @@ func drawIcon(in context: CGContext) {
     let gradient = CGGradient(
         colorsSpace: space,
         colors: [
-            CGColor(red: 0.99, green: 0.97, blue: 0.92, alpha: 1),
-            CGColor(red: 0.94, green: 0.90, blue: 0.84, alpha: 1),
+            CGColor(red: 1.00, green: 0.72, blue: 0.26, alpha: 1),
+            CGColor(red: 0.95, green: 0.33, blue: 0.10, alpha: 1),
         ] as CFArray,
         locations: [0, 1]
     )!
@@ -95,8 +95,8 @@ func drawIcon(in context: CGContext) {
     let highlight = CGGradient(
         colorsSpace: space,
         colors: [
-            CGColor(red: 1, green: 1, blue: 1, alpha: 0.55),
-            CGColor(red: 1, green: 1, blue: 1, alpha: 0),
+            CGColor(red: 1, green: 0.97, blue: 0.86, alpha: 0.55),
+            CGColor(red: 1, green: 0.97, blue: 0.86, alpha: 0),
         ] as CFArray,
         locations: [0, 1]
     )!
@@ -111,7 +111,7 @@ func drawIcon(in context: CGContext) {
     // Two paw prints walking across the tile, back foot first — the menu bar
     // emoji's arrangement, drawn rather than borrowed: the glyph itself is
     // Apple's artwork and has no business being baked into a shipped bundle.
-    let ink = CGColor(red: 0.20, green: 0.17, blue: 0.15, alpha: 1)
+    let ink = CGColor(red: 0.25, green: 0.14, blue: 0.06, alpha: 1)
     context.setFillColor(ink)
 
     let centre = CGPoint(x: canvas / 2, y: canvas / 2)
