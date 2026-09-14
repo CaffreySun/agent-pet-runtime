@@ -240,8 +240,10 @@ final class PetView: NSView {
             case .message:
                 drawMessage(item, in: rect, isFocused: row.isFocused)
             case .agent:
-                Self.text(item.primary, font: MessagePanelLayout.agentFont)
-                    .draw(in: rect.insetBy(dx: 0, dy: 2.5))
+                if !drawSymbol(item, in: rect) {
+                    Self.text(item.primary, font: MessagePanelLayout.agentFont)
+                        .draw(in: rect.insetBy(dx: 0, dy: 2.5))
+                }
             case .session:
                 Self.text(item.primary, font: MessagePanelLayout.sessionFont,
                           color: .secondaryLabelColor)
@@ -252,6 +254,35 @@ final class PetView: NSView {
                     .draw(in: rect.insetBy(dx: 0, dy: 3))
             }
         }
+    }
+
+    /// Draws an item's symbol, if it has one, centred in its column.
+    ///
+    /// Tinted by hand — the glyph is drawn, then filled through with the label
+    /// colour using `.sourceAtop`, which paints only where the symbol is. SF
+    /// Symbols arrive as template images, and a template drawn directly takes
+    /// the context's fill colour only inside a control.
+    private func drawSymbol(_ item: MessagePanelLayout.Item, in rect: CGRect) -> Bool {
+        guard let name = item.symbolName,
+              let symbol = NSImage(systemSymbolName: name, accessibilityDescription: item.primary)?
+                  .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        else { return false }
+
+        let size = symbol.size
+        let target = CGRect(
+            x: rect.midX - size.width / 2,
+            y: rect.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        let tinted = NSImage(size: size, flipped: false) { frame in
+            symbol.draw(in: frame)
+            NSColor.labelColor.set()
+            frame.fill(using: .sourceAtop)
+            return true
+        }
+        tinted.draw(in: target)
+        return true
     }
 
     /// The usage bar and its number.
