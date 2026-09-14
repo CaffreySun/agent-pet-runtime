@@ -33,8 +33,10 @@ struct ActivityView: View {
 
     private func row(_ activity: AgentActivity) -> some View {
         HStack(spacing: 10) {
-            Text(emoji(for: activity))
+            Image(systemName: AgentGlyph.symbol(for: activity.agentID))
                 .font(.title3)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(activity.agentID)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -106,16 +108,6 @@ struct ActivityView: View {
         .contentShape(Rectangle())
         .onTapGesture { model.focus(activity) }
         .help(activity.focusTarget?.path.map { "Open \($0)" } ?? "No location known for this session")
-    }
-
-    private func emoji(for activity: AgentActivity) -> String {
-        switch activity.agentID {
-        case "claude-code": return "🐱"
-        case "codex":       return "🐼"
-        case "grok":        return "🐸"
-        case "pi":          return "🦊"
-        default:            return "🐾"
-        }
     }
 
     private func stateColor(_ state: AgentState) -> Color {

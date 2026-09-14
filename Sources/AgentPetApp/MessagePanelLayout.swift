@@ -79,24 +79,6 @@ enum MessagePanelLayout {
         }
     }
 
-    /// The glyph a row shows for an agent, in place of its name.
-    ///
-    /// Apple's own symbols, deliberately: an agent's logo belongs to whoever
-    /// makes it, and a third-party app that draws those marks takes on a
-    /// trademark question it does not need. These are generic glyphs — a
-    /// terminal, a bolt, a function sign — chosen because they read at eleven
-    /// points, and the full name stays in the item's `primary` for the verbose
-    /// log and for the image's accessibility description.
-    static func agentSymbol(forAgentID agentID: String) -> String {
-        switch agentID {
-        case "claude-code": return "asterisk"
-        case "codex":       return "terminal"
-        case "grok":        return "bolt"
-        case "pi":          return "function"
-        default:            return "pawprint"
-        }
-    }
-
     /// How wide an icon item is: the glyph, at the size the row draws it.
     nonisolated static let iconItemWidth: CGFloat = 13
 
@@ -140,7 +122,7 @@ enum MessagePanelLayout {
                 // Agents page is for.
                 return Item(kind: .agent, primary: row.agentName, secondary: nil,
                             context: nil, width: iconItemWidth, isFlexible: false,
-                            symbolName: agentSymbol(forAgentID: row.agentID),
+                            symbolName: AgentGlyph.symbol(for: row.agentID),
                             minimumWidth: iconItemWidth)
             case .session:
                 guard !row.sessionSuffix.isEmpty else { return nil }
