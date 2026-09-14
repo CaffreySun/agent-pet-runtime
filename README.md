@@ -160,13 +160,19 @@ Playback is layered, first match wins:
 |---|---|
 | 1. Dragging | which way you are moving it — `running-left` / `running-right` |
 | 2. A playing gesture | one-shots: `jumping`, `waving` |
-| 3. Agent state | the table above |
-| 4. Gaze | where your pointer is — sixteen poses, 22.5° apart |
+| 3. Your pointer, on the pet | `jumping`, played once and held — Codex's hover |
+| 4. Agent state | the table above |
 | 5. Idle | the fallback |
 
-Dragging outranks everything: you are holding it. Gaze only applies when the pet
-would otherwise be idle, and falls back while the pointer is too close to give a
-direction — the contract's "no-vector deadzone".
+Dragging outranks everything: you are holding it, and so does the pointer
+landing on the pet.
+
+Gaze is folded into the rows rather than layered under them, which is how
+Codex's own sprite works: the look frame *replaces* the animation, and only for
+the three rows whose state it offers one to — `idle`, `running` and `waving`. So
+a working pet watches your pointer instead of running, a waiting one keeps
+asking, and the deadzone is a single point: the pet looks at your cursor
+wherever it is, and only stops when it is exactly on its centre.
 
 ## What the pet says
 
@@ -318,6 +324,10 @@ corrected specification.
 |---|---|
 | Core, pet loading, validation, activity engine | done |
 | Floating pet, drag, gaze, position memory | done |
+| Pet size — Codex's own 112pt, or its two ends | done — set in the manager's Settings |
+| The pointer landing on the pet plays the jump | done — Codex's hover, held on the last frame |
+| The pet introduces itself once, waving | done — eight seconds, once per pet |
+| Tuck the pet away and wake it again | done — the menu bar item, remembered across launches |
 | Event bridge, verified against the real binary | done |
 | Pet Manager: list Codex's pets, preview, pick one | done — read-only; pets are installed with Codex's own tooling |
 | Agent Integrations: detect, configure, remove | Claude Code only |
