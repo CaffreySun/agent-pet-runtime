@@ -87,6 +87,14 @@ final class BridgeCoordinator {
         } catch {
             status.isListening = false
             status.error = "\(error)"
+            // Worth saying out loud: a pet that receives nothing looks the same
+            // from the outside whether the bridge failed or the agents are
+            // quiet, and the menu is the only other place this shows up.
+            if CommandLine.arguments.contains("--verbose") {
+                FileHandle.standardError.write(Data(
+                    "[pet] bridge: \(error)\n".utf8
+                ))
+            }
         }
         onStatusChange?()
     }

@@ -41,12 +41,35 @@ public final class BridgeServer: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
+    /// How long to wait for another runtime to finish leaving before giving up
+    /// on the socket path. An upgrade stops the old app and starts the new one,
+    /// so for a moment both exist and the old one still answers.
+    static let handoverWait: TimeInterval = 1
+
+    /// How often to look while waiting for that handover.
+    static let handoverPoll: TimeInterval = 0.2
+
     public func start() throws {
         try BridgeSocketLocation.validate(socketURL)
         try FileManager.default.createDirectory(
             at: socketURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+
+        // A socket that *answers* is not ours to remove. Every hook in the
+        // user's agents connects to this one path, so a second runtime that
+        // unlinks it leaves the first pet deaf until it restarts — the pet the
+        // user is actually watching. A file left behind by a crash is the
+        // opposite case: nothing answers on it, it would make bind fail, and
+        // removing it is exactly what it is for.
+        var waited: TimeInterval = 0
+        while BridgeSocketLocation.hasListener(at: socketURL) {
+            guard waited < Self.handoverWait else {
+                throw BridgeSocketError.alreadyRunning(path: socketURL.path)
+            }
+            Thread.sleep(forTimeInterval: Self.handoverPoll)
+            waited += Self.handoverPoll
+        }
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw BridgeSocketError.cannotCreateSocket(errno: errno) }
@@ -56,7 +79,7 @@ public final class BridgeServer: @unchecked Sendable {
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
 
-        // A socket left behind by a crashed run would make bind fail.
+        // Nothing answered above, so whatever is here is a leftover.
         unlink(socketURL.path)
 
         var address = sockaddr_un()

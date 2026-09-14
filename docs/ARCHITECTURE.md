@@ -495,6 +495,26 @@ dedupeKey = hash(agentID, eventName, sessionID, payloadEventID)
 
 回放与实时事件在时间上可能交错：同一个 session 若实时事件先到，旧的回放事件会被引擎乱序保护丢弃（§4.6）——结局仍然是最新状态胜出。
 
+### 5.5 socket 的归属：会应答的 socket 不是我们的（2026-09-14 修正）
+
+原实现 `BridgeServer.start()` **无条件 `unlink(socketURL.path)` 再 bind**。注释写的理由是"崩溃留下的 socket 会让 bind 失败"——对，但它同时意味着：**第二个实例会把正在运行的实例的 socket 删掉**。所有 hook 都连这一个固定路径，所以旧实例从此一个事件都收不到（它的 fd 指向已被 unlink 的 inode，谁也连不进来），直到用户重启它。手工再启动一次 App、`open -n`、或用户从终端跑二进制，都会触发。
+
+现在 bind 之前先**探测**：
+
+| 探测结果 | 动作 | 理由 |
+|---|---|---|
+| `connect()` 成功（有人在听） | 不 unlink，等待交接，超时后抛 `alreadyRunning` | 抢过来 = 让用户正看着的那只宠物变聋 |
+| `connect()` 失败（文件在，没人听） | unlink 后照常 bind | 崩溃残留正是 unlink 存在的意义 |
+| 文件不存在 | 照常 bind | 首次启动 |
+
+**等待（`handoverWait` 1s，每 200ms 重探一次）是为升级路径准备的**：cask 先 SIGTERM 旧 App 再装新包，两者可能短暂并存。若没有这段等待，"修好抢 socket"反而会让升级后的新实例起不来 bridge——比原来更糟。
+
+判定用 `connect()` 而不是"文件是否存在"：崩溃残留的文件存在但拒绝连接（ECONNREFUSED），活的 runtime 会应答。探测连接立刻关闭，服务端把它当作一个来了又走的 peer（不写任何东西，不产生"畸形帧"）。
+
+失败面：`BridgeSocketError` 实现了 `CustomStringConvertible`（这些字符串要出现在 Event Bridge 菜单和诊断包里，写的是"发生了什么"而不是"抛了哪个 case"），`BridgeCoordinator` 在 `--verbose` 下额外打一行 stderr——**没有事件和 bridge 起不来，从外面看是一模一样的**，这正是它以前难被发现的原因。
+
+测试：`BridgeEndToEndTests` 里两条——"第二个 runtime 不碰会应答的 socket"（随后用真实 shim 投递，断言仍是第一个收到）与"崩溃残留的 socket 会被回收"（手工 bind 后 close，制造出崩溃留下的那种文件）。
+
 ---
 
 ## 6. Pet 来源与生命周期（2026-09-13 修正）
