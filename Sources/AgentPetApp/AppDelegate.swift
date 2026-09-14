@@ -40,8 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let greetedKey = "pet.greeted.ids"
 
     /// How often a placeholder is checked against the process table. Long: a
-    /// session that has exited is a row that is merely stale, and its first
-    /// hook would have replaced it anyway.
+    /// session that has exited is a row that is merely stale for one more
+    /// minute, and one that never speaks at all is retired by age rather
+    /// than by this scan (`ActivityTuning.placeholderLifetime`).
     private static let placeholderPollInterval: TimeInterval = 60
 
     /// Runs only while a scan's guess is still standing.
@@ -180,7 +181,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// these arrive as placeholders at the lowest confidence. The first real
     /// event from the same process replaces one — which is why this runs
     /// *before* the spool is replayed: a replayed event adopts its placeholder
-    /// on the way in.
+    /// on the way in. One that no event ever comes to replace is retired by
+    /// the engine after `ActivityTuning.placeholderLifetime`: the process it
+    /// names is usually a session sitting at its prompt — alive, working on
+    /// nothing — and a guess nothing can fill must not stand forever.
     private func scanForRunningSessions() {
         guard !HeadlessMode.isActive else { return }
         let profiles = AgentIntegrationRegistry.all(transaction: ConfigTransaction(
@@ -210,6 +214,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             kind: .sessionStarted,
             at: Date(),
             confidence: EventConfidence(level: .low, source: "process scan"),
+            // The directory is what the session is working on, and the only
+            // readable thing a guess has to show: without it the activity
+            // list draws a bare terminal name beside an agent and reads as
+            // an empty row.
+            summary: running.workingDirectory.map { $0.lastPathComponent },
             projectPath: running.workingDirectory,
             focusTarget: running.workingDirectory.map { .openingDirectory($0) },
             processID: running.processID,
@@ -217,11 +226,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    /// Keeps the guesses honest: a session that is still running stays, one
-    /// whose process has gone is dropped.
+    /// Keeps the guesses honest: a session whose process has gone is dropped
+    /// rather than kept until it ages out.
     ///
-    /// The timer only runs while there is something to check, so the steady
-    /// state — every session has spoken for itself — costs nothing at all.
+    /// Retirement by age is the engine's job (`placeholderLifetime`); this
+    /// timer exists only to notice a process that leaves early. It runs only
+    /// while there is something to check, so the steady state — every session
+    /// has spoken for itself — costs nothing at all.
     private func startWatchingPlaceholders() {
         guard !controller.placeholderProcessIDs.isEmpty, placeholderTimer == nil else { return }
 
@@ -246,11 +257,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let names = Dictionary(uniqueKeysWithValues: profiles.map { ($0.agentID, $0.detection.executableNames) })
         let running = RunningAgents.scan(profiles: AgentProfiles.all, executableNames: names)
 
-        for guess in running {
-            controller.ingest(placeholderEvent(for: guess))
-        }
         // Anything still being guessed at whose process is not in this scan has
-        // exited — or has spoken for itself already, which the engine handles.
+        // exited. The running ones are left exactly as they are: re-ingesting
+        // them refreshed their age and re-created rows the engine had already
+        // replaced, and a guess that never speaks is retired by lifetime, not
+        // kept alive by being re-guessed.
         for processID in controller.placeholderProcessIDs
         where !running.contains(where: { $0.processID == processID }) {
             controller.forgetPlaceholder(processID: processID)
