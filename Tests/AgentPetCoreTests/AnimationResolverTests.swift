@@ -346,15 +346,59 @@ struct PresentationLayerTests {
         #expect(after?.trackName == "running", "a finished gesture must yield to the state")
     }
 
-    @Test("gaze is used only when the pet would otherwise be idle")
-    func gazeOnlyWhenIdle() {
+    @Test("the gaze replaces the idle row")
+    func gazeReplacesIdle() {
         let gazing = resolver.resolve(situation(look: 90), profile: v2)
         #expect(gazing?.row == 9)
         #expect(gazing?.column == 4)
+    }
 
-        // A working agent is more important than where the pointer is.
-        let working = resolver.resolve(situation(state: .running, look: 90), profile: v2)
-        #expect(working?.trackName == "running")
+    @Test("the gaze replaces the running row too, which is what Codex does")
+    func gazeReplacesRunning() {
+        // Its mascot passes a look frame exactly when the row it would play is
+        // `idle`, `running` or `waving`, and the sprite draws the look frame
+        // instead of the animation. A working pet therefore watches the
+        // pointer just as an idle one does.
+        for elapsed in [0.5, 60.0] {
+            let frame = resolver.resolve(
+                situation(state: .running, stateElapsed: elapsed, look: 90), profile: v2
+            )
+            #expect(frame?.row == 9, "a working pet looks where the pointer is")
+            #expect(frame?.column == 4)
+        }
+    }
+
+    @Test("the gaze leaves the rows Codex leaves alone")
+    func gazeSparesOtherRows() {
+        // `waiting`, `failed` and `review` play: their states are not rows the
+        // mascot hands a look frame to.
+        for state in [AgentState.waitingInput, .waitingApproval, .failed, .completed] {
+            let frame = resolver.resolve(situation(state: state, look: 90), profile: v2)
+            #expect(frame?.trackName == state.animationTrackName, "\(state)")
+        }
+
+        // A moment that has settled into its idle tail is still `review` to
+        // Codex, so it is still not a gaze row.
+        let settled = resolver.resolve(
+            situation(state: .completed, stateElapsed: 10, look: 90), profile: v2
+        )
+        #expect(settled?.trackName == "idle")
+        #expect(settled?.row == 0)
+    }
+
+    @Test("a wave gives way to the gaze, a jump does not")
+    func gesturesAndGaze() {
+        // Both are one-shots, and only one of them is a row Codex replaces:
+        // `waving` is in its gaze set, `jumping` is not.
+        let waving = resolver.resolve(
+            situation(gesture: .init(trackName: "waving", elapsed: 0.05), look: 90), profile: v2
+        )
+        #expect(waving?.row == 9)
+
+        let jumping = resolver.resolve(
+            situation(gesture: .init(trackName: "jumping", elapsed: 0.05), look: 90), profile: v2
+        )
+        #expect(jumping?.trackName == "jumping")
     }
 
     @Test("a V1 pet ignores gaze, having nowhere to put it")
@@ -440,16 +484,19 @@ struct PresentationLayerTests {
         }
     }
 
-    @Test("a working pet does not hand over to gaze")
-    func workingIgnoresGaze() {
-        // The agent is still working, so the pet must not turn away to watch
-        // the pointer — at any point in the state's life.
-        for elapsed in [0.5, 60.0] {
-            let frame = resolver.resolve(
-                situation(state: .running, stateElapsed: elapsed, look: 90), profile: v2
-            )
-            #expect(frame?.trackName == "running", "gaze would have shown a look row")
-        }
+    @Test("a drag outranks the gaze, and a hover outranks it too")
+    func gazeYieldsToHands() {
+        // Locomotion is not a gaze row, and neither is the jump the pointer
+        // arriving plays: direct manipulation and the pointer itself both win.
+        let dragged = resolver.resolve(
+            situation(drag: .init(direction: .right, elapsed: 0.5), look: 90), profile: v2
+        )
+        #expect(dragged?.trackName == "running-right")
+
+        let jumped = resolver.resolve(
+            situation(hover: .init(elapsed: 0.1), look: 90), profile: v2
+        )
+        #expect(jumped?.trackName == "jumping")
     }
 
     @Test("reduced motion holds the first frame of whatever would have played")
