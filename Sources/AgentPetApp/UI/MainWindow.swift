@@ -25,8 +25,18 @@ enum ManagerSection: String, CaseIterable, Identifiable {
 struct MainWindowView: View {
     @ObservedObject var model: AgentPetModel
 
+    /// The sidebar's state, in the model because the window rebuilds its view
+    /// tree every time it is opened (see `MainWindowController.show`) and a
+    /// `@State` here would start over as "shown" every time.
+    private var visibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { model.showsSidebar ? .all : .detailOnly },
+            set: { model.showsSidebar = ($0 != .detailOnly) }
+        )
+    }
+
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: visibility) {
             List(ManagerSection.allCases, selection: $model.section) { item in
                 Label(item.rawValue, systemImage: item.symbol).tag(item)
             }
@@ -44,6 +54,23 @@ struct MainWindowView: View {
             // section is a subtitle rather than something that renames the
             // window every time a sidebar row is clicked.
             .navigationSubtitle(model.section.rawValue)
+        }
+        // The sidebar toggle belongs in the toolbar, at the leading edge, where
+        // every Mac app puts it — Mail, Notes, Finder. Without a toolbar of its
+        // own this window had none: SwiftUI fell back to drawing a toggle
+        // inside the sidebar pane, and that fallback is what moved about when
+        // the sidebar opened and closed.
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    model.showsSidebar.toggle()
+                } label: {
+                    Image(systemName: "sidebar.leading")
+                }
+                .help(model.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
+                // ⌃⌘S, the shortcut the system gives this command.
+                .keyboardShortcut("s", modifiers: [.control, .command])
+            }
         }
         .frame(minWidth: 760, minHeight: 520)
         .onAppear { model.refreshAll() }
@@ -134,6 +161,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: Self.makeContent(model: model))
         window.title = "Agent Pet Runtime"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        // The style a window with a sidebar uses: title and toolbar on one
+        // line, the traffic lights inline with them.
+        window.toolbarStyle = .unified
         window.setContentSize(NSSize(width: 860, height: 580))
         window.center()
         window.isReleasedWhenClosed = false

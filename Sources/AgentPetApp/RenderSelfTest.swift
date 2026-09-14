@@ -161,6 +161,7 @@ enum RenderSelfTest {
         failures += checkBehaviourLayers(controller: controller, view: view)
         failures += checkMessagePanel(controller: controller, view: view, petSize: petSize)
         failures += checkReopenedWindow()
+        failures += checkManagerSidebar()
 
         print("")
         print(failures == 0 ? "PASS" : "FAIL (\(failures) problem(s))")
@@ -666,6 +667,59 @@ enum RenderSelfTest {
             failures += 1
         }
 
+        window.close()
+        return failures
+    }
+
+    /// The manager's sidebar toggle: in the window's toolbar, and in the same
+    /// place whether the sidebar is open or closed.
+    ///
+    /// Both halves were wrong. The window had no toolbar at all — SwiftUI only
+    /// installs one when the view declares toolbar content — so the split view
+    /// fell back to drawing its own toggle inside the sidebar pane, and that
+    /// fallback moved by the width of the column when the sidebar was hidden.
+    private static func checkManagerSidebar() -> Int {
+        print("")
+        print("Manager sidebar")
+        var failures = 0
+
+        let model = AgentPetModel(
+            root: BridgeSocketLocation.applicationSupportDirectory,
+            shimPath: "/tmp/none"
+        )
+        let manager = MainWindowController(model: model)
+        manager.show()
+        guard let window = NSApp.windows.first(where: { $0.title == "Agent Pet Runtime" }) else {
+            print("  ✗ the manager did not open")
+            return failures + 1
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        func toggleFrame() -> NSRect? {
+            guard let view = window.toolbar?.items.first?.view, view.window != nil else { return nil }
+            return view.convert(view.bounds, to: nil)
+        }
+
+        guard let open = toggleFrame() else {
+            print("  ✗ the window has no toolbar item to toggle the sidebar with")
+            window.close()
+            return failures + 1
+        }
+        print("  ✓ the toggle lives in the toolbar, at (\(Int(open.minX)),\(Int(open.minY)))")
+
+        model.showsSidebar = false
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        let closed = toggleFrame()
+        if let closed, abs(closed.minX - open.minX) < 1, abs(closed.minY - open.minY) < 1 {
+            print("  ✓ and it stays there when the sidebar is hidden")
+        } else {
+            print("  ✗ the toggle moved: \(closed.map { "(\(Int($0.minX)),\(Int($0.minY)))" } ?? "gone")"
+                  + " against (\(Int(open.minX)),\(Int(open.minY)))")
+            failures += 1
+        }
+
+        model.showsSidebar = true
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
         window.close()
         return failures
     }

@@ -690,11 +690,15 @@ Codex 的设置页有 `Tuck Away Pet` / `Wake Pet`（`petVisible`，默认 true�
 
 **"重开后旧树会不会恢复"这个问题，自检现在每次都会问，并打印答案**（`RenderSelfTest.checkReopenedWindow`：开窗 → 改 model → 计数 `updateNSView` → 关窗 → 重开 → 再计数；基线不过就跳过）。在无头/后台会话里它必然跳过——实测该环境下 `window.isVisible == true` 而 `occlusionState` 恒为 false，即窗口从未被 window server 判定为可见，而 SwiftUI 对不可见窗口本来就跳过更新，于是"冻结"与"没合成"无法区分。**在一个正常桌面会话里跑 `AgentPet --selftest`，那一行会给出 yes/no**；若是 yes，说明这次重建只是保险而非必需（可以再讨论去掉），若是 no，它就是必需的。
 
-### 6.5d 面板里的 agent 列是字形（2026-09-14）
+### 6.5d 面板里的 agent 列是字形，管理器窗口的侧边栏开关进了工具栏（2026-09-14）
 
 **agent 列**：原来画的是 `displayName`（"Claude Code" 在 11.5pt semibold 下约 75pt），在默认 112pt 宠物、200% 面板（224pt）里占掉三分之一。改成 **SF Symbols 字形**（claude-code `asterisk`、codex `terminal`、grok `bolt`、pi `function`、其余 `pawprint`），固定 13pt 宽；完整名字仍在 `Item.primary` 里，供 `--verbose` 的 `[pet] panel:` 行与图像的无障碍描述使用。
 
 **为什么不用各家 logo**：Claude / OpenAI / xAI 的商标属于各自公司，第三方 app 把它们的标识画进 UI 会同时碰到商标（暗示背书/关联）与美术作品著作权两个问题——这类事要么拿到书面许可，要么别做。SF Symbols 是 Apple 授权给 Apple 平台 app 使用的通用字形，与任何厂商标识都不相像，所以没有这个问题；管理器 Activity 页用的 emoji（🐱🐼🐸🦊）同理。**这条是决定，不是权宜**：如果将来想用真 logo，先取得许可，别默默换上去。
+
+**侧边栏开关**：用户报"位置在展开/收起时跳动太大"。实测发现根本原因是**那个窗口压根没有工具栏**（`window.toolbar == nil`）——SwiftUI 只在视图声明了 toolbar 内容时才给窗口装工具栏，没有它 `NavigationSplitView` 就退回到"在侧边栏面板里自己画一个开关"，于是开关的位置随侧边栏列的显隐整体横移约一列宽（170pt）。修法是补上惯例的那一半：`MainWindowView` 声明 `.toolbar { ToolbarItem(placement: .navigation) { … } }`（开关自己控制 `columnVisibility` 绑定），窗口设 `toolbarStyle = .unified`（标题与工具栏同一行的常规样式），并补上 View 菜单里的 `Toggle Sidebar`（⌃⌘S）与 `Enter Full Screen`（⌃⌘F）。侧边栏显隐因此和当前标签页一样存进 model（`AgentPetModel.showsSidebar`），重建视图树时不会复位。自检现在量这件事：开关在工具栏里，且收起/展开两态的坐标一致（实测 (91,592) 两态相同）。
+
+**未能在本会话验证的一点**：SwiftUI 退回画的那个 in-content 开关是否随工具栏出现而消失——它由 SwiftUI 自己绘制，不进 AppKit 视图树，而本会话的窗口拿不到 window server 的可见状态（§6.5c），截图手段也不可用。若升级后看到两个开关，说明它没消失，那就把我们的按钮去掉、改用别的方式绑定。
 
 ### 6.6 状态栏 tap：上下文用量的唯一来源（2026-09-14）
 
