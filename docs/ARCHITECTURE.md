@@ -964,6 +964,10 @@ enum RuntimeConstants {
     static let bridgeReadTimeout  : TimeInterval = 5  // 连上却不说话的对端
     static let descriptorBackoff  : TimeInterval = 0.1 // EMFILE 后的重试间隔（§5.6）
 
+    // 事件捕获（--log-events）
+    static let captureMaxBytes : Int = 8 * 1024 * 1024   // 超过即轮转为 <path>.1
+    static let threadStartGrace : TimeInterval = 1        // 线程未认领连接的宽限（§5.6）
+
     // 未送达事件
     static let spoolMaxEvents  : Int = 200
     static let spoolDirectory  = "pending-events"
