@@ -86,12 +86,51 @@ public enum EventCapture {
         ]
     }
 
+    /// How large a capture may grow before it is rotated out of the way.
+    ///
+    /// `--log-events` is a switch a user may leave on for a day; without a
+    /// ceiling the file grows until the disk notices. One previous file is
+    /// kept (`<path>.1`), so the capture is bounded at twice this and the
+    /// events from just before the rotation are still readable.
+    public static let maximumCaptureBytes = 8 * 1024 * 1024
+
     /// Appends one JSON line, creating the file owner-only.
     ///
     /// An event log records what the user's agents were doing, so it is not
     /// something other accounts on the machine should be able to read. The
     /// default umask would leave it world-readable, and a file that predates
     /// this rule is tightened on every append.
+    /// Moves the capture aside once it has reached its ceiling.
+    ///
+    /// Renamed rather than truncated: a log that silently emptied itself is
+    /// worse than a large one, and the file that was rotated out is where the
+    /// answer to "what happened just before" lives.
+    @discardableResult
+    static func rotateIfNeeded(
+        _ url: URL,
+        appending bytes: Int,
+        maximumBytes: Int,
+        fileManager: FileManager
+    ) -> Bool {
+        guard let size = (try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? NSNumber,
+              size.intValue + bytes > maximumBytes
+        else { return false }
+
+        let previous = url.appendingPathExtension("1")
+        try? fileManager.removeItem(at: previous)
+        try? fileManager.moveItem(at: url, to: previous)
+        return true
+    }
+
+    /// Creates the capture with its first line, owner-only.
+    private static func create(_ url: URL, with data: Data, fileManager: FileManager) {
+        fileManager.createFile(
+            atPath: url.path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
+        )
+    }
+
     public static func append(_ record: [String: Any], to url: URL) {
         guard let data = try? JSONSerialization.data(withJSONObject: record),
               let line = String(data: data, encoding: .utf8)
@@ -100,18 +139,25 @@ public enum EventCapture {
         append(Data((line + "\n").utf8), to: url)
     }
 
-    public static func append(_ data: Data, to url: URL) {
+    public static func append(
+        _ data: Data,
+        to url: URL,
+        maximumBytes: Int = EventCapture.maximumCaptureBytes
+    ) {
         let fileManager = FileManager.default
 
         if !fileManager.fileExists(atPath: url.path) {
-            fileManager.createFile(
-                atPath: url.path,
-                contents: data,
-                attributes: [.posixPermissions: 0o600]
-            )
+            create(url, with: data, fileManager: fileManager)
             return
         }
 
+        if rotateIfNeeded(url, appending: data.count, maximumBytes: maximumBytes, fileManager: fileManager) {
+            // The file this line was going into has just been moved aside, so
+            // the line starts the next one. Skipping this is how a rotation
+            // used to eat exactly the event that caused it.
+            create(url, with: data, fileManager: fileManager)
+            return
+        }
         try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
 
         guard let handle = try? FileHandle(forWritingTo: url) else { return }

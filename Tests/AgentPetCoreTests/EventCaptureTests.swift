@@ -221,3 +221,50 @@ struct EventCaptureFileTests {
         #expect(lines.count == 3)
     }
 }
+
+@Suite("Event capture rotation")
+struct EventCaptureRotationTests {
+
+    private func capture() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-capture-\(UUID().uuidString).jsonl")
+    }
+
+    @Test("a capture rotates once it reaches its ceiling, and keeps what it had")
+    func rotatesAtTheCeiling() {
+        // `--log-events` is a debugging switch a user may leave on all day; the
+        // file used to grow until the disk noticed.
+        let url = capture()
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: url.appendingPathExtension("1"))
+        }
+
+        let line = Data(String(repeating: "x", count: 40).utf8)
+        for _ in 0..<10 { EventCapture.append(line, to: url, maximumBytes: 200) }
+
+        let rotated = url.appendingPathExtension("1")
+        #expect(FileManager.default.fileExists(atPath: rotated.path), "the old file is kept")
+        let live = (try? Data(contentsOf: url)) ?? Data()
+        #expect(live.count <= 200, "the live capture stays under its ceiling")
+
+        // Nothing is lost to the rotation — not even the line that caused it.
+        let previous = (try? Data(contentsOf: rotated)) ?? Data()
+        #expect(live.count + previous.count == 400, "all ten lines survived across the two files")
+    }
+
+    @Test("nothing rotates while the capture is small")
+    func quietUntilTheCeiling() {
+        let url = capture()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let first = Data("one line\n".utf8)
+        let second = Data("another\n".utf8)
+        EventCapture.append(first, to: url, maximumBytes: 200)
+        EventCapture.append(second, to: url, maximumBytes: 200)
+
+        #expect(!FileManager.default.fileExists(atPath: url.appendingPathExtension("1").path))
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
+        #expect(size?.intValue == first.count + second.count, "both lines are there, still appended")
+    }
+}
