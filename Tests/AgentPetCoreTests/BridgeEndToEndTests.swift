@@ -130,6 +130,73 @@ struct BridgeEndToEndTests {
         return box.envelopes.count >= count
     }
 
+    @Test("a second runtime leaves a bridge that answers alone")
+    func secondRuntimeRefusesALiveSocket() async throws {
+        let box = EnvelopeBox()
+        let (first, socket) = try makeServer(box)
+        defer { first.stop() }
+
+        let second = BridgeServer(socketURL: socket, handler: { _ in })
+        defer { second.stop() }
+
+        #expect(throws: BridgeSocketError.alreadyRunning(path: socket.path)) {
+            try second.start()
+        }
+
+        // The point of refusing: the hooks still reach the runtime the user is
+        // watching, rather than a second copy that took the path.
+        let status = try runShim(
+            socket: socket,
+            agent: "claude-code",
+            event: "PreToolUse",
+            payload: #"{"session_id":"kept","cwd":"/tmp/project"}"#
+        )
+        #expect(status == 0)
+        #expect(await waitForEnvelopes(box, count: 1), "the first runtime stopped receiving")
+        #expect(box.messages.isEmpty, "diagnostics: \(box.messages)")
+    }
+
+    @Test("a socket left behind by a crash is reclaimed rather than refused")
+    func staleSocketIsReclaimed() async throws {
+        let box = EnvelopeBox()
+        let socket = URL(fileURLWithPath: "/tmp/ap-\(getpid())-\(Self.socketCounter.next()).sock")
+        try leaveStaleSocket(at: socket)
+        #expect(!BridgeSocketLocation.hasListener(at: socket), "nothing should answer on it")
+
+        let server = BridgeServer(socketURL: socket, handler: { box.add($0) })
+        try server.start()
+        defer { server.stop() }
+
+        try runShim(
+            socket: socket,
+            agent: "claude-code",
+            event: "PreToolUse",
+            payload: #"{"session_id":"after-crash","cwd":"/tmp/project"}"#
+        )
+        #expect(await waitForEnvelopes(box, count: 1))
+    }
+
+    /// Exactly what a crashed runtime leaves: a bound socket file that no one
+    /// is listening on.
+    private func leaveStaleSocket(at url: URL) throws {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        try #require(fd >= 0)
+
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(url.path.utf8CString)
+        withUnsafeMutableBytes(of: &address.sun_path) { destination in
+            pathBytes.withUnsafeBytes { destination.copyBytes(from: $0) }
+        }
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        close(fd)   // the file stays; nothing answers on it any more
+        try #require(bound == 0)
+    }
+
     @Test("a payload sent by the real shim arrives as a usable agent event")
     func fullRoundTrip() async throws {
         let box = EnvelopeBox()
