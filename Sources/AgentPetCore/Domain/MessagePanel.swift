@@ -124,7 +124,7 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
 
         public var explanation: String {
             switch self {
-            case .agent:   return "Which agent the session belongs to."
+            case .agent:   return "Which agent the session belongs to, as its glyph."
             case .session: return "The last six characters of the session id."
             case .task:    return "The session's name, or its repository or project directory."
             case .model:   return "The model serving the session, and its reasoning effort."

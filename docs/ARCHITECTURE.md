@@ -690,6 +690,12 @@ Codex 的设置页有 `Tuck Away Pet` / `Wake Pet`（`petVisible`，默认 true�
 
 **"重开后旧树会不会恢复"这个问题，自检现在每次都会问，并打印答案**（`RenderSelfTest.checkReopenedWindow`：开窗 → 改 model → 计数 `updateNSView` → 关窗 → 重开 → 再计数；基线不过就跳过）。在无头/后台会话里它必然跳过——实测该环境下 `window.isVisible == true` 而 `occlusionState` 恒为 false，即窗口从未被 window server 判定为可见，而 SwiftUI 对不可见窗口本来就跳过更新，于是"冻结"与"没合成"无法区分。**在一个正常桌面会话里跑 `AgentPet --selftest`，那一行会给出 yes/no**；若是 yes，说明这次重建只是保险而非必需（可以再讨论去掉），若是 no，它就是必需的。
 
+### 6.5d 面板里的 agent 列是字形（2026-09-14）
+
+**agent 列**：原来画的是 `displayName`（"Claude Code" 在 11.5pt semibold 下约 75pt），在默认 112pt 宠物、200% 面板（224pt）里占掉三分之一。改成 **SF Symbols 字形**（claude-code `asterisk`、codex `terminal`、grok `bolt`、pi `function`、其余 `pawprint`），固定 13pt 宽；完整名字仍在 `Item.primary` 里，供 `--verbose` 的 `[pet] panel:` 行与图像的无障碍描述使用。
+
+**为什么不用各家 logo**：Claude / OpenAI / xAI 的商标属于各自公司，第三方 app 把它们的标识画进 UI 会同时碰到商标（暗示背书/关联）与美术作品著作权两个问题——这类事要么拿到书面许可，要么别做。SF Symbols 是 Apple 授权给 Apple 平台 app 使用的通用字形，与任何厂商标识都不相像，所以没有这个问题；管理器 Activity 页用的 emoji（🐱🐼🐸🦊）同理。**这条是决定，不是权宜**：如果将来想用真 logo，先取得许可，别默默换上去。
+
 ### 6.6 状态栏 tap：上下文用量的唯一来源（2026-09-14）
 
 hook payload **不含**任何 token 计数——在 2.1.268 的二进制里逐字段确认过：`used_percentage` / `context_window` 只出现在**状态栏** JSON 的 schema 中（`context_window.used_percentage`、`context_window_size`、`total_input_tokens`、`session_name`、`workspace.repo.name`）。这个数字只有 Claude Code 自己算得对：上下文窗口大小取决于模型，而网关背后的模型名外部无从得知（本机实测同一条会话已占用 302k token）。

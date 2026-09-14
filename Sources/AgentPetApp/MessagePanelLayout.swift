@@ -47,7 +47,49 @@ enum MessagePanelLayout {
         let context: SessionContext?
         let width: CGFloat
         let isFlexible: Bool
+        /// An SF Symbol to draw instead of the text, for items that are a mark
+        /// rather than a word.
+        var symbolName: String?
+
+        init(
+            kind: MessagePanelConfig.Kind,
+            primary: String,
+            secondary: String?,
+            context: SessionContext?,
+            width: CGFloat,
+            isFlexible: Bool,
+            symbolName: String? = nil
+        ) {
+            self.kind = kind
+            self.primary = primary
+            self.secondary = secondary
+            self.context = context
+            self.width = width
+            self.isFlexible = isFlexible
+            self.symbolName = symbolName
+        }
     }
+
+    /// The glyph a row shows for an agent, in place of its name.
+    ///
+    /// Apple's own symbols, deliberately: an agent's logo belongs to whoever
+    /// makes it, and a third-party app that draws those marks takes on a
+    /// trademark question it does not need. These are generic glyphs — a
+    /// terminal, a bolt, a function sign — chosen because they read at eleven
+    /// points, and the full name stays in the item's `primary` for the verbose
+    /// log and for the image's accessibility description.
+    static func agentSymbol(forAgentID agentID: String) -> String {
+        switch agentID {
+        case "claude-code": return "asterisk"
+        case "codex":       return "terminal"
+        case "grok":        return "bolt"
+        case "pi":          return "function"
+        default:            return "pawprint"
+        }
+    }
+
+    /// How wide an icon item is: the glyph, at the size the row draws it.
+    nonisolated static let iconItemWidth: CGFloat = 13
 
     struct Row {
         let id: String
@@ -84,9 +126,12 @@ enum MessagePanelLayout {
                 // A row that belongs to no session — the pet's own introduction
                 // — has no agent to name, and a blank column reads as a bug.
                 guard !row.agentName.isEmpty else { return nil }
+                // An icon, not the name: "Claude Code" is three quarters of a
+                // 112pt pet's panel width, and the name is what the manager's
+                // Agents page is for.
                 return Item(kind: .agent, primary: row.agentName, secondary: nil,
-                            context: nil, width: width(of: row.agentName, font: agentFont),
-                            isFlexible: false)
+                            context: nil, width: iconItemWidth, isFlexible: false,
+                            symbolName: agentSymbol(forAgentID: row.agentID))
             case .session:
                 guard !row.sessionSuffix.isEmpty else { return nil }
                 return Item(kind: .session, primary: row.sessionSuffix, secondary: nil,

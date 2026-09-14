@@ -509,6 +509,23 @@ enum RenderSelfTest {
             failures += 1
         }
 
+        // The agent column is a glyph, not a name: "Claude Code" would take
+        // most of the panel's width, and the name is what the Agents page is
+        // for. The name stays on the item for the verbose log.
+        let agentItems = MessagePanelLayout.items(
+            for: panel.rows[0], config: view.currentPanelConfig
+        ).filter { $0.kind == .agent }
+        if let agent = agentItems.first,
+           let symbol = agent.symbolName,
+           NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil,
+           agent.width <= 20,
+           !agent.primary.isEmpty {
+            print("  ✓ the agent column is the glyph '\(symbol)' — \(Int(agent.width))pt, for '\(agent.primary)'")
+        } else {
+            print("  ✗ the agent column is not an icon")
+            failures += 1
+        }
+
         // The other status-line items draw from the same reading. They get a
         // row with room for them: at Codex's pet size a panel carrying every
         // item is full edge to edge, and an item squeezed out entirely would
