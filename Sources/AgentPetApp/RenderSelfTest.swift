@@ -94,6 +94,12 @@ enum RenderSelfTest {
         let states: [AgentState] = [.idle, .running, .waitingInput, .waitingApproval,
                                     .completed, .failed, .paused, .unknown]
 
+        // Pinned to no direction for everything compared here: with a pointer
+        // on screen the look frame replaces the idle and running rows — Codex's
+        // rule, checked on its own further down — and two rows that render the
+        // same pose would compare as one track.
+        controller.aimGaze(at: nil)
+
         // Two states sharing a track must look identical; two states on
         // different tracks must not. Comparing raw state-to-state would flag
         // `waitingInput` and `waitingApproval` as a bug when they are in fact
@@ -267,7 +273,11 @@ enum RenderSelfTest {
             return failures
         }
 
+        // A direction to look in replaces the idle row; taking it away gives
+        // the row back. Both ends are pinned here — the direction the real
+        // pointer happens to give is not something a test can assert.
         controller.previewState(.idle)
+        controller.aimGaze(at: nil)
         let idleFrame = view.currentImage
         controller.aimGaze(at: 90)   // straight right
         if view.currentImage != nil, view.currentImage !== idleFrame {
@@ -278,23 +288,50 @@ enum RenderSelfTest {
         }
 
         controller.aimGaze(at: nil)
-        if view.currentImage !== idleFrame {
-            print("  ✓ with no direction the pet falls back to idle")
+        if view.currentImage === idleFrame {
+            print("  ✓ with no direction the pet falls back to its own row")
         } else {
-            print("  ✗ the deadzone did not fall back to idle")
+            print("  ✗ the pet did not fall back when the direction went away")
             failures += 1
         }
 
-        // Gaze must not outrank an agent that is actually doing something.
+        // The gaze is folded into the rows Codex folds it into: with a
+        // direction to look in, a working pet shows the look pose rather than
+        // its running row — the same picture an idle one shows.
         controller.aimGaze(at: 90)
+        controller.previewState(.running)
+        let workingGazing = view.currentImage
+        controller.previewState(.idle)
+        if workingGazing != nil, workingGazing === view.currentImage {
+            print("  ✓ a working pet looks wherever the pointer is, like an idle one")
+        } else {
+            print("  ✗ the gaze did not replace the running row")
+            failures += 1
+        }
+
+        // With no direction they go back to their own rows.
+        controller.aimGaze(at: nil)
         controller.previewState(.running)
         let working = view.currentImage
         controller.previewState(.idle)
-        if view.currentImage !== working {
-            print("  ✓ a working agent outranks where the pointer is")
+        if working !== view.currentImage {
+            print("  ✓ with no direction each state plays its own row again")
         } else {
-            print("  ✗ gaze overrode an active agent state")
+            print("  ✗ running and idle played the same row")
             failures += 1
+        }
+
+        // And a waiting pet is not a row Codex replaces, so it keeps asking.
+        controller.aimGaze(at: 90)
+        controller.previewState(.waitingInput)
+        let waitingGazing = view.currentImage
+        controller.aimGaze(at: nil)
+        controller.previewState(.waitingInput)
+        if waitingGazing !== view.currentImage {
+            print("  ✗ the gaze replaced a waiting pet's row")
+            failures += 1
+        } else {
+            print("  ✓ a waiting pet keeps asking, whatever the pointer is doing")
         }
 
         controller.aimGaze(at: nil)

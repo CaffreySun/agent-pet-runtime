@@ -139,9 +139,13 @@ public struct AnimationResolver: Sendable {
     ///    way Codex plays it: three passes, then the idle row, which is where
     ///    the loop restarts. The pet keeps breathing while the work continues;
     ///    the message beside it is what says the work is still happening.
-    /// 5. **Gaze** — when the pet would otherwise be idle and the pointer gives
-    ///    it a direction to look in. The contract treats this as an
-    ///    alternative to idle: with no direction vector it falls back.
+    /// 5. **Gaze** — folded into the rows above rather than sitting under
+    ///    them, because that is how Codex folds it: its sprite draws the look
+    ///    frame *instead of* the animation, and only for the three rows whose
+    ///    state it passes a look frame for (`idle`, `running`, `waving`). So a
+    ///    working pet turns to watch the pointer just as an idle one does, and
+    ///    a waiting one does not; with no direction vector everything falls
+    ///    back to the row it would have played.
     /// 6. **Idle**.
     ///
     /// Under reduced motion every layer collapses to the first frame of
@@ -152,6 +156,34 @@ public struct AnimationResolver: Sendable {
         guard situation.reducedMotion else { return frame }
         return AnimationFrame(
             trackName: frame.trackName, row: frame.row, column: 0, isFinished: false
+        )
+    }
+
+    /// Rows Codex shows the look frame *instead of*.
+    ///
+    /// Its mascot component passes `lookFrame` only when the animation it
+    /// would play is one of these — `state: hovered ? "jumping" : state`, then
+    /// `lookFrame: animates ? lookFrame : null` — and the sprite element draws
+    /// the look frame rather than starting the row's timer. Every other row
+    /// plays: `waiting`, `failed`, `review`, the jump, and locomotion.
+    private static let gazeRows: Set<String> = ["idle", "running", "waving"]
+
+    /// The look frame, when the pointer gives a direction and the row it would
+    /// replace is one Codex replaces.
+    private func gaze(
+        overriding track: AnimationTrack,
+        _ situation: PetSituation,
+        _ profile: CompatibilityProfile
+    ) -> AnimationFrame? {
+        guard Self.gazeRows.contains(track.name),
+              profile.hasLookDirections,
+              let angle = situation.lookAngle
+        else { return nil }
+
+        let cell = LookDirection.cell(forAngle: angle)
+        guard let look = profile.track(atRow: cell.row) else { return nil }
+        return AnimationFrame(
+            trackName: look.name, row: cell.row, column: cell.column, isFinished: false
         )
     }
 
@@ -171,7 +203,13 @@ public struct AnimationResolver: Sendable {
             let resolved = frame(for: track, elapsed: gesture.elapsed)
             // A finished gesture falls through to the layers beneath it rather
             // than sticking on its last frame.
-            if !resolved.isFinished { return resolved }
+            if !resolved.isFinished {
+                // A wave is one of Codex's gaze rows — the greeting it plays
+                // while the pet introduces itself is `waving` — so a pointer
+                // with a direction still wins. A jump does not, which is the
+                // difference between the two gestures.
+                return gaze(overriding: track, situation, profile) ?? resolved
+            }
         }
 
         // 3. The pointer on the pet.
@@ -200,6 +238,14 @@ public struct AnimationResolver: Sendable {
             let elapsed = situation.agentStateElapsed
             let passes = track.duration * Double(track.repeats)
 
+            // `running` is the row this layer shares with the gaze; a moment
+            // that has settled into its idle tail is not (Codex's state is
+            // still `review` or `failed` there, and those are not gaze rows).
+            let settledIntoIdle = track.repeats > 1 && elapsed >= passes
+            if !settledIntoIdle, let look = gaze(overriding: track, situation, profile) {
+                return look
+            }
+
             // A condition (`repeats == 1`) loops its row for as long as the
             // state lasts. A moment plays out its passes and then hands over
             // to the idle row, which is where the loop restarts — Codex's
@@ -212,18 +258,10 @@ public struct AnimationResolver: Sendable {
             return frame(for: track, elapsed: elapsed)
         }
 
-        // 5. Gaze.
-        if let angle = situation.lookAngle, profile.hasLookDirections {
-            let cell = LookDirection.cell(forAngle: angle)
-            if let track = profile.track(atRow: cell.row) {
-                return AnimationFrame(
-                    trackName: track.name, row: cell.row, column: cell.column, isFinished: false
-                )
-            }
-        }
-
-        // 6. Idle.
+        // 6. Idle — which is also where the gaze lives for a pet with nothing
+        //    else to do, `idle` being one of the rows the look frame replaces.
         guard let idle = profile.track(named: "idle") else { return nil }
-        return frame(for: idle, elapsed: situation.agentStateElapsed)
+        return gaze(overriding: idle, situation, profile)
+            ?? frame(for: idle, elapsed: situation.agentStateElapsed)
     }
 }

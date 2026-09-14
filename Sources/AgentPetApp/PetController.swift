@@ -16,9 +16,10 @@ final class PetController {
 
     /// How close the pointer must come before it stops meaning a direction.
     ///
-    /// The contract calls this the no-vector deadzone: with no meaningful
-    /// vector there is no gaze angle to pick, and the pet falls back to idle.
-    private static let gazeDeadzone: CGFloat = 28
+    /// One point: Codex's own deadzone is `Math.hypot(r, i) <= uuo` with
+    /// `uuo = 1`, so a pet with a pointer anywhere on screen has a direction to
+    /// look in and only stops looking when the pointer is on its own centre.
+    private static let gazeDeadzone: CGFloat = 1
 
     private let engine: ActivityEngine
     private let resolver = AnimationResolver()

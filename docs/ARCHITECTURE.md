@@ -226,9 +226,17 @@ column = sector mod 8
 2. 手势播放中    → waving / jumping               （one-shot，播完下沉）
 3. 指针停在宠物上 → jumping                        （one-shot，末帧停住，见下）
 4. Agent 状态    → 见 §3.3                        （inactive 状态跳过）
-5. 注视方向      → row 9/10                       （仅 V2，仅在有角度时）
+5. 注视方向      → row 9/10                       （仅 V2，且只在上面某一行的"可被注视替换"时，见下）
 6. idle
 ```
+
+**注视不是独立一层，而是折进上面几行里的**（2026-09-14 照抄 Codex）：Codex 的 mascot 只在将要播放的行是 `idle`/`running`/`waving` 时才把 look frame 传下去（`lookFrame: animates ? lookFrame : null`），而 sprite 元素**用 look frame 直接顶掉那一行的播放**（`if (n != null) { backgroundPosition = Glo(n, rows); return }`，定时器根本不启动）。所以：
+
+- **工作中的宠物会转头看光标**（running 也在集合里），而不是继续跑 running——这与本项目此前的实现相反，照抄后改了；
+- `waiting` / `failed` / `review`、跳跃、拖拽 locomotion 都不在集合里，该播什么播什么（所以"等待你输入"的宠物不会被光标带走）；
+- 一个 moment（`completed`/`failed`）播完沉入 idle 尾段时，Codex 的状态仍是 `review`/`failed`，因此**不**接受注视——本项目照此实现（只有状态本身是 idle/running/waving 才给 look frame）；
+- 死区是 **1pt**（Codex 的 `uuo = 1`：`Math.hypot(r, i) <= 1` 才算"没有方向"），所以屏幕上有光标时宠物基本一直在看着它——这是原版行为，不是 bug；
+- 注视只对 V2 有（V1 没有 look 行）：Codex 用 `if (n !== r4.version) return null` 挡住，本项目用 `hasLookDirections`。
 
 **第 3 层是照抄 Codex 的**（2026-09-14 补）。Codex 的 mascot 组件是 `state: hovered ? "jumping" : state`，而它的 sprite 定时器对 one-shot 播完即停（`if (t.loopStartIndex != null) … else { a = null; return }`）——所以**光标停上去只跳一次，之后停在落地那一帧，直到光标离开**，不是循环。这不是"没做好的循环"，是这个 feature 本来的样子：`AnimationResolver` 里 `frameIndex` 对 one-shot 天然钳在末帧，正好就是那个"停住"。拖动（第 1 层）与手势（第 2 层）都排在它上面；**放下宠物时重新起跳**（`endDrag` 重置 hover 计时），因为 Codex 的行切换会重启轨道。追踪区域只覆盖精灵本体，面板上方不算 hover。
 
