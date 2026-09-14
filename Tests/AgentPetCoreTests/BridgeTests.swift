@@ -410,3 +410,24 @@ struct BridgeAcceptFailureTests {
         #expect(!server.isAccepting, "the menu must not say Listening for a bridge that never ran")
     }
 }
+
+@Suite("Bridge orphaned connections")
+struct BridgeAbandonedConnectionTests {
+
+    @Test("a connection its thread never claimed is swept, a claim is not")
+    func sweepRule() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let justStarted: Int32 = 3
+        let waiting: Int32 = 4
+
+        let unclaimed: [Int32: Date] = [
+            justStarted: now.addingTimeInterval(-0.2),   // its thread may still be starting
+            waiting: now.addingTimeInterval(-5),
+        ]
+        #expect(BridgeServer.abandoned(unclaimed, now: now) == [waiting])
+
+        // A thread that reported in has been removed from the map entirely, so
+        // a long-running connection is never swept.
+        #expect(BridgeServer.abandoned([:], now: now).isEmpty)
+    }
+}

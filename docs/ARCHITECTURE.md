@@ -558,6 +558,8 @@ if client < 0 { return }   // "listening socket closed"
 
 测试：`BridgeTests` 的 "Bridge accept failures" 三条分类用例（可恢复/退避/致命）。
 
+**线程没起来的那条连接（2026-09-14 补）**：`Thread.start()` 没有失败返回值——系统不肯给线程时，什么都不跑，`readLoop` 的 `defer close` 也就永不执行，那条描述符与连接计数会被留到进程结束（每次丢一格上限）。现在连接在创建线程前先记进 `unclaimed`，线程体的第一件事是 `claim` 它；accept 循环每轮用 `BridgeServer.abandoned(_:now:)` 扫一遍超过 1 秒仍未被认领的（纯函数，有测试），关掉并归还计数。`stop()` 也会收尾所有未认领的连接。
+
 ---
 
 ## 6. Pet 来源与生命周期（2026-09-13 修正）
