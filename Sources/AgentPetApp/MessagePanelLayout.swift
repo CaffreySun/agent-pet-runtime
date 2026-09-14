@@ -81,10 +81,14 @@ enum MessagePanelLayout {
             guard item.isEnabled else { return nil }
             switch item.kind {
             case .agent:
+                // A row that belongs to no session — the pet's own introduction
+                // — has no agent to name, and a blank column reads as a bug.
+                guard !row.agentName.isEmpty else { return nil }
                 return Item(kind: .agent, primary: row.agentName, secondary: nil,
                             context: nil, width: width(of: row.agentName, font: agentFont),
                             isFlexible: false)
             case .session:
+                guard !row.sessionSuffix.isEmpty else { return nil }
                 return Item(kind: .session, primary: row.sessionSuffix, secondary: nil,
                             context: nil, width: width(of: row.sessionSuffix, font: sessionFont),
                             isFlexible: false)

@@ -647,6 +647,12 @@ Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可
 - **诊断行与画面同源**：`--verbose` 的 `[pet] panel:` 行用与绘制相同的 `MessagePanelLayout.items(for:config:)` 构造，不会打印用户已关掉的项。
 - **布局按 (panel, config) 记忆**（2026-09-14）：`AppDelegate.resizeWindow` 每帧都要 plan，而建一张 plan 要逐个 item 量文字（实测 5 行×9 项 = 460 µs，60 fps 下 27.6 ms/s）。面板与配置是"按事件变"而不是"按帧变"的量，所以 `MessagePanelLayout.plan` 记住上一条结果，命中时只做一次相等比较（实测 1.5 µs，约 0.1 ms/s）。
 
+### 6.5a 初次登场的问候（2026-09-14 补，照抄 Codex）
+
+Codex 的悬浮宠物第一次出现时会弹一条 **8 秒**的临时通知（title `Hi, I'm {petName}`，body `I'm here to help keep your ChatGPT sessions moving`），mascot 状态是 **waving**，并且**每只宠物只问候一次**（持久化 key `first-awake-pet-notification-avatar-ids`）。本项目照此实现：`MessagePanel.Greeting.introduction(petName:)` + `Greeting.lifetime = 8`，`loadPet` 成功时若该 pet id 未问候过就 `controller.introduce(petName:)`（挥手一次 + 面板里那一行）。与 Codex 的差异只有一处：body 去掉了产品名（"sessions moving"，因为这里看的是 CLI agent）。**诊断运行（`--selftest`/`--diagnose`）不问候也不记账**——那会花掉用户真正的那一次。已问候的 id 存在 UserDefaults（`pet.greeted.ids`，与窗口位置同类，属于记账而不是设置）。
+
+问候行是 `MessagePanel` 里唯一**不属于任何会话**的行，所以 `MessagePanelLayout.items` 现在会跳过内容为空的 agent/session 项——否则那一行会画出空白的 agent 名和 session 尾号。它也必须能在"没有任何会话"和 `alwaysVisible=false` 时出现：宠物在说自己，不是在显示会话。
+
 ### 6.6 状态栏 tap：上下文用量的唯一来源（2026-09-14）
 
 hook payload **不含**任何 token 计数——在 2.1.268 的二进制里逐字段确认过：`used_percentage` / `context_window` 只出现在**状态栏** JSON 的 schema 中（`context_window.used_percentage`、`context_window_size`、`total_input_tokens`、`session_name`、`workspace.repo.name`）。这个数字只有 Claude Code 自己算得对：上下文窗口大小取决于模型，而网关背后的模型名外部无从得知（本机实测同一条会话已占用 302k token）。
@@ -915,6 +921,9 @@ enum RuntimeConstants {
     static let failedStale     : TimeInterval = 600
     // 会话保留上限（与状态无关，见 §4.5a）：一天没被听到就不再保留
     static let silentSessionLifetime : TimeInterval = 86_400
+
+    // 初次问候（= Codex 的 first-awake：8 秒、每只宠物一次、waving）
+    static let greetingLifetime : TimeInterval = 8
 
     // 宠物尺寸（= Codex 的 avatar-overlay-mascot-width-px 默认值与两端）
     static let petWidthSmall    = 80

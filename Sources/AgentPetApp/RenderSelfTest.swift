@@ -220,6 +220,40 @@ enum RenderSelfTest {
         }
         controller.clearPreview()
 
+        // The introduction: the pet waves and the panel carries the words.
+        // Codex shows its own for eight seconds, once per pet.
+        let beforeGreeting = view.currentImage
+        controller.introduce(petName: "Clippy")
+        let greetingRow = view.currentPanel.rows.first
+        let greetingLabel = greetingRow?.message?.label
+        let greetingBody = greetingRow?.message?.body
+        if greetingLabel == "Hi, I'm Clippy",
+           greetingBody == "I'm here to help keep your sessions moving",
+           view.currentImage !== beforeGreeting {
+            print("  ✓ the pet introduces itself, and waves while it does")
+        } else {
+            print("  ✗ the introduction is wrong: "
+                  + "\(greetingLabel ?? "no row") / \(greetingBody ?? "-")")
+            failures += 1
+        }
+
+        // A row that belongs to no session must not invent the columns a
+        // session row has: a blank agent name or session id reads as a bug,
+        // and the pet's own line has neither.
+        if let greetingRow {
+            let items = MessagePanelLayout.items(for: greetingRow, config: view.currentPanelConfig)
+            let sessionColumns = items.filter { $0.kind == .agent || $0.kind == .session }
+            if sessionColumns.isEmpty {
+                print("  ✓ the introduction carries no session's columns")
+            } else {
+                print("  ✗ the introduction drew a blank agent or session column")
+                failures += 1
+            }
+        }
+        // Retired before the panel checks: they count session rows, and the
+        // introduction is not one.
+        controller.dismissGreeting()
+
         // Gaze only exists in a V2 atlas. A V1 pet has nowhere to put a
         // direction, so "no effect" is the correct result rather than a fault.
         guard let profile = controller.loadedProfile else {
