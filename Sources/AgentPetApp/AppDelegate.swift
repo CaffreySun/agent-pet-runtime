@@ -34,6 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let positionKey = "pet.window.origin"
 
+    /// Pets that have already said hello. Codex keeps the same note — its
+    /// greeting is once per pet, not once per launch, so a user with three
+    /// pets meets each of them as themselves.
+    private static let greetedKey = "pet.greeted.ids"
+
     /// Signal sources that turn a termination signal into a normal quit.
     ///
     /// `brew upgrade` stops the old process before replacing the bundle, and
@@ -59,7 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMainMenu()
         // Read before the window exists: the size decides the window's frame,
         // and the model that owns the settings is built later still.
-        petSize = AppConfigStore().load().pet.size
+        let stored = AppConfigStore().load()
+        petSize = stored.pet.size
+        isPetVisible = stored.pet.visible
         buildWindow()
         buildStatusItem()
         let panelConfig = { [weak self] in
@@ -117,6 +124,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         controller.start()
+        // Tucking the pet away has to survive a relaunch, and the window was
+        // built before this point.
+        setPetVisible(isPetVisible, persist: false)
         // The model exists before the bridge does: an event that arrived in
         // between used to reach the engine but not the manager's view of the
         // world, since `model` was still nil when the bridge delivered it.
@@ -321,6 +331,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openUpdatePage() {
         guard let update = availableUpdate else { return }
         NSWorkspace.shared.open(update.page)
+    }
+
+    /// Tucks the pet away, or wakes it: the same switch Codex puts in its
+    /// settings, where ours belongs in the menu bar the app lives in.
+    @objc private func togglePetVisibility() {
+        setPetVisible(!isPetVisible, persist: true)
+        rebuildMenu()
+    }
+
+    private func setPetVisible(_ visible: Bool, persist: Bool) {
+        isPetVisible = visible
+        if visible {
+            window.orderFrontRegardless()
+            // Frames are only worth choosing while somebody can see them.
+            controller.start()
+        } else {
+            window.orderOut(nil)
+            controller.stop()
+        }
+        if persist { model?.rememberPetVisibility(visible) }
+        if CommandLine.arguments.contains("--verbose") {
+            FileHandle.standardError.write(Data(
+                "[pet] pet \(visible ? "awake" : "tucked away")\n".utf8
+            ))
+        }
     }
 
     @objc private func openManager() {
@@ -707,6 +742,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   action: #selector(openManager), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
+
+        // Codex's "tuck away" / "wake". The pet is the app's only window, so
+        // this is the difference between a pet on screen and a menu bar icon.
+        let visibility = NSMenuItem(
+            title: isPetVisible ? "Tuck Pet Away" : "Wake Pet",
+            action: #selector(togglePetVisibility), keyEquivalent: ""
+        )
+        visibility.target = self
+        menu.addItem(visibility)
 
         if let update = availableUpdate {
             let item = NSMenuItem(

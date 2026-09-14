@@ -219,6 +219,12 @@ final class AgentPetModel: ObservableObject {
         config.pet.defaultPetID = petID
     }
 
+    /// Records whether the pet is on screen, so tucking it away survives a
+    /// relaunch.
+    func rememberPetVisibility(_ visible: Bool) {
+        config.pet.visible = visible
+    }
+
     /// Set by the app to switch the desktop pet.
     var onUsePet: ((PetLibrary.Entry) -> Void)?
 

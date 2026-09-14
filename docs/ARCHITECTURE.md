@@ -653,6 +653,10 @@ Codex 的悬浮宠物第一次出现时会弹一条 **8 秒**的临时通知（t
 
 问候行是 `MessagePanel` 里唯一**不属于任何会话**的行，所以 `MessagePanelLayout.items` 现在会跳过内容为空的 agent/session 项——否则那一行会画出空白的 agent 名和 session 尾号。它也必须能在"没有任何会话"和 `alwaysVisible=false` 时出现：宠物在说自己，不是在显示会话。
 
+### 6.5b 收纳 / 唤醒（2026-09-14 补，照抄 Codex）
+
+Codex 的设置页有 `Tuck Away Pet` / `Wake Pet`（`petVisible`，默认 true）。本项目放在菜单栏（状态菜单与右键菜单同源）：`Tuck Pet Away` / `Wake Pet`，持久化在 `AppConfig.pet.visible`。收纳时窗口 `orderOut` 并 `controller.stop()`（看不见的帧不值得算），唤醒时 `orderFrontRegardless()` 并重新起帧。**应用始终留在菜单栏**——那是唯一的回来的路。
+
 ### 6.6 状态栏 tap：上下文用量的唯一来源（2026-09-14）
 
 hook payload **不含**任何 token 计数——在 2.1.268 的二进制里逐字段确认过：`used_percentage` / `context_window` 只出现在**状态栏** JSON 的 schema 中（`context_window.used_percentage`、`context_window_size`、`total_input_tokens`、`session_name`、`workspace.repo.name`）。这个数字只有 Claude Code 自己算得对：上下文窗口大小取决于模型，而网关背后的模型名外部无从得知（本机实测同一条会话已占用 302k token）。
