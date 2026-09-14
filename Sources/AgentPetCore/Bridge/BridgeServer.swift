@@ -41,6 +41,19 @@ public final class BridgeServer: @unchecked Sendable {
     /// its frame and closes; a peer that does neither is holding a thread.
     static let readTimeout: TimeInterval = 5
 
+    /// How long a connection may go unclaimed before the bridge assumes the
+    /// thread that was meant to serve it never started.
+    static let threadStartGrace: TimeInterval = 1
+
+    /// Connections whose thread has been started but has not reported in.
+    ///
+    /// `Thread.start()` cannot fail loudly: if the system will not create the
+    /// thread, nothing runs, and the descriptor and the connection count would
+    /// be held for the life of the process — one slot of the cap lost each
+    /// time. The accept loop sweeps this instead, so an unclaimed connection is
+    /// closed rather than kept by a thread that never existed.
+    private var unclaimed: [Int32: Date] = [:]
+
     /// Counts frames that arrived but could not be understood. Reported by
     /// diagnostics rather than thrown, because a malformed frame from one
     /// agent must not take the bridge down for the others.
@@ -159,6 +172,15 @@ public final class BridgeServer: @unchecked Sendable {
             close(fd)
             unlink(socketURL.path)
         }
+
+        // Anything still unclaimed is a connection with no thread behind it.
+        stateLock.lock()
+        let stranded = Array(unclaimed.keys)
+        unclaimed.removeAll()
+        openConnections -= stranded.count
+        stateLock.unlock()
+        for client in stranded { close(client) }
+
         acceptThread = nil
     }
 
@@ -197,11 +219,39 @@ public final class BridgeServer: @unchecked Sendable {
     /// is back the moment a descriptor is freed.
     static let descriptorBackoff: TimeInterval = 0.1
 
+    /// The connections in `unclaimed` that have been waiting too long — pure,
+    /// so the rule can be tested without a system that refuses threads.
+    static func abandoned(_ unclaimed: [Int32: Date], now: Date) -> [Int32] {
+        unclaimed.filter { now.timeIntervalSince($0.value) >= threadStartGrace }.map(\.key)
+    }
+
+    /// Closes anything whose thread never claimed it.
+    private func sweepUnclaimedThreads() {
+        let abandoned = Self.abandoned(unclaimed, now: Date())
+        guard !abandoned.isEmpty else { return }
+
+        stateLock.lock()
+        for client in abandoned {
+            _ = unclaimed.removeValue(forKey: client)
+            openConnections -= 1
+        }
+        stateLock.unlock()
+
+        for client in abandoned { close(client) }
+        diagnostic(
+            "the bridge closed \(abandoned.count) connection(s) whose thread never started"
+        )
+    }
+
     private func acceptLoop(fd: Int32) {
         var reportedDescriptorTrouble = false
         var reportedConnectionLimit = false
 
         while true {
+            // Cheap when nothing is pending, and the only moment it can matter:
+            // a connection is only ever added just before its thread starts.
+            sweepUnclaimedThreads()
+
             let client = accept(fd, nil, nil)
             if client < 0 {
                 let code = errno
@@ -270,19 +320,29 @@ public final class BridgeServer: @unchecked Sendable {
             return nil
         }
         openConnections += 1
+        unclaimed[client] = Date()
         stateLock.unlock()
 
         let connection = Thread { [weak self] in
-            defer { self?.connectionFinished() }
+            defer { self?.connectionFinished(client: client) }
+            self?.claim(client)
             self?.readLoop(client: client)
         }
         connection.stackSize = 256 * 1024
         return connection
     }
 
-    private func connectionFinished() {
+    /// The thread is running: this connection is no longer a possible orphan.
+    private func claim(_ client: Int32) {
+        stateLock.lock()
+        unclaimed.removeValue(forKey: client)
+        stateLock.unlock()
+    }
+
+    private func connectionFinished(client: Int32) {
         stateLock.lock()
         openConnections -= 1
+        unclaimed.removeValue(forKey: client)
         stateLock.unlock()
     }
 
