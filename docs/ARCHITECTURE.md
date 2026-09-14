@@ -224,7 +224,7 @@ column = sector mod 8
 ```
 1. 拖动中        → running-left / running-right   （用户手上拿着它）
 2. 手势播放中    → waving / jumping               （one-shot，播完下沉）
-3. 指针停在宠物上 → jumping                        （one-shot，末帧停住，见下）
+3. 指针停在宠物上 → jumping                        （三遍，然后接 idle 段，见下）
 4. Agent 状态    → 见 §3.3                        （inactive 状态跳过）
 5. 注视方向      → row 9/10                       （仅 V2，且只在上面某一行的"可被注视替换"时，见下）
 6. idle
@@ -238,7 +238,16 @@ column = sector mod 8
 - 死区是 **1pt**（Codex 的 `uuo = 1`：`Math.hypot(r, i) <= 1` 才算"没有方向"），所以屏幕上有光标时宠物基本一直在看着它——这是原版行为，不是 bug；
 - 注视只对 V2 有（V1 没有 look 行）：Codex 用 `if (n !== r4.version) return null` 挡住，本项目用 `hasLookDirections`。
 
-**第 3 层是照抄 Codex 的**（2026-09-14 补）。Codex 的 mascot 组件是 `state: hovered ? "jumping" : state`，而它的 sprite 定时器对 one-shot 播完即停（`if (t.loopStartIndex != null) … else { a = null; return }`）——所以**光标停上去只跳一次，之后停在落地那一帧，直到光标离开**，不是循环。这不是"没做好的循环"，是这个 feature 本来的样子：`AnimationResolver` 里 `frameIndex` 对 one-shot 天然钳在末帧，正好就是那个"停住"。拖动（第 1 层）与手势（第 2 层）都排在它上面；**放下宠物时重新起跳**（`endDrag` 重置 hover 计时），因为 Codex 的行切换会重启轨道。追踪区域只覆盖精灵本体，面板上方不算 hover。
+**第 3 层是照抄 Codex 的**（2026-09-14 补，同日修正）。Codex 的 mascot 组件是 `state: hovered ? "jumping" : state`；至于这一行怎么播，真正的出处是它构造轨道的 `Ulo(state, hasLookFrame)`：
+
+```js
+if (hasLookFrame) return { frames: [row[0]], loopStartIndex: null };   // 注视：单帧
+if (state === 'idle') return { frames: idleFrames, loopStartIndex: 0 };
+let r = [...row, ...row, ...row];
+return { frames: [...r, ...idleFrames], loopStartIndex: r.length };    // 其余每个状态
+```
+
+**除 idle 与注视单帧之外，每个状态都是"三遍 + idle 段，从 idle 段起无限循环"**——jumping 也不例外。所以光标停在宠物上：跳三遍（约 2.5 秒）**然后接着呼吸，直到光标离开**，不是跳一次然后冻在落地帧。本项目第一版读漏了 `loopStartIndex`（只看定时器里 `if (t.loopStartIndex != null) … else { a = null }` 那一行就下了结论），把 jumping/waving 当成 one-shot 播一遍，用户实测指出后才查回 `Ulo`。现在 `waving`/`jumping` 与 `failed`/`review` 一样是 **moment（`repeats = 3`、`loop: .loop`）**，三层（状态/手势/hover）共用 `AnimationResolver.moment(_:elapsed:)` 这个"三遍 → idle 段"的实现。拖动（第 1 层）与手势（第 2 层）都排在 hover 上面；**放下宠物时重新起跳**（`endDrag` 重置 hover 计时）。追踪区域只覆盖精灵本体，面板上方不算 hover。
 
 两条容易写错的规则：
 

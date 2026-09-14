@@ -102,16 +102,36 @@ struct FrameAdvanceTests {
 
     @Test("a one-shot holds its last frame and reports finished")
     func oneShotHolds() {
-        let waving = track("waving")
-        #expect(!waving.frameIndex(at: waving.duration - 0.001).finished)
+        // No shipped row is a one-shot any more — every row Codex plays is a
+        // moment, three passes and then the idle segment — but the mode is
+        // still part of the track model, so it is tested on a track of its own.
+        let once = AnimationTrack(
+            name: "once", row: 3, frameCount: 4,
+            frameDuration: 0.140, finalFrameDuration: 0.280,
+            loop: .once, kind: .gesture
+        )
+        #expect(!once.frameIndex(at: once.duration - 0.001).finished)
 
-        let done = waving.frameIndex(at: waving.duration)
-        #expect(done.index == waving.frameCount - 1)
+        let done = once.frameIndex(at: once.duration)
+        #expect(done.index == once.frameCount - 1)
         #expect(done.finished)
 
-        let muchLater = waving.frameIndex(at: 100)
-        #expect(muchLater.index == waving.frameCount - 1, "a finished one-shot must not wrap")
+        let muchLater = once.frameIndex(at: 100)
+        #expect(muchLater.index == once.frameCount - 1, "a finished one-shot must not wrap")
         #expect(muchLater.finished)
+    }
+
+    @Test("the shipped gestures are moments, not one-shots")
+    func gesturesAreMoments() {
+        // What the frame indices rest on: hovering plays the jump three times
+        // and then breathes, so `jumping` must wrap within its passes rather
+        // than clamp on the landing frame.
+        for name in ["waving", "jumping"] {
+            let gesture = track(name)
+            #expect(gesture.repeats == 3, "\(name) plays three passes")
+            #expect(gesture.loop == .loop, "\(name) wraps within them")
+            #expect(!gesture.frameIndex(at: gesture.duration + 0.01).finished)
+        }
     }
 
     @Test("a static pose never advances, however long it is held")
@@ -228,23 +248,35 @@ struct PresentationLayerTests {
         )
     }
 
-    @Test("the pointer on the pet plays the jump, and the landing pose is held")
-    func hoverPlaysTheJumpAndHolds() {
-        // Codex's mascot is `state: hovered ? "jumping" : state`, and its
-        // sprite timer stops on the last frame of a one-shot. Ported as it is:
-        // one jump per arrival, then the pose it landed in — not a loop, and
-        // not a fall-through to idle.
+    @Test("the pointer on the pet plays the jump three times, then it breathes")
+    func hoverPlaysTheJumpThenSettles() {
+        // Codex: `state: hovered ? "jumping" : state`, and every state but
+        // `idle` is built as three passes of its row followed by the idle
+        // segment, looping from there (`Ulo`'s `loopStartIndex`). So the pet
+        // jumps, lands, and goes on breathing for as long as the pointer
+        // stays — it does not freeze on the landing pose.
         let jumping = track("jumping")
         let first = resolver.resolve(situation(hover: .init(elapsed: 0)), profile: v1)
         #expect(first?.trackName == "jumping")
         #expect(first?.row == 4)
         #expect(first?.column == 0)
 
-        let held = resolver.resolve(
-            situation(hover: .init(elapsed: jumping.duration + 10)), profile: v1
+        // Still jumping in the second pass.
+        let second = resolver.resolve(
+            situation(hover: .init(elapsed: jumping.duration + 0.05)), profile: v1
         )
-        #expect(held?.column == jumping.frameCount - 1, "the last frame stays put")
-        #expect(held?.isFinished == true)
+        #expect(second?.trackName == "jumping")
+
+        // Past the third pass: the idle row, moving.
+        let settled = resolver.resolve(
+            situation(hover: .init(elapsed: jumping.duration * 3 + 0.05)), profile: v1
+        )
+        #expect(settled?.trackName == "idle")
+        let later = resolver.resolve(
+            situation(hover: .init(elapsed: jumping.duration * 3 + 0.5)), profile: v1
+        )
+        #expect(later?.trackName == "idle")
+        #expect(later?.column != settled?.column, "and it keeps animating, not holding")
     }
 
     @Test("hovering outranks the agent state, and gives it back on the way out")
@@ -330,8 +362,11 @@ struct PresentationLayerTests {
         #expect(frame?.trackName == "running-left")
     }
 
-    @Test("a gesture plays over the agent state until it finishes")
+    @Test("a gesture plays over the agent state until its passes are done")
     func gestureOverridesState() {
+        // A gesture is a moment too: three passes, and then the layers beneath
+        // it are the better answer (`PetController` keeps the gesture alive
+        // only for that long).
         let waving = track("waving")
         let during = resolver.resolve(
             situation(state: .running, gesture: .init(trackName: "waving", elapsed: 0.1)),
@@ -339,11 +374,20 @@ struct PresentationLayerTests {
         )
         #expect(during?.trackName == "waving")
 
-        let after = resolver.resolve(
-            situation(state: .running, gesture: .init(trackName: "waving", elapsed: waving.duration + 1)),
+        let secondPass = resolver.resolve(
+            situation(state: .running, gesture: .init(trackName: "waving", elapsed: waving.duration + 0.1)),
             profile: v1
         )
-        #expect(after?.trackName == "running", "a finished gesture must yield to the state")
+        #expect(secondPass?.trackName == "waving", "the second pass is still the gesture")
+
+        let after = resolver.resolve(
+            situation(
+                state: .running,
+                gesture: .init(trackName: "waving", elapsed: waving.duration * 3 + 0.1)
+            ),
+            profile: v1
+        )
+        #expect(after?.trackName == "running", "past its passes the pet is the agent's again")
     }
 
     @Test("the gaze replaces the idle row")

@@ -160,7 +160,7 @@ Playback is layered, first match wins:
 |---|---|
 | 1. Dragging | which way you are moving it — `running-left` / `running-right` |
 | 2. A playing gesture | one-shots: `jumping`, `waving` |
-| 3. Your pointer, on the pet | `jumping`, played once and held — Codex's hover |
+| 3. Your pointer, on the pet | `jumping` — Codex's hover: three passes, then it settles back into breathing |
 | 4. Agent state | the table above |
 | 5. Idle | the fallback |
 

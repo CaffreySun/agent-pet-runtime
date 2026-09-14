@@ -219,6 +219,19 @@ enum RenderSelfTest {
             failures += 1
         }
 
+        // Three passes, and then it breathes: the landing pose is not the end
+        // of the story while the pointer stays.
+        controller.aimHover(elapsed: 20)   // well past the jump's three passes
+        let settledHover = view.currentImage
+        controller.aimHover(elapsed: 20.5)
+        if settledHover != nil, settledHover !== view.currentImage {
+            print("  ✓ a hovered pet keeps animating after the jump, rather than freezing")
+        } else {
+            print("  ✗ the pet froze on the jump's last frame instead of settling into idle")
+            failures += 1
+        }
+        controller.aimHover(elapsed: nil)
+
         controller.endHover()
         if view.currentImage !== jumped {
             print("  ✓ the pointer leaving hands the pet back to its own animation")

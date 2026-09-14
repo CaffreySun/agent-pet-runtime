@@ -45,6 +45,10 @@ final class PetController {
     /// has been up for its eight seconds.
     private var greeting: (greeting: MessagePanel.Greeting, shownAt: Date)?
 
+    /// Set by the self-test to pin a hover's elapsed time, so the idle segment
+    /// a jump settles into can be sampled without waiting three passes out.
+    private var forcedHoverElapsed: TimeInterval?
+
     /// Set by the self-test to pin a single state.
     private var forcedState: AgentState?
 
@@ -215,7 +219,14 @@ final class PetController {
     /// The pointer arrived on the pet.
     func beginHover() {
         guard hoverStartedAt == nil else { return }
+        forcedHoverElapsed = nil
         hoverStartedAt = Date()
+        render()
+    }
+
+    /// Pins how far into a hover a render sits. Used by the self-test.
+    func aimHover(elapsed: TimeInterval?) {
+        forcedHoverElapsed = elapsed
         render()
     }
 
@@ -223,6 +234,7 @@ final class PetController {
     func endHover() {
         guard hoverStartedAt != nil else { return }
         hoverStartedAt = nil
+        forcedHoverElapsed = nil
         render()
     }
 
@@ -305,7 +317,9 @@ final class PetController {
             drag: drag.map { PetSituation.Drag(direction: $0.direction,
                                                elapsed: now.timeIntervalSince($0.startedAt)) },
             gesture: activeGesture(now: now),
-            hover: hoverStartedAt.map { PetSituation.Hover(elapsed: now.timeIntervalSince($0)) },
+            hover: hoverStartedAt.map {
+                PetSituation.Hover(elapsed: forcedHoverElapsed ?? now.timeIntervalSince($0))
+            },
             lookAngle: gazeAngle(),
             reducedMotion: shouldReduceMotion()
         )
