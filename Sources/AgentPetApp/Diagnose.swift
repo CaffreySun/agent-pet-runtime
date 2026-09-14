@@ -72,7 +72,8 @@ enum Diagnose {
             return 0
         }
 
-        let size = PetWindow.defaultSize
+        let pet = AppConfigStore().load().pet.size
+        let size = PetWindow.size(for: pet)
         print("Displays (\(NSScreen.screens.count)):")
         for (index, screen) in NSScreen.screens.enumerated() {
             let marker = screen == NSScreen.screens.first ? "primary" : "       "
@@ -89,7 +90,8 @@ enum Diagnose {
         }
         let origin = PetWindow.defaultOrigin(on: screen)
         print("Pet window would open at:  (\(Int(origin.x)), \(Int(origin.y))) "
-              + "size \(Int(size.width))x\(Int(size.height)) on the primary display")
+              + "size \(Int(size.width))x\(Int(size.height)) on the primary display "
+              + "(the \(pet.displayName.lowercased()) pet size)")
 
         let saved = UserDefaults.standard.string(forKey: "pet.window.origin")
         print("Saved window origin:       \(saved ?? "(none)")")

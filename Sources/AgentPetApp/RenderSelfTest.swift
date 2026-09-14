@@ -76,7 +76,7 @@ enum RenderSelfTest {
         return samples.joined(separator: "+")
     }
 
-    static func run(controller: PetController, view: PetView) -> Int32 {
+    static func run(controller: PetController, view: PetView, petSize: PetSize) -> Int32 {
         print("Render self-test")
         print("")
 
@@ -152,7 +152,7 @@ enum RenderSelfTest {
 
         failures += checkDraggable(view: view)
         failures += checkBehaviourLayers(controller: controller, view: view)
-        failures += checkMessagePanel(controller: controller, view: view)
+        failures += checkMessagePanel(controller: controller, view: view, petSize: petSize)
 
         print("")
         print(failures == 0 ? "PASS" : "FAIL (\(failures) problem(s))")
@@ -250,7 +250,7 @@ enum RenderSelfTest {
     /// Driven by real events through the real engine — the panel is a view of
     /// the activity list, and a test that hand-built the rows would prove
     /// nothing about whether sessions reach it.
-    private static func checkMessagePanel(controller: PetController, view: PetView) -> Int {
+    private static func checkMessagePanel(controller: PetController, view: PetView, petSize: PetSize) -> Int {
         print("")
         print("Message panel")
         var failures = 0
@@ -324,7 +324,10 @@ enum RenderSelfTest {
 
         // Positions and sizes, as the window sees them.
         let plan = MessagePanelLayout.plan(for: panel, config: view.currentPanelConfig)
-        let configuredWidth = MessagePanelLayout.panelWidth(for: view.currentPanelConfig)
+        let pet = PetWindow.size(for: petSize)
+        let configuredWidth = MessagePanelLayout.panelWidth(
+            for: view.currentPanelConfig, petWidth: pet.width
+        )
         let withPanel = contentHash(view)
         if plan.height > 0, view.spriteRect.height < view.bounds.height {
             print("  ✓ the pet keeps its place: \(Int(plan.height))pt reserved above it")
@@ -334,7 +337,7 @@ enum RenderSelfTest {
         }
 
         if let window = view.window,
-           abs(window.frame.height - (PetWindow.defaultSize.height + plan.height)) < 1,
+           abs(window.frame.height - (pet.height + plan.height)) < 1,
            abs(window.frame.width - configuredWidth) < 1 {
             print("  ✓ the window is \(Int(window.frame.width))x\(Int(window.frame.height)) "
                   + "— the width the settings asked for")
@@ -350,21 +353,30 @@ enum RenderSelfTest {
         // through the real resize path — and alignment by what is drawn.
         var narrow = view.currentPanelConfig
         narrow.widthPercent = 110
-        let narrowWidth = MessagePanelLayout.panelWidth(for: narrow)
-        if abs(narrowWidth - PetWindow.defaultSize.width * 1.1) <= 1,
-           MessagePanelLayout.panelWidth(for: view.currentPanelConfig) > narrowWidth {
+        let narrowWidth = MessagePanelLayout.panelWidth(for: narrow, petWidth: pet.width)
+        if abs(narrowWidth - pet.width * 1.1) <= 1,
+           MessagePanelLayout.panelWidth(for: view.currentPanelConfig, petWidth: pet.width) > narrowWidth {
             print("  ✓ the width setting is a percentage of the pet: 110% → \(Int(narrowWidth))pt")
         } else {
             print("  ✗ the width setting does not follow the pet's width")
             failures += 1
         }
 
-        var rightAligned = view.currentPanelConfig
+        // Alignment needs room to show: with every item switched on the rows
+        // fill the panel edge to edge — which is what a 200%-of-the-pet panel
+        // is at Codex's pet size — and left and right would lay out the same
+        // pixels. One short row is the case the setting is actually for.
+        var roomToSpare = view.currentPanelConfig
+        roomToSpare.items = [MessagePanelConfig.Item(.agent), MessagePanelConfig.Item(.message)]
+        view.show(panel, config: roomToSpare)
+        let leftHash = contentHash(view)
+
+        var rightAligned = roomToSpare
         rightAligned.alignment = .right
         view.show(panel, config: rightAligned)
         let rightHash = contentHash(view)
         view.show(panel, config: view.currentPanelConfig)
-        if rightHash != withPanel {
+        if rightHash != leftHash {
             print("  ✓ the alignment setting moves the rows")
         } else {
             print("  ✗ alignment changed nothing")
@@ -387,8 +399,17 @@ enum RenderSelfTest {
             failures += 1
         }
 
-        // The other status-line items draw from the same reading.
-        var withoutStatusItems = view.currentPanelConfig
+        // The other status-line items draw from the same reading. They get a
+        // row with room for them: at Codex's pet size a panel carrying every
+        // item is full edge to edge, and an item squeezed out entirely would
+        // make "turning it off changed nothing" the wrong verdict.
+        var statusItems = MessagePanelConfig()
+        statusItems.items = [MessagePanelConfig.Item(.session), MessagePanelConfig.Item(.model),
+                             MessagePanelConfig.Item(.cost), MessagePanelConfig.Item(.limits)]
+        view.show(panel, config: statusItems)
+        let withStatusHash = contentHash(view)
+
+        var withoutStatusItems = statusItems
         for index in withoutStatusItems.items.indices
         where [.model, .cost, .limits].contains(withoutStatusItems.items[index].kind) {
             withoutStatusItems.items[index].isEnabled = false
@@ -396,7 +417,7 @@ enum RenderSelfTest {
         view.show(panel, config: withoutStatusItems)
         let withoutModelHash = contentHash(view)
         view.show(panel, config: view.currentPanelConfig)
-        if withoutModelHash != withoutContextHash, withoutModelHash != withPanel {
+        if withoutModelHash != withStatusHash {
             print("  ✓ the model, cost, and rate-limit items are painted too")
         } else {
             print("  ✗ the model / cost / limits items made no difference")

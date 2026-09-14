@@ -11,6 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let bridge = BridgeCoordinator()
 
     private var statusItem: NSStatusItem?
+
+    /// How big the pet is drawn. Seeded from the stored settings before the
+    /// window exists, then kept in step with the manager's copy of them —
+    /// `resizeWindow` is where a change is noticed, because it is already the
+    /// one thing that runs every frame.
+    private var petSize: PetSize = .standard
     private var library: [PetLibrary.Entry] = []
     private var selectedPetID: String?
     /// Last panel written to the verbose log, so the frame loop does not
@@ -47,6 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         handleTerminationSignals()
         buildMainMenu()
+        // Read before the window exists: the size decides the window's frame,
+        // and the model that owns the settings is built later still.
+        petSize = AppConfigStore().load().pet.size
         buildWindow()
         buildStatusItem()
         let panelConfig = { [weak self] in
@@ -120,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         checkForUpdatesInBackground()
 
         if CommandLine.arguments.contains("--selftest") {
-            let status = RenderSelfTest.run(controller: controller, view: petView)
+            let status = RenderSelfTest.run(controller: controller, view: petView, petSize: petSize)
             exit(status)
         }
 
@@ -303,7 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Window
 
     private func buildWindow() {
-        let size = PetWindow.defaultSize
+        let size = PetWindow.size(for: petSize)
         let origin = restoredOrigin() ?? defaultOrigin(for: size)
         window = PetWindow(contentRect: NSRect(origin: origin, size: size))
 
@@ -403,11 +412,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// downward would move the pet every time a session went to work.
     private func resizeWindow(for panel: MessagePanel, config: MessagePanelConfig) {
         guard let window else { return }
+        if let configured = model?.config.pet.size { petSize = configured }
+
         let plan = MessagePanelLayout.plan(for: panel, config: config)
         let width = plan.rows.isEmpty
-            ? PetWindow.defaultSize.width
-            : MessagePanelLayout.panelWidth(for: config)
-        let height = PetWindow.defaultSize.height + plan.height
+            ? petSize.width
+            : MessagePanelLayout.panelWidth(for: config, petWidth: petSize.width)
+        let height = petSize.height + plan.height
 
         let frame = window.frame
         guard abs(frame.width - width) > 0.5 || abs(frame.height - height) > 0.5 else { return }
@@ -433,7 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // trusted.
         guard WindowDrag.isReachable(
             origin: point,
-            size: PetWindow.defaultSize,
+            size: PetWindow.size(for: petSize),
             screens: NSScreen.screens.map(\.visibleFrame)
         ) else { return nil }
 
@@ -446,7 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the saved point is the sprite's anchor rather than the frame's
         // corner. Otherwise a wide panel at one quit and a narrow one at the
         // next would walk the pet sideways a little on every relaunch.
-        let anchorX = frame.minX + (frame.width - PetWindow.defaultSize.width) / 2
+        let anchorX = frame.minX + (frame.width - petSize.width) / 2
         UserDefaults.standard.set("\(anchorX),\(frame.minY)", forKey: Self.positionKey)
     }
 

@@ -638,6 +638,7 @@ Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可
 - **idle 行有寿命**：终端被关掉时不会有 `SessionEnd`，一行"闲置会话"如果常驻，就会在宠物旁边飘一辈子。闲置行（`state == .idle`）在 `max(updatedAt, context.capturedAt)` 之后 10 分钟消失；状态栏还在报数的会话因此一直可见（它确实还活着）。
 - **`alwaysVisible=false`** 时，面板仅在存在非 idle 会话时出现；出现后显示全部行。
 - **窗口横向也要长**：面板最宽 520pt（超出则截断文本），窗口以精灵为轴左右对称加宽，底边不动——这样宠物在屏幕上纹丝不动。位置持久化存的是**还原到默认宽度时的原点**，否则宽面板一次、窄面板一次地退出会把宠物一步步挪走。
+- **宠物尺寸是可设置的，默认就是 Codex 的尺寸**（2026-09-14 修正）：此前窗口硬编码 144×156pt，是 Codex 的 **1.29 倍**（不是 DPI 问题——两边都是 point，只是数字不同）。Codex 自己的设置是 `avatar-overlay-mascot-width-px`，默认 **112**、范围 **80–224**（设置页里是 80–224 的连续滑杆），渲染规则 `width: var(--codex-pet-width); aspect-ratio: 192/208`。本项目取它的默认值与两个端点作三档：**小 80×87 / 默认 112×121 / 大 224×243**——用户能选的每一档都是 Codex 自己允许的。窗口即宠物（精灵按 aspect-fit 填满），面板宽度是宠物宽度的百分比，所以**面板跟着一起缩放**：默认档下面板最宽 224pt（原先 288pt），九项全开时行会被挤掉一些；想要原来的面板宽度就选大档（448pt）。
 - **配置**（`AppConfig.messagePanel`）：`alwaysVisible` + 有序 `items`（开关与顺序即数组顺序）+ `widthPercent` + `alignment`。两处逐字段 `decodeIfPresent`：`AppConfig` 与 `MessagePanelConfig` 各自实现——合成解码会让"旧版本写下的配置文件缺新键"变成整份配置解码失败，而 store 拒绝半读，结果就是用户的所有设置被静默重置。**新增 item kind 时不需要迁移**：解码时把 items 里不存在的 kind 追加到末尾（管理器只能开关、不能删除条目，所以"缺失"只可能意味着"旧文件"）。
 - **重建时机**：每次事件 + 至多每秒一次（状态机会按时钟老化，只在事件时重建会错过它）。管理器不参与：[`MainWindow` 的 1s ticker] 只刷管理器的副本，宠物自己走这条路径。
 - **诊断行与画面同源**：`--verbose` 的 `[pet] panel:` 行用与绘制相同的 `MessagePanelLayout.items(for:config:)` 构造，不会打印用户已关掉的项。
@@ -911,6 +912,11 @@ enum RuntimeConstants {
     static let failedStale     : TimeInterval = 600
     // 会话保留上限（与状态无关，见 §4.5a）：一天没被听到就不再保留
     static let silentSessionLifetime : TimeInterval = 86_400
+
+    // 宠物尺寸（= Codex 的 avatar-overlay-mascot-width-px 默认值与两端）
+    static let petWidthSmall    = 80
+    static let petWidthStandard = 112
+    static let petWidthLarge    = 224
 
     // Bridge
     static let bridgeProtocolVersion = 1

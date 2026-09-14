@@ -10,6 +10,15 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Pet") {
+                Picker("Size", selection: binding(\.pet.size)) {
+                    ForEach(PetSize.allCases) { size in
+                        Text(size.displayName).tag(size)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("How big the pet is drawn. Default is the size Codex draws its "
+                      + "own pet at (112pt wide); Small and Large are the ends of Codex's "
+                      + "own range. The message panel follows the pet.")
                 Toggle("Animate the pet", isOn: binding(\.pet.animationEnabled))
                 Toggle("Keep the pet above other windows", isOn: binding(\.pet.alwaysOnTop))
                 Toggle("Respect Reduce Motion", isOn: binding(\.pet.respectsReduceMotion))
