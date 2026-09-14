@@ -224,10 +224,13 @@ column = sector mod 8
 ```
 1. 拖动中        → running-left / running-right   （用户手上拿着它）
 2. 手势播放中    → waving / jumping               （one-shot，播完下沉）
-3. Agent 状态    → 见 §3.3                        （inactive 状态跳过）
-4. 注视方向      → row 9/10                       （仅 V2，仅在有角度时）
-5. idle
+3. 指针停在宠物上 → jumping                        （one-shot，末帧停住，见下）
+4. Agent 状态    → 见 §3.3                        （inactive 状态跳过）
+5. 注视方向      → row 9/10                       （仅 V2，仅在有角度时）
+6. idle
 ```
+
+**第 3 层是照抄 Codex 的**（2026-09-14 补）。Codex 的 mascot 组件是 `state: hovered ? "jumping" : state`，而它的 sprite 定时器对 one-shot 播完即停（`if (t.loopStartIndex != null) … else { a = null; return }`）——所以**光标停上去只跳一次，之后停在落地那一帧，直到光标离开**，不是循环。这不是"没做好的循环"，是这个 feature 本来的样子：`AnimationResolver` 里 `frameIndex` 对 one-shot 天然钳在末帧，正好就是那个"停住"。拖动（第 1 层）与手势（第 2 层）都排在它上面；**放下宠物时重新起跳**（`endDrag` 重置 hover 计时），因为 Codex 的行切换会重启轨道。追踪区域只覆盖精灵本体，面板上方不算 hover。
 
 两条容易写错的规则：
 

@@ -342,6 +342,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.endDrag()
             self?.savePosition()
         }
+        petView.onHoverBegan = { [weak self] in
+            self?.controller.beginHover()
+        }
+        petView.onHoverEnded = { [weak self] in
+            self?.controller.endHover()
+        }
         petView.onClick = { [weak self] in
             self?.controller.greet()
         }

@@ -35,6 +35,11 @@ final class PetController {
     /// Non-nil while a one-shot gesture is playing over the steady state.
     private var gesture: (track: AnimationTrack, startedAt: Date)?
 
+    /// When the pointer arrived on the pet, or nil if it is not there. Codex
+    /// plays its `jumping` row for this and holds the landing pose, so the
+    /// only fact the layer needs is when the hover began.
+    private var hoverStartedAt: Date?
+
     /// Set by the self-test to pin a single state.
     private var forcedState: AgentState?
 
@@ -161,6 +166,26 @@ final class PetController {
     /// rather than finishing a locomotion cycle it is no longer doing.
     func endDrag() {
         drag = nil
+        // Set down under the pointer: the pet jumps again, which is what Codex
+        // does — its sprite restarts a row whenever the animation it is
+        // showing changes back to it.
+        if hoverStartedAt != nil { hoverStartedAt = Date() }
+        render()
+    }
+
+    // MARK: - Hover
+
+    /// The pointer arrived on the pet.
+    func beginHover() {
+        guard hoverStartedAt == nil else { return }
+        hoverStartedAt = Date()
+        render()
+    }
+
+    /// The pointer left. The pet goes back to whatever the agent is doing.
+    func endHover() {
+        guard hoverStartedAt != nil else { return }
+        hoverStartedAt = nil
         render()
     }
 
@@ -243,6 +268,7 @@ final class PetController {
             drag: drag.map { PetSituation.Drag(direction: $0.direction,
                                                elapsed: now.timeIntervalSince($0.startedAt)) },
             gesture: activeGesture(now: now),
+            hover: hoverStartedAt.map { PetSituation.Hover(elapsed: now.timeIntervalSince($0)) },
             lookAngle: gazeAngle(),
             reducedMotion: shouldReduceMotion()
         )

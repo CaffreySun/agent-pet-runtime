@@ -196,6 +196,30 @@ enum RenderSelfTest {
             failures += 1
         }
 
+        // The pointer arriving makes the pet jump — Codex's `hovered ?
+        // "jumping" : state` — and the pose it lands in is held until the
+        // pointer leaves, so the picture must stay put rather than fall back
+        // to the agent's row on its own.
+        controller.previewState(.running)
+        let workingBefore = view.currentImage
+        controller.beginHover()
+        let jumped = view.currentImage
+        if jumped != nil, jumped !== workingBefore {
+            print("  ✓ the pointer arriving plays the jump")
+        } else {
+            print("  ✗ hovering did not change the animation")
+            failures += 1
+        }
+
+        controller.endHover()
+        if view.currentImage !== jumped {
+            print("  ✓ the pointer leaving hands the pet back to its own animation")
+        } else {
+            print("  ✗ the pet stayed on the jump after the pointer left")
+            failures += 1
+        }
+        controller.clearPreview()
+
         // Gaze only exists in a V2 atlas. A V1 pet has nowhere to put a
         // direction, so "no effect" is the correct result rather than a fault.
         guard let profile = controller.loadedProfile else {
