@@ -67,16 +67,6 @@ public struct AgentEvent: Sendable, Equatable {
     /// Best-effort unique id from the agent's payload, used for deduplication.
     public let eventID: String?
 
-    /// The agent process this event came from — the shim's parent, which is the
-    /// agent itself. Set on everything that arrives over the bridge, and on the
-    /// placeholders a process scan creates, so the first real event from a
-    /// process replaces what was guessed about it.
-    public let processID: Int32?
-
-    /// True for a session the runtime inferred from the process table rather
-    /// than heard from: it exists, and that is all that is known about it.
-    public let isPlaceholder: Bool
-
     public init(
         agentID: String,
         sessionID: String,
@@ -89,9 +79,7 @@ public struct AgentEvent: Sendable, Equatable {
         projectPath: URL? = nil,
         focusTarget: FocusTarget? = nil,
         context: SessionContext? = nil,
-        eventID: String? = nil,
-        processID: Int32? = nil,
-        isPlaceholder: Bool = false
+        eventID: String? = nil
     ) {
         self.agentID = agentID
         self.sessionID = sessionID
@@ -105,8 +93,6 @@ public struct AgentEvent: Sendable, Equatable {
         self.focusTarget = focusTarget
         self.context = context
         self.eventID = eventID
-        self.processID = processID
-        self.isPlaceholder = isPlaceholder
     }
 }
 

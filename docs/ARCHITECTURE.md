@@ -343,8 +343,6 @@ completionDwell = 4.0s   // completed 状态至少展示 4s 才可让位给更�
 
 为什么是 24h 而不是面板的 10 分钟：这是**会话不再存在**的时刻，不是"不值得画"的时刻。`waitingInput` 没有静默超时（用户可能离开很久，§4.5），跨夜必须还在——8 小时的测试用例继续通过；一天是上限，不是判决：还活着的 agent 下一个 hook 就会重建它，只是算作新的到达（`arrivalOrder` 一并清掉了）。
 
-进程表猜测（占位会话）不走这条 24h：它们有自己的、更短的 `placeholderLifetime`（10 分钟，§5.2a）——一个从未说过话的猜测，24 小时和永远没有区别。
-
 测试：`ActivityEngineTests` 四条——50 个被杀会话 23h 时还在、25h 后清空；持续上报 30 小时的不被回收；只有 status-line reading 的会话保持存活且状态不变；复活会话按新到达排序。
 
 ### 4.6 Session 去重
@@ -497,26 +495,6 @@ UI 因此需要一个显式的 `Clear Activities` 动作。
 ```
 
 `FocusTarget` 只承诺 `open(cwd)`。Accessibility 窗口聚焦推迟到 v0.2。
-
-### 5.2a 启动时探测：进程表才是"谁在跑"的第一手来源（2026-09-14 补）
-
-hook 只在干活前后触发，所以**静置在提示符前的会话什么都不发**——应用在那种寂静里启动，旁边的终端开着三个会话，面板却是空的。这正是 `SPEC-REVIEW.md` 当初建议过、却一直没实现的条目（"App 启动后主动探测当前有哪些 Agent 进程在跑（process scan），补一个初始状态"）；`Confidence.swift` 里"process scan 推断出的状态是猜测"这句注释也一直在等它。
-
-现在启动时扫一遍进程表（`RunningAgents`，libproc + sysctl，`KERN_PROCARGS2` 取 argv、`PROC_PIDTBSDINFO` 取 tty、`PROC_PIDVNODEPATHINFO` 取 cwd），**判定一个进程是"某人的会话"要同时满足三条**，每条都有实测依据（本机真实进程表）：
-
-| 规则 | 为什么 |
-|---|---|
-| `argv[0]` 的 basename 等于该 agent 的可执行名 | `claude` ✓；而 node 启动的脚本靠 argv 前几项兜底 |
-| **有控制终端** | `claude`（ttys064）✓ vs `claude daemon run` 与 `claude --bg-pty-host`（tty 为空）✗——这是最省事也最可靠的一条 |
-| `argv` 里没有该 agent 自己的子命令 | `daemon` / `--bg-pty-host` / `update` / `--version` 等（denylist 而非 allowlist：把辅助进程当会话 = 一条永不消失的幽灵行，把会话漏掉只是回到"等它下次 hook"） |
-
-**扫描只能证明"存在"，不能证明"在干什么"**——所以它产出的是 `.low` 置信度的**占位会话**（`AgentEvent.isPlaceholder`，sessionID 用终端名如 `ttys064`，比 pid 更能告诉用户"看哪个窗口"；focusTarget 用扫到的 cwd，summary 同取目录名，于是面板 task 列和 activity 列表都显示项目名而非一个裸 tty）。**第一个来自同一进程的真实事件会顶掉占位者**（事件带 `processID` = shim 的 `getppid()`；引擎按 pid 反查并 `forget`），因此扫描**排在 spool 回放之前**——回放的事件会顺手把占位者换掉，而不是留下两条。
-
-占位者的维护分两条路。进程退出：应用在有占位者时每 60 秒重扫一次，只把"进程已不在"的 `forget` 掉，**没有占位者时定时器直接停掉**——稳态零成本。进程还在、却永远不说话（终端静置在提示符前，恰恰是扫描存在的理由）：交给引擎按寿命回收，`ActivityTuning.placeholderLifetime`（10 分钟，与 `MessagePanel.idleRowLifetime` 同一个数——"只说明存在"的行，两处画它的地方用一条规则），时钟从**第一次被看到**起算（`startedAt`，不是 `updatedAt`），所以重复投递同一个猜测不续命。
-
-> 2026-09-14 修（v0.9.4）：此前 60 秒重扫会把**所有**在跑会话的占位事件重新 ingest 一遍（本意只是"在跑的留下、不在的清掉"），后果有二：刷新了 `updatedAt`，面板 idle 行十分钟的寿命永远不到期；且只要还有别的占位者撑着定时器，**已被真实事件顶掉**的会话会被重新造出来。真实翻车案例：本机交互会话 pid 52960（ttys064）开着，而它 fork 出的后台会话——真正在发 hook 的进程——是另一条进程链（`claude daemon run` → `--bg-pty-host` → versions 二进制，pid 88572/ttys096），hook 进程的父进程实测是 88572 而非 52960。两条进程永不相交，"第一个真实事件顶掉占位者"对这个占位者永远不会发生，ttys064 空行于是钉死在面板和 activity 列表里。**猜测必须有自己的寿命**——被顶掉是运气，过期才是保证。
-
-测试：匹配规则用本机实测的命令行做样本（裸 `claude` ✓ / `daemon run` ✗ / `--bg-pty-host` ✗ / 无 tty ✗ / 环境变量不得被当成参数 ✗）；引擎侧测占位者的创建、被真实事件顶替、不同进程不互相顶替、进程消失后被丢弃、以及新加的寿命三则——到期回收、重新投递不续命、被顶替的真实会话不受猜测寿命影响。端到端（本机，真实会话 pid 52960）：启动 6 秒内日志出现 `[pet] running: claude-code pid=52960 tty=ttys064 cwd=~/github` 与面板行 `Claude Code · github`，而该会话当时一个 hook 都没发。
 
 ### 5.3 去重
 
@@ -990,8 +968,6 @@ enum RuntimeConstants {
     static let failedStale     : TimeInterval = 600
     // 会话保留上限（与状态无关，见 §4.5a）：一天没被听到就不再保留
     static let silentSessionLifetime : TimeInterval = 86_400
-    // 进程表猜测的寿命（§5.2a）：与面板 idle 行同数——"只说明存在"的行活十分钟
-    static let placeholderLifetime : TimeInterval = 600
 
     // 初次问候（= Codex 的 first-awake：8 秒、每只宠物一次、waving）
     static let greetingLifetime : TimeInterval = 8

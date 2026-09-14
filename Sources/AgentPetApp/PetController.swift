@@ -127,17 +127,6 @@ final class PetController {
 
     var currentActivities: [AgentActivity] { engine.allActivities() }
 
-    /// The processes a scan is still guessing about, so the app can ask the
-    /// process table whether they are still there.
-    var placeholderProcessIDs: [Int32] { engine.placeholderProcessIDs }
-
-    /// Drops the guess a process left behind.
-    func forgetPlaceholder(processID: Int32) {
-        engine.forgetPlaceholder(processID: processID)
-        rebuildPanel(now: Date())
-        render()
-    }
-
     /// The session the pet is currently showing.
     var focusedActivity: AgentActivity? {
         forcedState != nil ? nil : engine.currentFocus()

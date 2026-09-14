@@ -188,8 +188,7 @@ public struct EventNormalizer: Sendable {
             toolName: toolName,
             projectPath: cwd.map { URL(fileURLWithPath: $0) },
             focusTarget: focus,
-            context: context,
-            processID: envelope.proc?.ppid
+            context: context
         )]
     }
 
