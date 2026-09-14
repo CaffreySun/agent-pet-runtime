@@ -15,7 +15,45 @@ final class AgentPetModel: ObservableObject {
     @Published private(set) var activities: [AgentActivity] = []
     @Published private(set) var focusedActivityID: String?
 
-    @Published var statusMessage: String?
+    /// How long a confirmation stays on screen.
+    ///
+    /// It is an acknowledgement, not information: the bar spans the bottom of
+    /// the window, and one that never leaves is a fixture the user has to
+    /// dismiss by hand. Errors are the opposite and stay until dismissed.
+    static let statusDuration: TimeInterval = 5
+
+    private var statusDismissal: Timer?
+
+    @Published var statusMessage: String? {
+        didSet {
+            statusDismissal?.invalidate()
+            statusDismissal = nil
+            // A newer message always resets the clock, and `nil` — the close
+            // button, or the error path — leaves nothing armed behind it.
+            guard let message = statusMessage else {
+                Self.log("cleared")
+                return
+            }
+            let timer = Timer(timeInterval: Self.statusDuration, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.statusMessage = nil }
+            }
+            // `.common`, or resizing and dragging the window would hold the
+            // timer until the mouse comes up — the same reason the manager's
+            // ticker uses that mode.
+            RunLoop.main.add(timer, forMode: .common)
+            statusDismissal = timer
+            Self.log("\(message) — in \(Int(Self.statusDuration))s")
+        }
+    }
+
+    /// The bar is short-lived by design, so `--verbose` records when it appears
+    /// and when it goes: reading the timing back beats watching the window for
+    /// five seconds.
+    private static func log(_ line: String) {
+        guard CommandLine.arguments.contains("--verbose") else { return }
+        FileHandle.standardError.write(Data("[pet] status: \(line)\n".utf8))
+    }
+
     @Published var errorMessage: String?
     @Published var isBusy = false
     /// Which pet the desktop is currently showing, so the list can mark it.
