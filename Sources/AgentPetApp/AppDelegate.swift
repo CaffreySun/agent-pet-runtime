@@ -742,7 +742,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.button?.image = image
             item.button?.imagePosition = .imageOnly
         } else {
-            item.button?.title = "🐾"
+            // The same glyph as an agent with no name of its own, by the same
+            // rules: a symbol, not an emoji.
+            let fallback = NSImage(systemSymbolName: "pawprint", accessibilityDescription: "Agent Pet Runtime")
+            fallback?.isTemplate = true
+            item.button?.image = fallback
+            item.button?.title = "Agent Pet Runtime"
         }
         statusItem = item
     }
@@ -799,8 +804,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             petsMenu.addItem(item)
             if !entry.warnings.isEmpty {
                 let warning = NSMenuItem(
-                    title: "  ⚠︎ \(entry.warnings.count) compatibility warning(s)",
+                    title: "\(entry.warnings.count) compatibility warning(s)",
                     action: nil, keyEquivalent: ""
+                )
+                warning.image = NSImage(
+                    systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Warning"
                 )
                 warning.isEnabled = false
                 petsMenu.addItem(warning)
@@ -863,7 +871,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridgeMenu.addItem(received)
 
         if let error = bridge.status.error {
-            let failure = NSMenuItem(title: "  ⚠︎ \(error)", action: nil, keyEquivalent: "")
+            let failure = NSMenuItem(title: error, action: nil, keyEquivalent: "")
+            failure.image = NSImage(
+                systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Problem"
+            )
             failure.isEnabled = false
             bridgeMenu.addItem(failure)
         }
