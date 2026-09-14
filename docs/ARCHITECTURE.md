@@ -785,6 +785,45 @@ UI 显示的组合状态：
 
 管理窗口打开期间，卡片和 Activity 列表由 1s ticker 驱动重新求值（复用已有的 detection 结果，不重复 spawn `--version`）；此前卡片只是"打开那一刻的快照"，会在事件不断到达时继续显示"没有事件"。
 
+### 8.7 可执行文件到哪儿找（2026-09-14 修正：GUI 的 PATH 不是终端的 PATH）
+
+`Not Detected` 曾是 pi 在本机的常态，原因不在 agent 本身：
+
+- Finder / 登录项启动的 .app 由 launchd 拉起，`PATH` 是 `/usr/bin:/bin:/usr/sbin:/sbin`；
+  终端里那个 PATH（fnm / nvm / pnpm / …）在 app 进程里**根本不存在**。
+- 本机 pi 由 fnm 安装，真实位置 `~/.local/share/fnm/node-versions/<ver>/installation/bin/pi`。
+  终端能看到它，只是靠 fnm 给每个 shell 建的临时软链目录
+  `~/.local/state/fnm_multishells/<pid>_<ts>/bin`（PID 命名、随 shell 生灭）——不能作为搜索依据。
+- 实测（同一台机器）：终端下 `--status` 四个 agent 全 ●；`env -i HOME=$HOME PATH=/usr/bin:/bin`
+  下只有 pi 变 ○。claude / codex / grok 是 Mach-O 原生二进制，且恰好落在固定目录里，
+  把这个缺陷盖住了。
+
+`AgentDetector.defaultSearchPaths()` 现在在 PATH **之后**追加各版本管理器的默认目录：
+
+```
+~/.local/share/fnm/node-versions/*/installation/bin    按目录名里的版本号，新的在前
+~/.nvm/versions/node/*/bin                             同上
+~/.volta/bin   ~/.bun/bin   ~/Library/pnpm   ~/.asdf/shims   ~/.local/share/mise/shims
+```
+
+三条理由，写给下一个想改这里的人：
+
+1. **顺序由我们定，不交给文件系统**：通配目录按名字里的数字排序，否则同一台机器两次启动
+   可能报出不同版本的路径。`newestFirst` 有测试（`AgentDetectorTests`）。
+2. **PATH 排在枚举目录之前**：从终端启动时，shell 自己解析出的那一条比我们枚举的更准；
+   枚举目录只兜 launchd 那种"什么都没有"的情况。
+3. **不解析 login shell 的 PATH**（`$SHELL -lic 'echo $PATH'`）：能覆盖自建目录，但本机实测
+   **461 ms**，还要执行用户的 rc 文件——有副作用（fnm env 会写状态目录）、rc 卡住就只能超时放弃。
+   用一个会超时的不确定换一个罕见场景不值。**代价明确接受**：非默认位置（如 `~/opt/node/bin`）
+   检测不到，这是有意的取舍，不是遗漏。
+
+版本探针（`--version`）继承的 PATH 里也追加了这些目录：版本管理器装的 CLI 通常是脚本
+（`pi` 的 shebang 是 `#!/usr/bin/env node`），没有 node 就退 127，表现为"检测到了但没有版本号"。
+实测 `env -i PATH=/usr/bin:/bin pi --version` → `env: node: No such file or directory`。
+
+另外 `Specification.extraSearchPaths` 此前是个**死字段**（声明、赋值、注释都在，没有读取方），
+现已接上：先扫 agent 自己的 extra，再扫全局表。
+
 ---
 
 ## 9. 常量汇总

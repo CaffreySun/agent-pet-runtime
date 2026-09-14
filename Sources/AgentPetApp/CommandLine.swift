@@ -149,8 +149,8 @@ enum CommandLineTool {
         }
         guard let configurator = profile.configurator else {
             print("\(profile.displayName) has no configurator.")
-            print("Its configuration format is not one the runtime can edit safely, so it is")
-            print("detected but left alone rather than half-supported.")
+            // The same sentence the agent's card shows, from the same place.
+            if let note = profile.configurationNote { print(note) }
             return 1
         }
 

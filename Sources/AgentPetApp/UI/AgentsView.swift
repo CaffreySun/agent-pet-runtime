@@ -54,8 +54,8 @@ struct AgentsView: View {
             }
             .font(.callout)
 
-            if !status.canConfigure {
-                Text("This agent's configuration format is not one the runtime can edit safely, so it is detected but not configurable.")
+            if !status.canConfigure, let note = status.profile.configurationNote {
+                Text(note)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

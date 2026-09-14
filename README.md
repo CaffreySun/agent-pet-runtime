@@ -82,9 +82,10 @@ Sessions running long jobs are not interrupted. (Verified by adding
 watching them fire.)
 
 Only Claude Code is configurable today. Grok's hooks live in TOML and Codex's
-`notify` is an argv array; neither is something the JSON transaction can edit
-safely, so those agents are detected and reported as *not configurable* rather
-than half-supported.
+`notify` is an argv array, so neither is something the JSON transaction can edit
+safely; Pi is extended by installing a package rather than by editing a config
+file. All three are detected and reported as *not configurable*, each with its
+own reason, rather than half-supported.
 
 ### What configuring does
 
@@ -324,7 +325,7 @@ corrected specification.
 | Session panel: one row per session, configurable items | done |
 | Context usage from Claude Code's status line | done — opt-in, wraps your existing status line |
 | Survives restarts and upgrades mid-turn | done — undelivered events are replayed at the next launch |
-| Grok / Codex / Pi configuration | not built — their formats need their own configurators |
+| Grok / Codex / Pi configuration | not built — each needs its own configurator (TOML, argv array, extension package) |
 | Window focusing | opens the project folder; hooks carry no terminal identity |
 
 ---

@@ -66,8 +66,13 @@ public struct AgentDetector: Sendable {
         self.readVersions = readVersions
     }
 
-    public static func defaultSearchPaths() -> [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+    /// Home and environment are parameters rather than reads of the process:
+    /// `homeDirectoryForCurrentUser` ignores `$HOME`, so a test cannot fake a
+    /// home any other way.
+    public static func defaultSearchPaths(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [URL] {
         var paths: [URL] = [
             URL(fileURLWithPath: "/opt/homebrew/bin"),
             URL(fileURLWithPath: "/usr/local/bin"),
@@ -75,14 +80,85 @@ public struct AgentDetector: Sendable {
             home.appendingPathComponent(".local/bin"),
             home.appendingPathComponent("bin"),
         ]
-        if let path = ProcessInfo.processInfo.environment["PATH"] {
+        if let path = environment["PATH"] {
             paths.append(contentsOf: path.split(separator: ":").map { URL(fileURLWithPath: String($0)) })
+        }
+        // Last, not first: started from a terminal, the shell's own resolution
+        // is the better answer, and these are the fallback for a GUI launch.
+        paths.append(contentsOf: versionManagerPaths(home: home))
+        return paths
+    }
+
+    /// Where the node version managers keep the CLIs installed through them.
+    ///
+    /// A GUI app is launched by launchd, so its `PATH` is
+    /// `/usr/bin:/bin:/usr/sbin:/sbin` — nothing installed with fnm, nvm,
+    /// volta, bun, pnpm, asdf or mise is in it, and a version manager's
+    /// directory is not somewhere a user would think to look either. Naming
+    /// them is what makes such an agent visible at all: `pi` from fnm read as
+    /// "not found" in the manager while the same machine's terminal found it
+    /// (2026-09-14).
+    static func versionManagerPaths(home: URL) -> [URL] {
+        var paths = versionedBinaries(
+            under: home.appendingPathComponent(".local/share/fnm/node-versions"),
+            bin: "installation/bin"
+        )
+        paths += versionedBinaries(
+            under: home.appendingPathComponent(".nvm/versions/node"),
+            bin: "bin"
+        )
+        for directory in [
+            ".volta/bin",
+            ".bun/bin",
+            "Library/pnpm",
+            ".asdf/shims",
+            ".local/share/mise/shims",
+        ] {
+            paths.append(home.appendingPathComponent(directory))
         }
         return paths
     }
 
+    /// The `bin` directory of every installed version, newest first.
+    ///
+    /// The order is decided here rather than left to the filesystem, which
+    /// would hand back a different one from launch to launch on a machine with
+    /// several node versions.
+    private static func versionedBinaries(under root: URL, bin: String) -> [URL] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        return newestFirst(names).map {
+            root.appendingPathComponent($0).appendingPathComponent(bin)
+        }
+    }
+
+    /// `v24.13.0` before `v22.19.0`. A name carrying no version sorts last, in
+    /// name order, so an unexpected directory is searched rather than dropped.
+    static func newestFirst(_ names: [String]) -> [String] {
+        names.sorted { nameA, nameB in
+            switch (versionComponents(nameA), versionComponents(nameB)) {
+            case let (a?, b?):
+                return a == b ? nameA < nameB : !a.lexicographicallyPrecedes(b)
+            case (_?, nil):  return true
+            case (nil, _?):  return false
+            case (nil, nil): return nameA < nameB
+            }
+        }
+    }
+
+    private static func versionComponents(_ name: String) -> [Int]? {
+        var components: [Int] = []
+        for piece in name.split(separator: ".") {
+            // `v24` and `24` are the same version; a leading `v` is not a fault.
+            guard let value = Int(piece.drop(while: { !$0.isNumber })) else { return nil }
+            components.append(value)
+        }
+        return components.isEmpty ? nil : components
+    }
+
     public func detect(_ specification: Specification) -> DetectionResult {
-        let executable = findExecutable(specification.executableNames)
+        let executable = findExecutable(
+            specification.executableNames, extra: specification.extraSearchPaths
+        )
 
         let configs = specification.configFiles
             .filter { FileManager.default.fileExists(atPath: $0.path) }
@@ -101,8 +177,8 @@ public struct AgentDetector: Sendable {
     }
 
     /// First match wins, so `extraSearchPaths` can shadow a stale install.
-    func findExecutable(_ names: [String]) -> URL? {
-        for directory in searchPaths {
+    func findExecutable(_ names: [String], extra: [URL] = []) -> URL? {
+        for directory in extra + searchPaths {
             for name in names {
                 let candidate = directory.appendingPathComponent(name)
                 if FileManager.default.isExecutableFile(atPath: candidate.path) {
@@ -123,6 +199,7 @@ public struct AgentDetector: Sendable {
         let process = Process()
         process.executableURL = executable
         process.arguments = spec.versionArguments
+        process.environment = probeEnvironment()
 
         let output = Pipe()
         process.standardOutput = output
@@ -149,5 +226,20 @@ public struct AgentDetector: Sendable {
         let text = String(decoding: data, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text.split(separator: "\n").first.map(String.init)
+    }
+
+    /// The version probe runs with the directories we just searched on `PATH`.
+    ///
+    /// A CLI installed by a version manager is usually a script — `pi` starts
+    /// `#!/usr/bin/env node` — so without `node` on `PATH` the probe exits 127
+    /// and the agent is found but reports no version. The inherited `PATH` is
+    /// kept and extended rather than replaced.
+    func probeEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let inherited = environment["PATH"].map { [$0] } ?? []
+        environment["PATH"] = (searchPaths.map(\.path) + inherited)
+            .filter { !$0.isEmpty }
+            .joined(separator: ":")
+        return environment
     }
 }

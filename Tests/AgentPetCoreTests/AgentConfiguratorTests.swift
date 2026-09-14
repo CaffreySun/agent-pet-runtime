@@ -385,6 +385,19 @@ struct AgentIntegrationRegistryTests {
         }
     }
 
+    @Test("an agent with no configurator explains why, in its own words")
+    func unconfigurableAgentsExplainThemselves() {
+        var seen = Set<String>()
+        for profile in AgentIntegrationRegistry.all(transaction: transaction)
+        where profile.configurator == nil {
+            let note = profile.configurationNote ?? ""
+            #expect(!note.isEmpty, "\(profile.agentID) is not configurable and says nothing about it")
+            // Grok, Codex and Pi are unconfigurable for three different
+            // reasons; one recycled sentence was wrong for two of them.
+            #expect(seen.insert(note).inserted, "\(profile.agentID) reuses another agent's note")
+        }
+    }
+
     @Test("no agent claims focusSession, which v0.1 cannot deliver")
     func focusNotClaimed() {
         for profile in AgentIntegrationRegistry.all(transaction: transaction) {
