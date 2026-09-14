@@ -168,6 +168,30 @@ public struct AnimationResolver: Sendable {
     /// plays: `waiting`, `failed`, `review`, the jump, and locomotion.
     private static let gazeRows: Set<String> = ["idle", "running", "waving"]
 
+    /// Plays a row as Codex plays it: a moment runs its passes and then hands
+    /// over to the idle segment, which loops for as long as the occasion
+    /// lasts.
+    ///
+    /// This is `Ulo`'s shape — `[...row, ...row, ...row, ...idle]` with
+    /// `loopStartIndex` at the idle part — and it is what keeps a gesture or a
+    /// hover from freezing on a last frame: the jump plays three times and the
+    /// pet goes on breathing while the pointer stays.
+    ///
+    /// A condition (`repeats == 1`, e.g. `running`) skips straight to its own
+    /// frame — this project keeps those looping their row, which is a
+    /// deliberate deviation for states that outlive three passes by minutes.
+    private func moment(
+        _ track: AnimationTrack,
+        elapsed: TimeInterval,
+        _ profile: CompatibilityProfile
+    ) -> AnimationFrame {
+        let passes = track.duration * Double(track.repeats)
+        if track.repeats > 1, elapsed >= passes, let idle = profile.track(named: "idle") {
+            return frame(for: idle, elapsed: elapsed - passes)
+        }
+        return frame(for: track, elapsed: elapsed)
+    }
+
     /// The look frame, when the pointer gives a direction and the row it would
     /// replace is one Codex replaces.
     private func gaze(
@@ -200,10 +224,12 @@ public struct AnimationResolver: Sendable {
         // 2. A gesture in flight.
         if let gesture = situation.gesture,
            let track = profile.track(named: gesture.trackName) {
-            let resolved = frame(for: track, elapsed: gesture.elapsed)
-            // A finished gesture falls through to the layers beneath it rather
-            // than sticking on its last frame.
-            if !resolved.isFinished {
+            let resolved = moment(track, elapsed: gesture.elapsed, profile)
+            // A gesture that has played its passes falls through to the layers
+            // beneath it — the state the agent is in is the better answer by
+            // then, and on its own the gesture would sit in the idle segment
+            // for as long as it was asked to.
+            if gesture.elapsed < track.duration * Double(track.repeats) {
                 // A wave is one of Codex's gaze rows — the greeting it plays
                 // while the pet introduces itself is `waving` — so a pointer
                 // with a direction still wins. A jump does not, which is the
@@ -223,7 +249,7 @@ public struct AnimationResolver: Sendable {
         if let hover = situation.hover,
            let jumping = profile.track(named: "jumping"),
            jumping.frameCount > 0 {
-            return frame(for: jumping, elapsed: hover.elapsed)
+            return moment(jumping, elapsed: hover.elapsed, profile)
         }
 
         // 4. Agent state.
@@ -245,17 +271,7 @@ public struct AnimationResolver: Sendable {
             if !settledIntoIdle, let look = gaze(overriding: track, situation, profile) {
                 return look
             }
-
-            // A condition (`repeats == 1`) loops its row for as long as the
-            // state lasts. A moment plays out its passes and then hands over
-            // to the idle row, which is where the loop restarts — Codex's
-            // `loopStartIndex` at the idle segment. Gaze stays out of it
-            // either way: the agent is still working, so the pet should not
-            // turn away to watch the pointer.
-            if track.repeats > 1, elapsed >= passes, let idle = profile.track(named: "idle") {
-                return frame(for: idle, elapsed: elapsed - passes)
-            }
-            return frame(for: track, elapsed: elapsed)
+            return moment(track, elapsed: elapsed, profile)
         }
 
         // 6. Idle — which is also where the gaze lives for a pet with nothing

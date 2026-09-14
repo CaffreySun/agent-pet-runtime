@@ -44,8 +44,15 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
 
     // MARK: - Tracks
 
-    /// How many times a *moment's* row plays before the pet settles into
-    /// idle. Codex's playback shape, in both the app and the TUI.
+    /// How many times a *moment's* row plays before the pet settles into the
+    /// idle segment — which then loops, so a moment never freezes.
+    ///
+    /// Every row Codex plays goes through this: its track builder
+    /// (`Ulo(state, hasLookFrame)`) answers `[...row, ...row, ...row, ...idle]`
+    /// with `loopStartIndex` at the idle part, for *every* state except `idle`
+    /// and the single-frame gaze pose. A gesture is no different, which is why
+    /// hovering three jumps in and then keeps breathing instead of holding a
+    /// landing pose.
     private static let momentRepeats = 3
 
     /// The nine standard rows, with the contract's own per-frame timings.
@@ -82,12 +89,12 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
             AnimationTrack(
                 name: "waving", row: 3, frameCount: 4,
                 frameDuration: 0.140, finalFrameDuration: 0.280,
-                loop: .once, kind: .gesture
+                loop: .loop, kind: .gesture, repeats: Self.momentRepeats
             ),
             AnimationTrack(
                 name: "jumping", row: 4, frameCount: 5,
                 frameDuration: 0.140, finalFrameDuration: 0.280,
-                loop: .once, kind: .gesture
+                loop: .loop, kind: .gesture, repeats: Self.momentRepeats
             ),
             // A failure is a moment: three passes and then the idle breath,
             // which is what stops the pet holding a grimace.
