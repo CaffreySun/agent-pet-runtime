@@ -165,7 +165,25 @@ enum MessagePanelLayout {
 
     // MARK: - Rows
 
+    /// The last layout built, kept for the next caller.
+    ///
+    /// `plan` is asked for on every frame — the window sizes itself from it
+    /// sixty times a second — and building one measures the text of every item
+    /// in every row. The panel and its configuration change on the scale of an
+    /// event, not of a frame, so one remembered layout is enough to keep the
+    /// frame loop out of text measurement entirely.
+    private static var remembered: (panel: MessagePanel, config: MessagePanelConfig, plan: Plan)?
+
     static func plan(for panel: MessagePanel, config: MessagePanelConfig) -> Plan {
+        if let remembered, remembered.panel == panel, remembered.config == config {
+            return remembered.plan
+        }
+        let plan = build(panel, config)
+        remembered = (panel, config, plan)
+        return plan
+    }
+
+    private static func build(_ panel: MessagePanel, _ config: MessagePanelConfig) -> Plan {
         let rows = panel.rows.map { row in
             Row(id: row.id, isFocused: row.isFocused, alignment: config.alignment,
                 items: items(for: row, config: config))
