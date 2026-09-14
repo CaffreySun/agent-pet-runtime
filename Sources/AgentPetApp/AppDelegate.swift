@@ -238,9 +238,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // expires states on a clock and moves focus without any event, so a
         // list that only refreshed on events could sit there contradicting
         // the pet beside it on screen.
+        var ticks = 0
         managerWindow?.onTick = { [weak self] in
             self?.pushActivities()
-            self?.model?.refreshAgentHealth()
+            // Health re-reads each agent's integration record, and the hook
+            // entries in the config file, from disk. Those change when an agent
+            // is configured — not once a second.
+            if ticks.isMultiple(of: 5) { self?.model?.refreshAgentHealth() }
+            ticks += 1
         }
         pushActivities()
     }
