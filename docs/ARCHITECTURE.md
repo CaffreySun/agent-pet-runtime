@@ -496,6 +496,24 @@ UI 因此需要一个显式的 `Clear Activities` 动作。
 
 `FocusTarget` 只承诺 `open(cwd)`。Accessibility 窗口聚焦推迟到 v0.2。
 
+### 5.2a 启动时探测：进程表才是"谁在跑"的第一手来源（2026-09-14 补）
+
+hook 只在干活前后触发，所以**静置在提示符前的会话什么都不发**——应用在那种寂静里启动，旁边的终端开着三个会话，面板却是空的。这正是 `SPEC-REVIEW.md` 当初建议过、却一直没实现的条目（"App 启动后主动探测当前有哪些 Agent 进程在跑（process scan），补一个初始状态"）；`Confidence.swift` 里"process scan 推断出的状态是猜测"这句注释也一直在等它。
+
+现在启动时扫一遍进程表（`RunningAgents`，libproc + sysctl，`KERN_PROCARGS2` 取 argv、`PROC_PIDTBSDINFO` 取 tty、`PROC_PIDVNODEPATHINFO` 取 cwd），**判定一个进程是"某人的会话"要同时满足三条**，每条都有实测依据（本机真实进程表）：
+
+| 规则 | 为什么 |
+|---|---|
+| `argv[0]` 的 basename 等于该 agent 的可执行名 | `claude` ✓；而 node 启动的脚本靠 argv 前几项兜底 |
+| **有控制终端** | `claude`（ttys064）✓ vs `claude daemon run` 与 `claude --bg-pty-host`（tty 为空）✗——这是最省事也最可靠的一条 |
+| `argv` 里没有该 agent 自己的子命令 | `daemon` / `--bg-pty-host` / `update` / `--version` 等（denylist 而非 allowlist：把辅助进程当会话 = 一条永不消失的幽灵行，把会话漏掉只是回到"等它下次 hook"） |
+
+**扫描只能证明"存在"，不能证明"在干什么"**——所以它产出的是 `.low` 置信度的**占位会话**（`AgentEvent.isPlaceholder`，sessionID 用终端名如 `ttys064`，比 pid 更能告诉用户"看哪个窗口"；focusTarget 用扫到的 cwd，于是面板的 task 列显示项目名）。**第一个来自同一进程的真实事件会顶掉占位者**（事件带 `processID` = shim 的 `getppid()`；引擎按 pid 反查并 `forget`），因此扫描**排在 spool 回放之前**——回放的事件会顺手把占位者换掉，而不是留下两条。
+
+占位者的维护：进程退出后占位行不该留着，所以应用在有占位者时每 60 秒重扫一次（在跑的刷新、不在的 `forget`），**没有占位者时定时器直接停掉**——稳态零成本。会话要么被真实事件顶掉、要么 24 小时老化回收（§4.5a），两条路都把它清干净。
+
+测试：匹配规则用本机实测的命令行做样本（裸 `claude` ✓ / `daemon run` ✗ / `--bg-pty-host` ✗ / 无 tty ✗ / 环境变量不得被当成参数 ✗）；引擎侧测占位者的创建、被真实事件顶替、不同进程不互相顶替、进程消失后被丢弃、以及照常老化。端到端（本机，真实会话 pid 52960）：启动 6 秒内日志出现 `[pet] running: claude-code pid=52960 tty=ttys064 cwd=~/github` 与面板行 `Claude Code · github`，而该会话当时一个 hook 都没发。
+
 ### 5.3 去重
 
 ```swift

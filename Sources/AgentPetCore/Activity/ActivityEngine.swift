@@ -67,6 +67,13 @@ public final class ActivityEngine {
 
     private var lastSeen: [SessionKey: (kind: AgentEventKind, at: Date, id: String?)] = [:]
 
+    /// Sessions a process scan guessed at, by the process that was running.
+    ///
+    /// The guess is only what a process table can prove — a session of that
+    /// agent exists — so the first event from the same process replaces it,
+    /// whatever session id the agent turns out to use.
+    private var placeholders: [Int32: SessionKey] = [:]
+
     private var focusedKey: SessionKey?
     private var focusAcquiredAt: Date?
 
@@ -82,6 +89,13 @@ public final class ActivityEngine {
     @discardableResult
     public func ingest(_ event: AgentEvent) -> AgentActivity? {
         let key = SessionKey(agentID: event.agentID, sessionID: event.sessionID)
+
+        // A real event speaks for its process: whatever was inferred about that
+        // process is now known better, and its placeholder goes.
+        if !event.isPlaceholder, let processID = event.processID,
+           let placeholder = placeholders.removeValue(forKey: processID), placeholder != key {
+            forget(placeholder)
+        }
 
         // A status-line reading describes a session rather than moving it, so
         // it takes its own path before deduplication and ordering: it never
@@ -104,10 +118,7 @@ public final class ActivityEngine {
         lastSeen[key] = (event.kind, event.at, event.eventID)
 
         if event.kind == .sessionClosed {
-            activities.removeValue(forKey: key)
-            arrivalOrder.removeValue(forKey: key)
-            lastSeen.removeValue(forKey: key)
-            if focusedKey == key { clearFocus() }
+            forget(key)
             return nil
         }
 
@@ -163,7 +174,28 @@ public final class ActivityEngine {
         arrivalOrder[key] = nextArrival
         nextArrival += 1
         activities[key] = activity
+        if event.isPlaceholder, let processID = event.processID {
+            placeholders[processID] = key
+        }
         return activity
+    }
+
+    /// Forgets one session, the way `sessionClosed` does.
+    private func forget(_ key: SessionKey) {
+        activities.removeValue(forKey: key)
+        arrivalOrder.removeValue(forKey: key)
+        lastSeen.removeValue(forKey: key)
+        placeholders = placeholders.filter { $0.value != key }
+        if focusedKey == key { clearFocus() }
+    }
+
+    /// The processes still being guessed at, so a caller can ask the process
+    /// table whether they are still there.
+    public var placeholderProcessIDs: [Int32] { Array(placeholders.keys) }
+
+    /// Drops the placeholder a process left behind.
+    public func forgetPlaceholder(processID: Int32) {
+        if let key = placeholders.removeValue(forKey: processID) { forget(key) }
     }
 
     /// Attaches a status-line reading to the session it belongs to.
@@ -261,12 +293,7 @@ public final class ActivityEngine {
         }
         guard !forgotten.isEmpty else { return }
 
-        for key in forgotten {
-            activities.removeValue(forKey: key)
-            arrivalOrder.removeValue(forKey: key)
-            lastSeen.removeValue(forKey: key)
-            if focusedKey == key { clearFocus() }
-        }
+        for key in forgotten { forget(key) }
     }
 
     // MARK: - Selection
@@ -397,6 +424,7 @@ public final class ActivityEngine {
         activities.removeAll()
         arrivalOrder.removeAll()
         lastSeen.removeAll()
+        placeholders.removeAll()
         nextArrival = 0
         droppedEventCount = 0
         clearFocus()
