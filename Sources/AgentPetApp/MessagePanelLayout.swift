@@ -31,13 +31,12 @@ enum MessagePanelLayout {
     static let sessionFont = NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular)
     static let messageFont = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
 
-    /// The panel's width, in points, for a configuration.
+    /// The panel's width, in points, for a configuration and a pet.
     ///
     /// A percentage of the pet's own width, clamped to the range the settings
-    /// allow, so "200%" means twice the pet at whatever size it draws.
-    static func panelWidth(for config: MessagePanelConfig) -> CGFloat {
-        let petWidth = PetWindow.defaultSize.width
-        return (petWidth * CGFloat(MessagePanelConfig.clampWidth(config.widthPercent)) / 100)
+    /// allow, so "200%" means twice the pet at whatever size the pet is drawn.
+    static func panelWidth(for config: MessagePanelConfig, petWidth: CGFloat) -> CGFloat {
+        (petWidth * CGFloat(MessagePanelConfig.clampWidth(config.widthPercent)) / 100)
             .rounded()
     }
 
@@ -61,8 +60,6 @@ enum MessagePanelLayout {
     struct Plan {
         let rows: [Row]
         let alignment: MessagePanelConfig.Alignment
-        /// The width the panel is drawn at, from the configuration.
-        let width: CGFloat
 
         var height: CGFloat {
             guard !rows.isEmpty else { return 0 }
@@ -189,7 +186,7 @@ enum MessagePanelLayout {
                 items: items(for: row, config: config))
         }.filter { !$0.items.isEmpty }
 
-        return Plan(rows: rows, alignment: config.alignment, width: panelWidth(for: config))
+        return Plan(rows: rows, alignment: config.alignment)
     }
 
     /// Lay one row out inside `width`, shrinking the flexible items first and

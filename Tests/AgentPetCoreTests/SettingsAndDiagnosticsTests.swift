@@ -26,12 +26,40 @@ struct AppConfigTests {
         #expect(store().load() == AppConfig())
     }
 
+    @Test("a config written before the size setting keeps the pet it named")
+    func petSizeIsAddedWithoutLosingTheOldFields() throws {
+        // The nested object is decoded field by field for the same reason the
+        // top level is: a synthesised decode fails the whole `pet` object when
+        // one key is missing, and the user's chosen pet would go with it.
+        let stored = Data(#"""
+        {"schemaVersion":1,"pet":{"defaultPetID":"clippy","alwaysOnTop":false}}
+        """#.utf8)
+        let config = try JSONDecoder().decode(AppConfig.self, from: stored)
+
+        #expect(config.pet.defaultPetID == "clippy")
+        #expect(config.pet.alwaysOnTop == false)
+        #expect(config.pet.size == .standard, "no choice stored means Codex's own size")
+    }
+
+    @Test("the three pet sizes are Codex's default and its two ends")
+    func petSizes() {
+        #expect(PetSize.standard.width == 112)
+        #expect(PetSize.small.width == 80)
+        #expect(PetSize.large.width == 224)
+        // 192x208 cells: the height follows from the width, as it does in
+        // Codex's own `calc(var(--codex-pet-width) * 208 / 192)`.
+        for size in PetSize.allCases {
+            #expect(abs(size.height - (size.width * 208 / 192)) <= 0.5, "\(size)")
+        }
+    }
+
     @Test("settings round-trip through disk")
     func roundTrip() throws {
         let store = store()
         var config = AppConfig()
         config.pet.defaultPetID = "clippy"
         config.pet.alwaysOnTop = false
+        config.pet.size = .large
         config.agents.autoConfigureNewAgents = true
         try store.save(config)
 

@@ -1,4 +1,39 @@
+import CoreGraphics
 import Foundation
+
+/// How big the pet is drawn.
+///
+/// Codex's own setting is a slider over 80–224 px
+/// (`avatar-overlay-mascot-width-px`, default 112), so the three sizes on
+/// offer are its default and its two ends: every choice here is one Codex
+/// itself allows, and the default is the size its own pet is drawn at.
+public enum PetSize: String, Codable, Sendable, Equatable, CaseIterable, Identifiable {
+    case small
+    case standard
+    case large
+
+    /// The sprite's width in points. The atlas cell is 192×208, so the
+    /// height follows from it.
+    public var width: CGFloat {
+        switch self {
+        case .small:    return 80
+        case .standard: return 112
+        case .large:    return 224
+        }
+    }
+
+    public var height: CGFloat { (width * 208 / 192).rounded() }
+
+    public var displayName: String {
+        switch self {
+        case .small:    return "Small"
+        case .standard: return "Default"
+        case .large:    return "Large"
+        }
+    }
+
+    public var id: String { rawValue }
+}
 
 /// User-visible settings, persisted as JSON.
 ///
@@ -56,17 +91,38 @@ public struct AppConfig: Codable, Sendable, Equatable {
         public var alwaysOnTop: Bool
         /// Honours the system Reduce Motion setting when true.
         public var respectsReduceMotion: Bool
+        /// How big the pet is drawn. `standard` is Codex's own size.
+        public var size: PetSize
 
         public init(
             defaultPetID: String? = nil,
             animationEnabled: Bool = true,
             alwaysOnTop: Bool = true,
-            respectsReduceMotion: Bool = true
+            respectsReduceMotion: Bool = true,
+            size: PetSize = .standard
         ) {
             self.defaultPetID = defaultPetID
             self.animationEnabled = animationEnabled
             self.alwaysOnTop = alwaysOnTop
             self.respectsReduceMotion = respectsReduceMotion
+            self.size = size
+        }
+
+        /// Decoded field by field, for the same reason `AppConfig` is: a config
+        /// written before `size` existed has no key for it, and a synthesised
+        /// decode would fail the whole nested object — taking the user's chosen
+        /// pet down with the missing size.
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let defaults = PetConfig()
+            defaultPetID = try container.decodeIfPresent(String.self, forKey: .defaultPetID)
+            animationEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationEnabled)
+                ?? defaults.animationEnabled
+            alwaysOnTop = try container.decodeIfPresent(Bool.self, forKey: .alwaysOnTop)
+                ?? defaults.alwaysOnTop
+            respectsReduceMotion = try container.decodeIfPresent(Bool.self, forKey: .respectsReduceMotion)
+                ?? defaults.respectsReduceMotion
+            size = try container.decodeIfPresent(PetSize.self, forKey: .size) ?? defaults.size
         }
     }
 

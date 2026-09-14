@@ -1,3 +1,4 @@
+import AgentPetCore
 import AppKit
 
 /// The floating desktop pet surface.
@@ -8,7 +9,15 @@ import AppKit
 /// session it is reporting on.
 final class PetWindow: NSPanel {
 
-    nonisolated static let defaultSize = NSSize(width: 144, height: 156)
+    /// The window a pet of this size is drawn in. The sprite fills it, so the
+    /// window *is* the pet's size.
+    nonisolated static func size(for petSize: PetSize) -> NSSize {
+        NSSize(width: petSize.width, height: petSize.height)
+    }
+
+    /// Codex's own size — its `avatar-overlay-mascot-width-px` defaults to
+    /// 112, which is the width of the sprite this project draws.
+    nonisolated static var defaultSize: NSSize { size(for: .standard) }
 
     /// Where the pet appears the first time it is run.
     ///
