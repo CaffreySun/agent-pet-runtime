@@ -376,3 +376,37 @@ struct NormalizationRobustnessTests {
         #expect(engine.currentFocus()?.state == .idle, "a finished turn should settle to idle")
     }
 }
+
+@Suite("Bridge accept failures")
+struct BridgeAcceptFailureTests {
+
+    @Test("a connection that failed is not a listener that failed", arguments: [
+        EINTR, ECONNABORTED, EPROTO,
+    ])
+    func connectionFailuresRetryImmediately(code: Int32) {
+        #expect(BridgeServer.acceptFailure(for: code) == .retryNow)
+    }
+
+    @Test("running out of descriptors is survivable", arguments: [EMFILE, ENFILE])
+    func descriptorExhaustionBacksOff(code: Int32) {
+        // The regression this exists for: the accept loop treated every error
+        // as "the socket was closed" and ended, so one burst of connections
+        // that filled the descriptor table left a bridge that still reported
+        // itself as listening and never delivered another event.
+        #expect(BridgeServer.acceptFailure(for: code) == .outOfDescriptors)
+    }
+
+    @Test("a socket that is genuinely gone ends the loop", arguments: [EBADF, EINVAL, ENOTSOCK])
+    func unusableSocketsStop(code: Int32) {
+        #expect(BridgeServer.acceptFailure(for: code) == .fatal)
+    }
+
+    @Test("a server that never started is not accepting")
+    func notStartedIsNotAccepting() {
+        let server = BridgeServer(
+            socketURL: URL(fileURLWithPath: "/tmp/ap-never-\(getpid()).sock"),
+            handler: { _ in }
+        )
+        #expect(!server.isAccepting, "the menu must not say Listening for a bridge that never ran")
+    }
+}

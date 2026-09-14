@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
             return DiagnosticsBundle.BridgeSummary(
-                isListening: bridge.status.isListening,
+                isListening: bridge.isListening,
                 socketPath: bridge.status.socketPath,
                 eventsReceived: bridge.status.receivedCount,
                 malformedFrames: bridge.malformedFrameCount
@@ -735,7 +735,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bridgeMenu = NSMenu()
 
         let state = NSMenuItem(
-            title: bridge.status.isListening ? "● Listening" : "○ Not listening",
+            title: bridge.isListening ? "● Listening" : "○ Not listening",
             action: nil, keyEquivalent: ""
         )
         state.isEnabled = false

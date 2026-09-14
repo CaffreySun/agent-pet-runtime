@@ -525,6 +525,28 @@ dedupeKey = hash(agentID, eventName, sessionID, payloadEventID)
 
 测试：`BridgeEndToEndTests` 里两条——"第二个 runtime 不碰会应答的 socket"（随后用真实 shim 投递，断言仍是第一个收到）与"崩溃残留的 socket 会被回收"（手工 bind 后 close，制造出崩溃留下的那种文件）。
 
+### 5.6 accept 的失败 ≠ 监听结束（2026-09-14 修正）
+
+原 `acceptLoop`：
+
+```swift
+let client = accept(fd, nil, nil)
+if client < 0 { return }   // "listening socket closed"
+```
+
+注释只对了一半：`accept` 的错误里 `EINTR`、`ECONNABORTED`、`EPROTO` 只是**这一个连接**失败了，`EMFILE`/`ENFILE` 是**进程**没描述了。把它们一律当成"监听套接字已关闭"，意味着一次 fd 耗尽就等于：accept 线程退出、socket 文件还在、内核仍接受 `connect`（backlog 有空位时）——但**再也不会有人读**，菜单照样显示 "● Listening"，`status.error` 是 nil，所有 hook 的连接失败后写进 spool 要等到**下次启动**才回放。实测（本机，`RLIMIT_NOFILE` 降到 64，另一个进程持有 70 条连接）复现过：桥接对剩余进程寿命永久死亡。
+
+现在按 errno 分类：`retryNow` / `outOfDescriptors`（退避 100ms 重试，只在进入时报告一次）/ `fatal`（退出，且只在 `isRunning` 时报告——`stop()` 关 fd 也会走到这里，那不是故障）。同时：
+
+- **连接数上限 64**：每条连接是一个线程加一个描述符，没有上限的"每连接一个线程"本身就是把 fd 表打满的路径。超限时立刻 `close` 并报告一次。
+- **`SO_RCVTIMEO` 5s**：连接后不说话的对端会一直握着线程；hook 要么立刻发完一帧要么不发。
+- **`BridgeServer.isAccepting`**：accept 线程退出时置 false，`BridgeCoordinator.isListening = status.isListening && isAccepting`，菜单与诊断包都改用它——"listening" 必须意味着有人在那儿 accept。
+- **主进程抬高 `RLIMIT_NOFILE` 到 4096**（`main.swift`）：GUI 进程由 launchd 启动，软上限只有 256。
+
+`hasListener()`（§5.5）用的是 `connect()`，所以它证明的是"内核里有 listening socket"，不是"有活着的 accept 循环"：在 accept 线程已死而 backlog 未满的状态下它会返回 true，第二个实例于是报告"另一个 runtime 持有 socket"。措辞已改成只陈述已知事实（"holds the bridge socket"），不再断言对方"正在接收事件"。
+
+测试：`BridgeTests` 的 "Bridge accept failures" 三条分类用例（可恢复/退避/致命）。
+
 ---
 
 ## 6. Pet 来源与生命周期（2026-09-13 修正）
@@ -893,6 +915,9 @@ enum RuntimeConstants {
     static let bridgeProtocolVersion = 1
     static let dedupeWindow    : TimeInterval = 0.5
     static let shimTimeout     : TimeInterval = 0.1
+    static let maximumConnections : Int = 64          // 每连接一线程一描述符
+    static let bridgeReadTimeout  : TimeInterval = 5  // 连上却不说话的对端
+    static let descriptorBackoff  : TimeInterval = 0.1 // EMFILE 后的重试间隔（§5.6）
 
     // 未送达事件
     static let spoolMaxEvents  : Int = 200

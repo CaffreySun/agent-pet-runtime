@@ -129,8 +129,11 @@ public enum BridgeSocketError: Error, Equatable, Sendable, CustomStringConvertib
         case let .cannotConnect(path, errno):
             return "Could not connect to \(path) (errno \(errno))."
         case let .alreadyRunning(path):
-            return "Another Agent Pet Runtime is already receiving events on \(path). "
-                + "This one runs without the bridge; quit one of them."
+            // Says what is known — the socket is taken — and not what is not:
+            // a bound socket answers `connect` even when its accept loop has
+            // ended, so "already receiving events" is a claim this cannot make.
+            return "Another Agent Pet Runtime holds the bridge socket at \(path). "
+                + "This one runs without the bridge; quit the other instance."
         }
     }
 }

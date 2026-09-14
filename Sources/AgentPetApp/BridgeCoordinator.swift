@@ -27,6 +27,19 @@ final class BridgeCoordinator {
     /// affect the others.
     var malformedFrameCount: Int { server?.malformedFrameCount ?? 0 }
 
+    /// Whether the bridge is actually taking connections right now.
+    ///
+    /// `status.isListening` says a server was started, which is not the same
+    /// question: an accept loop that has ended leaves a socket that still
+    /// accepts at the kernel and reads nothing, and the menu used to call that
+    /// "Listening" while every hook was being refused or ignored. This is the
+    /// one the UI asks.
+    var isAccepting: Bool { server?.isAccepting ?? false }
+
+    /// Whether events can reach the pet: a server that started, and an accept
+    /// loop that is still there to take the connection.
+    var isListening: Bool { status.isListening && isAccepting }
+
     /// Called on the main actor for every normalized event.
     var onEvent: ((AgentEvent) -> Void)?
     var onStatusChange: (() -> Void)?
