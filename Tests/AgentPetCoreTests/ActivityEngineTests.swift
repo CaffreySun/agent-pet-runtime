@@ -213,11 +213,25 @@ struct ActivityTransitionTests {
         #expect(engine.droppedEventCount == droppedBefore + 1)
     }
 
-    @Test("sessionStarted lands on idle, not running")
-    func sessionStartedIsIdle() {
+    @Test("a session that has only announced itself is not drawn")
+    func sessionStartedAloneCreatesNothing() {
         let (engine, _) = makeEngine()
         engine.ingest(event(.sessionStarted))
-        #expect(engine.allActivities()[0].state == .idle)
+        #expect(engine.allActivities().isEmpty)
+        #expect(engine.currentFocus() == nil)
+        #expect(engine.droppedEventCount == 1)
+    }
+
+    @Test("SessionStart still refreshes a session we already know")
+    func sessionStartedRefreshesKnownSession() {
+        let (engine, clock) = makeEngine()
+        engine.ingest(event(.working))
+        clock.advance(by: 30)
+        engine.ingest(event(.sessionStarted, at: clock.now))
+
+        let activity = engine.allActivities().first
+        #expect(activity?.state == .idle, "a session back at its prompt is not still running")
+        #expect(activity?.lastHeardAt == clock.now)
     }
 
     @Test("a focus target survives a later event that lacks one")
@@ -412,7 +426,11 @@ struct FocusHoldTests {
     @Test("a blocking session interrupts an idle one after the short override")
     func urgentOverrideOnIdle() {
         let (engine, clock) = makeEngine()
-        engine.ingest(event(.sessionStarted, agent: "codex", session: "a"))  // idle
+        // An idle session, the way one now comes to exist: a reading for a
+        // session nothing else has reported. A lone `SessionStart` no longer
+        // creates one (see `sessionStartedAloneCreatesNothing`).
+        engine.ingest(event(.contextUpdate, agent: "codex", session: "a",
+                            context: SessionContext(capturedAt: start)))
         _ = engine.currentFocus()
 
         clock.advance(by: 1.5)   // past urgentOverride, inside focusHold

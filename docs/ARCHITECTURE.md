@@ -345,6 +345,36 @@ completionDwell = 4.0s   // completed 状态至少展示 4s 才可让位给更�
 
 测试：`ActivityEngineTests` 四条——50 个被杀会话 23h 时还在、25h 后清空；持续上报 30 小时的不被回收；只有 status-line reading 的会话保持存活且状态不变；复活会话按新到达排序。
 
+### 4.5b 只宣布了自己的会话不建行（2026-09-14 修正）
+
+`SessionStart` 是唯一一个**只证明"有个进程启动了"**的事件，而进程不一定是用户启动的：
+Claude Code 的后台 daemon 会**预热**会话（`claude bg-spare` + `bg-pty-host`），
+预热进程铸造 session id、触发 `SessionStart`，然后坐在那里等被 claim。
+本机取证（2026-09-14 18:14，用户报告"app 还是有一个不存在的 activity"）：
+
+| 证据 | 结果 |
+|---|---|
+| `~/.claude/session-env/0f45f4b5-…` | 18:14 创建，空 |
+| `~/.claude/jobs/0f45f4b5/` | 18:14 创建，除空 `tmp/` 外什么都没有（真实 job 有 `state.json` + `timeline.jsonl`） |
+| `/tmp/cc-daemon-501/…/rv/0f45f4b5.sock` | 18:14 创建（与 `spare/8c856c04.*` 同时） |
+| `~/.claude/projects/**/0f45f4b5*.jsonl` | **不存在** |
+| 进程 | **不存在** |
+
+它触发 `SessionStart` → `resultingState == .idle` → 引擎为未知 session 建 activity。
+于是管理器 Activity 列表出现一行 `claude-code · idle · <uuid>`，面板里 10 分钟
+（`idleRowLifetime`），列表里 24 小时（`silentSessionLifetime`，§4.5a）——
+而且**永远不会被任何后续事件替换**，因为那个会话永远不会说话。
+
+规则：**未知 session 的 `sessionStarted` 不创建 activity**（计入 `droppedEventCount`），
+已知 session 仍可被它刷新并落到 `idle`。这正是删掉启动扫描（973c700）时写下的那句不对称：
+**真的在干活的会话下一个 hook 会自己报到，而没人能填的空行永远不会结束**。
+`contextUpdate` 是例外，仍然建行：一行 status line **正在渲染**是当下的活体证明，
+`SessionStart` 只说明某个进程曾经启动（§6.5）。
+代价：新开的 `claude` 要等第一句话才出现在列表里；停在提示符上的会话照旧不显示。
+
+测试：`ActivityEngineTests` 两条——单独一条 `SessionStart` 之后 `allActivities()` 为空、`currentFocus()` 为 nil；
+已知 session 收到 `SessionStart` 仍然刷新 `lastHeardAt`。
+
 ### 4.6 Session 去重
 
 ```
