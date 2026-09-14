@@ -118,9 +118,18 @@ the part most implementations get wrong, so it is spelled out here.
 | `Stop` | celebrating, then idle | Fires at the end of *every turn*, not the session |
 | `TaskCompleted` | celebrating | An actual task finished |
 | `StopFailure` | failed | A failed turn is not a successful one |
+| `SessionStart` | *(nothing yet)* | A process started, and not necessarily one you started — the session appears with its first real event |
 | `SessionEnd` | *(removed)* | Session over |
 
-Three details that only show up against a real agent:
+Four details that only show up against a real agent:
+
+**`SessionStart` is not evidence of a session you can see.** Claude Code's
+background daemon pre-warms sessions: a process mints a session id, fires this
+hook, and then waits to be claimed — no terminal, no transcript, and no later
+event to correct the row it would have drawn. So a session that has only
+announced itself is not shown; it appears at its first prompt or tool call. A
+session that really is doing something reports itself a moment later, and a row
+nothing can ever fill is the one kind of row that never goes away on its own.
 
 **`Notification` is a grab bag.** It carries `permission_prompt`, `idle_prompt`,
 `auth_success`, and `elicitation_dialog`, distinguished only by a field. Treating

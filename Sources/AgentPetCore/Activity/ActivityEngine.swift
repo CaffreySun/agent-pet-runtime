@@ -146,6 +146,21 @@ public final class ActivityEngine {
             return existing
         }
 
+        // A session that has only announced itself is not yet something to
+        // draw. `SessionStart` proves a process started and nothing else, and
+        // the process is not always one the user started: Claude Code's
+        // background daemon pre-warms sessions that mint an id, fire this
+        // hook, and then sit waiting to be claimed — no terminal, no
+        // transcript, and no later event that could ever replace the row
+        // (observed on this machine, 2026-09-14). This is the asymmetry the
+        // launch scan was removed for: a session that is really working
+        // reports itself on its next event, and a row nothing can fill never
+        // ends. A session already known is still refreshed by it, above.
+        guard event.kind != .sessionStarted else {
+            droppedEventCount += 1
+            return nil
+        }
+
         let activity = AgentActivity(
             agentID: event.agentID,
             sessionID: event.sessionID,
