@@ -283,6 +283,23 @@ struct SessionContextTests {
         #expect(SessionContext.fromStatusPayload(["session_id": "abc"], at: now) == nil)
     }
 
+    @Test("a whole number too large to be one is dropped, not fatal")
+    func oversizedIntegersAreIgnored() {
+        // `JSONSerialization` returns a Double for a JSON integer beyond
+        // Int64, and `Int(Double)` traps. A frame carrying one arrived over
+        // the socket and took the whole app down with it — the one thing a
+        // malformed frame must never do.
+        let context = SessionContext.fromStatusPayload([
+            "tokens": 9_223_372_036_854_775_808.0,   // 2^63, one past Int.max
+            "window": 1e19,                          // and past anything at all
+            "used_percentage": 42.0,
+        ], at: now)
+
+        #expect(context?.totalTokens == nil)
+        #expect(context?.windowSize == nil)
+        #expect(context?.usedPercent == 42, "the rest of the reading is still worth showing")
+    }
+
     @Test("model, cost, and limits read the way a person would write them")
     func labels() {
         let full = SessionContext(

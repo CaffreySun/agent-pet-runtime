@@ -103,8 +103,8 @@ public struct SessionContext: Sendable, Equatable {
         at date: Date
     ) -> SessionContext? {
         let percent = number(payload["used_percentage"])
-        let tokens = number(payload["tokens"]).map(Int.init)
-        let window = number(payload["window"]).map(Int.init)
+        let tokens = integer(payload["tokens"])
+        let window = integer(payload["window"])
         let model = string(payload["model"])
         let effort = string(payload["effort"])
         let cost = number(payload["cost_usd"])
@@ -171,6 +171,17 @@ public struct SessionContext: Sendable, Equatable {
         if let int = value as? Int { return Double(int) }
         if let number = value as? NSNumber { return number.doubleValue }
         return nil
+    }
+
+    /// A whole number out of the payload, or nothing.
+    ///
+    /// `Int(someDouble)` traps on anything outside `Int64` — and
+    /// `JSONSerialization` happily hands back a `Double` for a JSON integer
+    /// that big, so a frame carrying `{"tokens": 9223372036854775808}` used to
+    /// take the whole app down. A number we cannot read is a number we do not
+    /// show.
+    private static func integer(_ value: Any?) -> Int? {
+        number(value).flatMap { Int(exactly: $0) }
     }
 
     private static func string(_ value: Any?) -> String? {
