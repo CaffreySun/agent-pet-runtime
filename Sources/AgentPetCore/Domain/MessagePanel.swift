@@ -177,6 +177,37 @@ public struct MessagePanel: Sendable, Equatable {
         public var showsDetail: Bool { body != nil }
     }
 
+    /// Something the pet says that belongs to no session.
+    ///
+    /// One thing fits here so far: the introduction it makes the first time it
+    /// is seen. Codex shows its own for eight seconds, waving as it does, and
+    /// keeps a note of which pets have already said hello.
+    public struct Greeting: Sendable, Equatable {
+        public let title: String
+        public let body: String
+
+        public init(title: String, body: String) {
+            self.title = title
+            self.body = body
+        }
+
+        /// Codex's own lifetime for it (`wd = 8e3`).
+        public static let lifetime: TimeInterval = 8
+
+        /// Codex's greeting, minus the product name it names: this pet watches
+        /// CLI agents, not ChatGPT.
+        public static func introduction(petName: String) -> Greeting {
+            Greeting(
+                title: "Hi, I'm \(petName)",
+                body: "I'm here to help keep your sessions moving"
+            )
+        }
+
+        public func isExpired(shownAt: Date, now: Date) -> Bool {
+            now.timeIntervalSince(shownAt) >= Self.lifetime
+        }
+    }
+
     public var rows: [Row]
 
     public init(rows: [Row] = []) {
@@ -203,15 +234,20 @@ public struct MessagePanel: Sendable, Equatable {
         focusedID: String?,
         agentNames: [String: String] = [:],
         config: MessagePanelConfig,
-        now: Date
+        now: Date,
+        greeting: Greeting? = nil
     ) -> MessagePanel {
+        // The introduction outranks the two reasons the panel would otherwise
+        // be empty: it is the pet saying something, not a session being shown.
+        let introduction = greeting.map { [row(greeting: $0)] } ?? []
+
         let visible = ranked.filter { isVisible($0, now: now) }
-        guard !visible.isEmpty else { return .empty }
+        guard !visible.isEmpty else { return MessagePanel(rows: introduction) }
 
         // A panel that is only there when something is happening is a panel
         // the user asked not to babysit.
         if !config.alwaysVisible, !visible.contains(where: { $0.state != .idle }) {
-            return .empty
+            return MessagePanel(rows: introduction)
         }
 
         // Same agent's sessions together, groups in the order their best
@@ -228,7 +264,22 @@ public struct MessagePanel: Sendable, Equatable {
                 row(for: activity, focusedID: focusedID, agentNames: agentNames)
             }
         }
-        return MessagePanel(rows: rows)
+        return MessagePanel(rows: introduction + rows)
+    }
+
+    private static func row(greeting: Greeting) -> Row {
+        Row(
+            id: "greeting",
+            agentID: "",
+            agentName: "",
+            sessionSuffix: "",
+            task: nil,
+            tool: nil,
+            context: nil,
+            message: Message(label: greeting.title, body: greeting.body),
+            state: .idle,
+            isFocused: false
+        )
     }
 
     private static func isVisible(_ activity: AgentActivity, now: Date) -> Bool {

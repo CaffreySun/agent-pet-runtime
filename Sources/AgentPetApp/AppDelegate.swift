@@ -17,6 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `resizeWindow` is where a change is noticed, because it is already the
     /// one thing that runs every frame.
     private var petSize: PetSize = .standard
+
+    /// Whether the pet is on screen. Codex calls putting it away "tuck away";
+    /// the app stays in the menu bar either way, which is the only way back.
+    private var isPetVisible = true
     private var library: [PetLibrary.Entry] = []
     private var selectedPetID: String?
     /// Last panel written to the verbose log, so the frame loop does not
@@ -276,6 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.loadedPetName = name
             selectedPetID = loaded.definition.id
             model?.currentPetID = loaded.definition.id
+            greetIfNew(petID: loaded.definition.id, name: name)
             rebuildMenu()
             if CommandLine.arguments.contains("--verbose") {
                 FileHandle.standardError.write(Data(
@@ -285,6 +290,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             NSLog("Failed to load pet at \(root.path): \(error)")
         }
+    }
+
+    /// Says hello, once per pet.
+    ///
+    /// A diagnostic run is exempt: `--selftest` and `--diagnose` load a pet
+    /// through this same path, and spending the user's greeting on a test
+    /// would mean never seeing it in real use.
+    private func greetIfNew(petID: String, name: String) {
+        guard !HeadlessMode.isActive else { return }
+        var greeted = UserDefaults.standard.stringArray(forKey: Self.greetedKey) ?? []
+        guard !greeted.contains(petID) else { return }
+        greeted.append(petID)
+        UserDefaults.standard.set(greeted, forKey: Self.greetedKey)
+        controller.introduce(petName: name)
     }
 
     /// The pet the user last put on the desktop, resolved against what is

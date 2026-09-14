@@ -253,6 +253,56 @@ struct MessagePanelConfigTests {
     }
 }
 
+@Suite("Pet introduction")
+struct GreetingTests {
+
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    @Test("the introduction names the pet, and lasts Codex's eight seconds")
+    func introduction() {
+        let greeting = MessagePanel.Greeting.introduction(petName: "Clippy")
+        #expect(greeting.title == "Hi, I'm Clippy")
+        #expect(greeting.body == "I'm here to help keep your sessions moving")
+
+        // Codex's own lifetime (`wd = 8e3`): still there a second short of it,
+        // gone at it.
+        #expect(!greeting.isExpired(shownAt: now, now: now.addingTimeInterval(7.9)))
+        #expect(greeting.isExpired(shownAt: now, now: now.addingTimeInterval(8)))
+    }
+
+    @Test("the introduction is a row of its own, with nothing a session has")
+    func introductionIsItsOwnRow() {
+        let empty = MessagePanel.build(
+            ranked: [], focusedID: nil, config: MessagePanelConfig(), now: now
+        )
+        #expect(empty.isEmpty, "no sessions and nothing to say is an empty panel")
+
+        // It has to appear even when no session does — that is the moment the
+        // pet introduces itself.
+        let greeting = MessagePanel.build(
+            ranked: [], focusedID: nil, config: MessagePanelConfig(), now: now,
+            greeting: .introduction(petName: "Clippy")
+        )
+        #expect(greeting.rows.count == 1)
+        #expect(greeting.rows.first?.message?.label == "Hi, I'm Clippy")
+        #expect(greeting.rows.first?.agentName == "")
+        #expect(greeting.rows.first?.sessionSuffix == "")
+    }
+
+    @Test("a hidden panel still says hello")
+    func introductionOutranksAlwaysVisible() {
+        // `alwaysVisible = false` means "only while something is happening".
+        // The pet introducing itself is something happening.
+        var config = MessagePanelConfig()
+        config.alwaysVisible = false
+        let greeting = MessagePanel.build(
+            ranked: [], focusedID: nil, config: config, now: now,
+            greeting: .introduction(petName: "Clippy")
+        )
+        #expect(greeting.rows.count == 1)
+    }
+}
+
 @Suite("Session context")
 struct SessionContextTests {
 

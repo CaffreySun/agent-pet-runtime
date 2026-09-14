@@ -40,6 +40,10 @@ final class PetController {
     /// only fact the layer needs is when the hover began.
     private var hoverStartedAt: Date?
 
+    /// The introduction the pet makes the first time it is seen, kept until it
+    /// has been up for its eight seconds.
+    private var greeting: (greeting: MessagePanel.Greeting, shownAt: Date)?
+
     /// Set by the self-test to pin a single state.
     private var forcedState: AgentState?
 
@@ -136,6 +140,38 @@ final class PetController {
     /// attention gesture".
     func greet() {
         playGesture(named: "waving")
+    }
+
+    /// The pet introduces itself: Codex's own greeting, waved, said once per
+    /// pet. The panel carries the words for `Greeting.lifetime` seconds and
+    /// the wave plays once, which is what Codex's mascot does with its
+    /// `waving` state.
+    func introduce(petName: String) {
+        greeting = (MessagePanel.Greeting.introduction(petName: petName), Date())
+        rebuildPanel(now: Date())
+        playGesture(named: "waving")
+    }
+
+    /// Retires the introduction early.
+    ///
+    /// The self-test uses it to see what the panel looks like afterwards
+    /// without waiting the eight seconds out; the app itself does not, because
+    /// Codex's greeting lives its own lifetime.
+    func dismissGreeting() {
+        guard greeting != nil else { return }
+        greeting = nil
+        rebuildPanel(now: Date())
+        render()
+    }
+
+    /// The greeting, if it is still worth showing.
+    private func activeGreeting(now: Date) -> MessagePanel.Greeting? {
+        guard let greeting else { return nil }
+        guard !greeting.greeting.isExpired(shownAt: greeting.shownAt, now: now) else {
+            self.greeting = nil
+            return nil
+        }
+        return greeting.greeting
     }
 
     // MARK: - Dragging
@@ -286,7 +322,8 @@ final class PetController {
             focusedID: focused?.id,
             agentNames: agentNames(),
             config: panelConfig(),
-            now: now
+            now: now,
+            greeting: activeGreeting(now: now)
         )
     }
 
