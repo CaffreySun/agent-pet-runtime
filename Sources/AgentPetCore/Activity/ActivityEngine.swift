@@ -28,21 +28,6 @@ public struct ActivityTuning: Sendable, Equatable {
     /// session stops existing, not when it stops being worth drawing.
     public var silentSessionLifetime: TimeInterval
 
-    /// How long a scan's guess stands without the session itself speaking.
-    ///
-    /// The scan can prove a session exists but never that it is doing
-    /// anything: a terminal sitting at its prompt and one blocked inside a
-    /// long tool are the same process table entry. Silence has to decay to
-    /// the answer that withdraws the claim — a session that does start
-    /// working re-creates itself one event later, while a guess left
-    /// standing is a row nothing can ever fill, pinned in the panel and in
-    /// the activity list for as long as the process lives.
-    ///
-    /// Ten minutes, the same lifetime an idle row gets in the panel
-    /// (`MessagePanel.idleRowLifetime`): one rule for "this exists and
-    /// nothing more", in both places that draw it.
-    public var placeholderLifetime: TimeInterval
-
     public init(
         agingThreshold: TimeInterval = 90,
         maxPromotions: Int = 2,
@@ -50,8 +35,7 @@ public struct ActivityTuning: Sendable, Equatable {
         urgentOverride: TimeInterval = 1.0,
         completionDwell: TimeInterval = 4.0,
         dedupeWindow: TimeInterval = 0.5,
-        silentSessionLifetime: TimeInterval = 24 * 60 * 60,
-        placeholderLifetime: TimeInterval = 10 * 60
+        silentSessionLifetime: TimeInterval = 24 * 60 * 60
     ) {
         self.agingThreshold = agingThreshold
         self.maxPromotions = maxPromotions
@@ -60,7 +44,6 @@ public struct ActivityTuning: Sendable, Equatable {
         self.completionDwell = completionDwell
         self.dedupeWindow = dedupeWindow
         self.silentSessionLifetime = silentSessionLifetime
-        self.placeholderLifetime = placeholderLifetime
     }
 
     public static let `default` = ActivityTuning()
@@ -84,13 +67,6 @@ public final class ActivityEngine {
 
     private var lastSeen: [SessionKey: (kind: AgentEventKind, at: Date, id: String?)] = [:]
 
-    /// Sessions a process scan guessed at, by the process that was running.
-    ///
-    /// The guess is only what a process table can prove — a session of that
-    /// agent exists — so the first event from the same process replaces it,
-    /// whatever session id the agent turns out to use.
-    private var placeholders: [Int32: SessionKey] = [:]
-
     private var focusedKey: SessionKey?
     private var focusAcquiredAt: Date?
 
@@ -106,13 +82,6 @@ public final class ActivityEngine {
     @discardableResult
     public func ingest(_ event: AgentEvent) -> AgentActivity? {
         let key = SessionKey(agentID: event.agentID, sessionID: event.sessionID)
-
-        // A real event speaks for its process: whatever was inferred about that
-        // process is now known better, and its placeholder goes.
-        if !event.isPlaceholder, let processID = event.processID,
-           let placeholder = placeholders.removeValue(forKey: processID), placeholder != key {
-            forget(placeholder)
-        }
 
         // A status-line reading describes a session rather than moving it, so
         // it takes its own path before deduplication and ordering: it never
@@ -135,7 +104,10 @@ public final class ActivityEngine {
         lastSeen[key] = (event.kind, event.at, event.eventID)
 
         if event.kind == .sessionClosed {
-            forget(key)
+            activities.removeValue(forKey: key)
+            arrivalOrder.removeValue(forKey: key)
+            lastSeen.removeValue(forKey: key)
+            if focusedKey == key { clearFocus() }
             return nil
         }
 
@@ -191,28 +163,7 @@ public final class ActivityEngine {
         arrivalOrder[key] = nextArrival
         nextArrival += 1
         activities[key] = activity
-        if event.isPlaceholder, let processID = event.processID {
-            placeholders[processID] = key
-        }
         return activity
-    }
-
-    /// Forgets one session, the way `sessionClosed` does.
-    private func forget(_ key: SessionKey) {
-        activities.removeValue(forKey: key)
-        arrivalOrder.removeValue(forKey: key)
-        lastSeen.removeValue(forKey: key)
-        placeholders = placeholders.filter { $0.value != key }
-        if focusedKey == key { clearFocus() }
-    }
-
-    /// The processes still being guessed at, so a caller can ask the process
-    /// table whether they are still there.
-    public var placeholderProcessIDs: [Int32] { Array(placeholders.keys) }
-
-    /// Drops the placeholder a process left behind.
-    public func forgetPlaceholder(processID: Int32) {
-        if let key = placeholders.removeValue(forKey: processID) { forget(key) }
     }
 
     /// Attaches a status-line reading to the session it belongs to.
@@ -287,23 +238,6 @@ public final class ActivityEngine {
         }
 
         evictSilent(now: now)
-        evictStalePlaceholders(now: now)
-    }
-
-    /// Retires guesses that have stood for `tuning.placeholderLifetime`
-    /// without the session ever speaking for itself.
-    ///
-    /// Measured from the session's first sighting — `startedAt` — not from
-    /// `updatedAt`: a guess re-delivered by a sweep must not buy itself more
-    /// time, or a session that never speaks would stand forever. Anything
-    /// the process really said already removed its own entry by way of the
-    /// adopt-on-ingest path, so a real session is never touched by this.
-    private func evictStalePlaceholders(now: Date) {
-        let cutoff = now.addingTimeInterval(-tuning.placeholderLifetime)
-        let expired = placeholders.values.filter { key in
-            (activities[key]?.startedAt ?? .distantFuture) < cutoff
-        }
-        for key in Set(expired) { forget(key) }
     }
 
     /// Forgets sessions that have not been heard from for
@@ -327,7 +261,12 @@ public final class ActivityEngine {
         }
         guard !forgotten.isEmpty else { return }
 
-        for key in forgotten { forget(key) }
+        for key in forgotten {
+            activities.removeValue(forKey: key)
+            arrivalOrder.removeValue(forKey: key)
+            lastSeen.removeValue(forKey: key)
+            if focusedKey == key { clearFocus() }
+        }
     }
 
     // MARK: - Selection
@@ -458,7 +397,6 @@ public final class ActivityEngine {
         activities.removeAll()
         arrivalOrder.removeAll()
         lastSeen.removeAll()
-        placeholders.removeAll()
         nextArrival = 0
         droppedEventCount = 0
         clearFocus()
