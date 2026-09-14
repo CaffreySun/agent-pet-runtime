@@ -12,7 +12,9 @@ private func event(
     summary: String? = nil,
     focus: FocusTarget? = nil,
     context: SessionContext? = nil,
-    id: String? = nil
+    id: String? = nil,
+    processID: Int32? = nil,
+    placeholder: Bool = false
 ) -> AgentEvent {
     AgentEvent(
         agentID: agent,
@@ -23,7 +25,9 @@ private func event(
         summary: summary,
         focusTarget: focus,
         context: context,
-        eventID: id
+        eventID: id,
+        processID: processID,
+        isPlaceholder: placeholder
     )
 }
 
@@ -565,5 +569,69 @@ struct ConcurrencyTests {
             clock.advance(by: 1)
         }
         #expect(engine.allActivities().map(\.agentID) == agents)
+    }
+}
+
+@Suite("ActivityEngine — sessions found in the process table")
+struct PlaceholderSessionTests {
+
+    /// A placeholder is what a launch-time scan can say: this process is a
+    /// session of that agent, and nothing more.
+    private func placeholder(process: Int32, session: String = "ttys004") -> AgentEvent {
+        event(.sessionStarted, session: session, processID: process, placeholder: true)
+    }
+
+    @Test("a scanned session is a session, and says only that it exists")
+    func scanCreatesAnIdleSession() {
+        let (engine, _) = makeEngine()
+        engine.ingest(placeholder(process: 4242))
+
+        #expect(engine.allActivities().count == 1)
+        #expect(engine.allActivities().first?.state == .idle, "a scan cannot know what a session is doing")
+        #expect(engine.placeholderProcessIDs == [4242])
+    }
+
+    @Test("the first real event from that process replaces it")
+    func aRealEventAdoptsThePlaceholder() {
+        let (engine, clock) = makeEngine()
+        engine.ingest(placeholder(process: 4242))
+        clock.advance(by: 5)
+
+        // The agent's own session id, which a scan cannot know.
+        engine.ingest(event(.working, session: "a1b2c3", at: clock.now, processID: 4242))
+
+        #expect(engine.allActivities().map(\.sessionID) == ["a1b2c3"], "the guess is gone, not doubled")
+        #expect(engine.currentFocus()?.state == .running)
+        #expect(engine.placeholderProcessIDs.isEmpty)
+    }
+
+    @Test("an event from a different process leaves the placeholder alone")
+    func anotherProcessDoesNotAdoptIt() {
+        let (engine, _) = makeEngine()
+        engine.ingest(placeholder(process: 4242))
+        engine.ingest(event(.working, session: "other", processID: 9999))
+
+        #expect(engine.allActivities().count == 2, "a different terminal is a different session")
+        #expect(engine.placeholderProcessIDs == [4242])
+    }
+
+    @Test("a process that has gone is dropped on the next look")
+    func aDeadProcessIsForgotten() {
+        let (engine, _) = makeEngine()
+        engine.ingest(placeholder(process: 4242))
+        engine.forgetPlaceholder(processID: 4242)
+
+        #expect(engine.allActivities().isEmpty)
+        #expect(engine.placeholderProcessIDs.isEmpty)
+    }
+
+    @Test("a placeholder ages out like any other session")
+    func aPlaceholderIsEvictedToo() {
+        let (engine, clock) = makeEngine()
+        engine.ingest(placeholder(process: 4242))
+        clock.advance(by: 25 * 60 * 60)
+
+        #expect(engine.allActivities().isEmpty)
+        #expect(engine.placeholderProcessIDs.isEmpty, "and it does not leave its process behind")
     }
 }

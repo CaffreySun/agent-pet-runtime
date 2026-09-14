@@ -39,6 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// pets meets each of them as themselves.
     private static let greetedKey = "pet.greeted.ids"
 
+    /// How often a placeholder is checked against the process table. Long: a
+    /// session that has exited is a row that is merely stale, and its first
+    /// hook would have replaced it anyway.
+    private static let placeholderPollInterval: TimeInterval = 60
+
+    /// Runs only while a scan's guess is still standing.
+    private var placeholderTimer: Timer?
+
     /// Signal sources that turn a termination signal into a normal quit.
     ///
     /// `brew upgrade` stops the old process before replacing the bundle, and
@@ -137,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // events into a process that is about to exit.
         if !HeadlessMode.isActive {
             startBridge()
+            scanForRunningSessions()
             replaySpooledEvents()
         }
         rebuildMenu()
@@ -158,6 +167,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.stop()
         bridge.stop()
         savePosition()
+    }
+
+    /// Gives the pet a starting picture of what is already running.
+    ///
+    /// Hooks fire around work, so a session sitting at its prompt says nothing
+    /// — launch the app into that silence and it shows an empty panel beside a
+    /// terminal with three sessions in it. The process table knows better: a
+    /// session somebody is watching has a terminal and the agent's own name.
+    ///
+    /// What a scan proves is that a session exists, never what it is doing, so
+    /// these arrive as placeholders at the lowest confidence. The first real
+    /// event from the same process replaces one — which is why this runs
+    /// *before* the spool is replayed: a replayed event adopts its placeholder
+    /// on the way in.
+    private func scanForRunningSessions() {
+        guard !HeadlessMode.isActive else { return }
+        let profiles = AgentIntegrationRegistry.all(transaction: ConfigTransaction(
+            backupDirectory: BridgeSocketLocation.applicationSupportDirectory
+                .appendingPathComponent("backups")
+        ))
+        let names = Dictionary(uniqueKeysWithValues: profiles.map { ($0.agentID, $0.detection.executableNames) })
+
+        for running in RunningAgents.scan(profiles: AgentProfiles.all, executableNames: names) {
+            if CommandLine.arguments.contains("--verbose") {
+                let line = "[pet] running: \(running.agentID) pid=\(running.processID) "
+                    + "tty=\(running.terminal ?? "-") cwd=\(running.workingDirectory?.path ?? "-")\n"
+                FileHandle.standardError.write(Data(line.utf8))
+            }
+            controller.ingest(placeholderEvent(for: running))
+        }
+        startWatchingPlaceholders()
+    }
+
+    /// One event per running session, carrying what the process table proved.
+    private func placeholderEvent(for running: RunningAgent) -> AgentEvent {
+        AgentEvent(
+            agentID: running.agentID,
+            // The terminal names the session better than a pid does: it is what
+            // tells a user which window to look at.
+            sessionID: running.terminal ?? "pid-\(running.processID)",
+            kind: .sessionStarted,
+            at: Date(),
+            confidence: EventConfidence(level: .low, source: "process scan"),
+            projectPath: running.workingDirectory,
+            focusTarget: running.workingDirectory.map { .openingDirectory($0) },
+            processID: running.processID,
+            isPlaceholder: true
+        )
+    }
+
+    /// Keeps the guesses honest: a session that is still running stays, one
+    /// whose process has gone is dropped.
+    ///
+    /// The timer only runs while there is something to check, so the steady
+    /// state — every session has spoken for itself — costs nothing at all.
+    private func startWatchingPlaceholders() {
+        guard !controller.placeholderProcessIDs.isEmpty, placeholderTimer == nil else { return }
+
+        let timer = Timer(timeInterval: Self.placeholderPollInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshPlaceholders() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        placeholderTimer = timer
+    }
+
+    private func refreshPlaceholders() {
+        guard !controller.placeholderProcessIDs.isEmpty else {
+            placeholderTimer?.invalidate()
+            placeholderTimer = nil
+            return
+        }
+
+        let profiles = AgentIntegrationRegistry.all(transaction: ConfigTransaction(
+            backupDirectory: BridgeSocketLocation.applicationSupportDirectory
+                .appendingPathComponent("backups")
+        ))
+        let names = Dictionary(uniqueKeysWithValues: profiles.map { ($0.agentID, $0.detection.executableNames) })
+        let running = RunningAgents.scan(profiles: AgentProfiles.all, executableNames: names)
+
+        for guess in running {
+            controller.ingest(placeholderEvent(for: guess))
+        }
+        // Anything still being guessed at whose process is not in this scan has
+        // exited — or has spoken for itself already, which the engine handles.
+        for processID in controller.placeholderProcessIDs
+        where !running.contains(where: { $0.processID == processID }) {
+            controller.forgetPlaceholder(processID: processID)
+        }
     }
 
     private func startBridge() {
