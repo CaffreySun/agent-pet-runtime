@@ -93,19 +93,24 @@ public struct AppConfig: Codable, Sendable, Equatable {
         public var respectsReduceMotion: Bool
         /// How big the pet is drawn. `standard` is Codex's own size.
         public var size: PetSize
+        /// Whether the pet is on screen. Codex calls putting it away "tuck
+        /// away"; the app stays in the menu bar either way.
+        public var visible: Bool
 
         public init(
             defaultPetID: String? = nil,
             animationEnabled: Bool = true,
             alwaysOnTop: Bool = true,
             respectsReduceMotion: Bool = true,
-            size: PetSize = .standard
+            size: PetSize = .standard,
+            visible: Bool = true
         ) {
             self.defaultPetID = defaultPetID
             self.animationEnabled = animationEnabled
             self.alwaysOnTop = alwaysOnTop
             self.respectsReduceMotion = respectsReduceMotion
             self.size = size
+            self.visible = visible
         }
 
         /// Decoded field by field, for the same reason `AppConfig` is: a config
@@ -123,6 +128,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
             respectsReduceMotion = try container.decodeIfPresent(Bool.self, forKey: .respectsReduceMotion)
                 ?? defaults.respectsReduceMotion
             size = try container.decodeIfPresent(PetSize.self, forKey: .size) ?? defaults.size
+            visible = try container.decodeIfPresent(Bool.self, forKey: .visible) ?? defaults.visible
         }
     }
 

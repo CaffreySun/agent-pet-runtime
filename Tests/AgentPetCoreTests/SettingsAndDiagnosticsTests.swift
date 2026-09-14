@@ -39,6 +39,7 @@ struct AppConfigTests {
         #expect(config.pet.defaultPetID == "clippy")
         #expect(config.pet.alwaysOnTop == false)
         #expect(config.pet.size == .standard, "no choice stored means Codex's own size")
+        #expect(config.pet.visible, "and a file from before the switch means the pet is on screen")
     }
 
     @Test("the three pet sizes are Codex's default and its two ends")
