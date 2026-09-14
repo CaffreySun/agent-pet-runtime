@@ -577,8 +577,8 @@ struct PlaceholderSessionTests {
 
     /// A placeholder is what a launch-time scan can say: this process is a
     /// session of that agent, and nothing more.
-    private func placeholder(process: Int32, session: String = "ttys004") -> AgentEvent {
-        event(.sessionStarted, session: session, processID: process, placeholder: true)
+    private func placeholder(process: Int32, session: String = "ttys004", at: Date = start) -> AgentEvent {
+        event(.sessionStarted, session: session, at: at, processID: process, placeholder: true)
     }
 
     @Test("a scanned session is a session, and says only that it exists")
@@ -625,13 +625,47 @@ struct PlaceholderSessionTests {
         #expect(engine.placeholderProcessIDs.isEmpty)
     }
 
-    @Test("a placeholder ages out like any other session")
-    func aPlaceholderIsEvictedToo() {
+    @Test("a guess that never speaks is retired after its lifetime, not held forever")
+    func aGuessIsRetiredByAge() {
+        // The regression this exists for: the launch scan finds a session
+        // sitting at its prompt — a live process no event will ever come to
+        // replace — and the guess stood in the panel and the activity list
+        // for as long as the app ran, with nothing able to fill or clear it.
         let (engine, clock) = makeEngine()
         engine.ingest(placeholder(process: 4242))
-        clock.advance(by: 25 * 60 * 60)
 
+        clock.advance(by: 9 * 60)
+        #expect(engine.allActivities().count == 1, "still inside its lifetime")
+
+        clock.advance(by: 2 * 60)
         #expect(engine.allActivities().isEmpty)
         #expect(engine.placeholderProcessIDs.isEmpty, "and it does not leave its process behind")
+    }
+
+    @Test("re-delivering a guess does not buy it more time")
+    func aRepeatedGuessStillExpires() {
+        let (engine, clock) = makeEngine()
+        engine.ingest(placeholder(process: 4242))
+
+        // What a process-table sweep re-delivering the same sighting looks
+        // like: the same guess, arriving again with a fresh timestamp.
+        clock.advance(by: 8 * 60)
+        engine.ingest(placeholder(process: 4242, at: clock.now))
+        clock.advance(by: 3 * 60)
+
+        #expect(engine.allActivities().isEmpty, "the clock runs from the first sighting")
+    }
+
+    @Test("the guess's lifetime never touches the real session that replaced it")
+    func anAdoptedSessionOutlivesTheGuess() {
+        let (engine, clock) = makeEngine()
+        engine.ingest(placeholder(process: 4242))
+        clock.advance(by: 5 * 60)
+        engine.ingest(event(.working, session: "a1b2c3", at: clock.now, processID: 4242))
+
+        clock.advance(by: 20 * 60)
+
+        #expect(engine.allActivities().map(\.sessionID) == ["a1b2c3"],
+                "a session that has spoken is no longer a guess")
     }
 }
