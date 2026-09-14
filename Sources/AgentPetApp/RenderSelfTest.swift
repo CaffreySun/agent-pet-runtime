@@ -510,6 +510,15 @@ enum RenderSelfTest {
             failures += 1
         }
 
+        // Temporary: a PNG of what is actually drawn, for looking at.
+        if let path = ProcessInfo.processInfo.environment["AGENTPET_DUMP_PANEL"],
+           let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?
+                .write(to: URL(fileURLWithPath: path))
+            print("  – panel dumped to \(path) (\(Int(view.bounds.width))x\(Int(view.bounds.height)))")
+        }
+
         // The agent column is a glyph, not a name: "Claude Code" would take
         // most of the panel's width, and the name is what the Agents page is
         // for. The name stays on the item for the verbose log.
@@ -524,6 +533,24 @@ enum RenderSelfTest {
             print("  ✓ the agent column is the glyph '\(symbol)' — \(Int(agent.width))pt, for '\(agent.primary)'")
         } else {
             print("  ✗ the agent column is not an icon")
+            failures += 1
+        }
+
+        // And it has to survive the row's squeeze. A panel narrower than its
+        // items drops what it cannot fit — anything under half the minimum
+        // item width — and a thirteen-point glyph used to be dropped as "too
+        // narrow to say anything", which made the whole column vanish while
+        // the item list still looked right.
+        let fullConfig = MessagePanelConfig()   // every item on, 200% of the pet
+        let squeezed = MessagePanelLayout.panelWidth(for: fullConfig, petWidth: pet.width)
+        let firstRow = MessagePanelLayout.plan(for: panel, config: fullConfig).rows.first
+        let drawnKinds = firstRow.map {
+            MessagePanelLayout.frames(for: $0, in: squeezed).map(\.item.kind)
+        } ?? []
+        if drawnKinds.contains(.agent) {
+            print("  ✓ it survives a row too narrow for everything else (\(drawnKinds.count) of 9 items fit)")
+        } else {
+            print("  ✗ the agent glyph was squeezed out of the row entirely")
             failures += 1
         }
 
