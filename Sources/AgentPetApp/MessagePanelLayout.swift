@@ -50,6 +50,13 @@ enum MessagePanelLayout {
         /// An SF Symbol to draw instead of the text, for items that are a mark
         /// rather than a word.
         var symbolName: String?
+        /// The narrowest this item may be drawn — and so the width below which
+        /// it is left out entirely.
+        ///
+        /// Half the general minimum by default: narrower than that and a label
+        /// says nothing. A glyph is the exception, and says so here, because a
+        /// thirteen-point icon is not a squeezed word.
+        var minimumWidth: CGFloat = MessagePanelLayout.minimumItemWidth / 2
 
         init(
             kind: MessagePanelConfig.Kind,
@@ -58,7 +65,8 @@ enum MessagePanelLayout {
             context: SessionContext?,
             width: CGFloat,
             isFlexible: Bool,
-            symbolName: String? = nil
+            symbolName: String? = nil,
+            minimumWidth: CGFloat = MessagePanelLayout.minimumItemWidth / 2
         ) {
             self.kind = kind
             self.primary = primary
@@ -67,6 +75,7 @@ enum MessagePanelLayout {
             self.width = width
             self.isFlexible = isFlexible
             self.symbolName = symbolName
+            self.minimumWidth = minimumWidth
         }
     }
 
@@ -131,7 +140,8 @@ enum MessagePanelLayout {
                 // Agents page is for.
                 return Item(kind: .agent, primary: row.agentName, secondary: nil,
                             context: nil, width: iconItemWidth, isFlexible: false,
-                            symbolName: agentSymbol(forAgentID: row.agentID))
+                            symbolName: agentSymbol(forAgentID: row.agentID),
+                            minimumWidth: iconItemWidth)
             case .session:
                 guard !row.sessionSuffix.isEmpty else { return nil }
                 return Item(kind: .session, primary: row.sessionSuffix, secondary: nil,
@@ -264,7 +274,7 @@ enum MessagePanelLayout {
             }
             if deficit > 0 {
                 for index in row.items.indices where deficit > 0 {
-                    let room = max(0, widths[index] - minimumItemWidth / 2)
+                    let room = max(0, widths[index] - row.items[index].minimumWidth)
                     let take = min(room, deficit)
                     widths[index] -= take
                     deficit -= take
@@ -272,7 +282,7 @@ enum MessagePanelLayout {
             }
         }
 
-        let drawn = widths.enumerated().filter { $0.element >= minimumItemWidth / 2 }
+        let drawn = widths.enumerated().filter { $0.element >= row.items[$0.offset].minimumWidth }
         let drawnWidth = drawn.map(\.element).reduce(0, +)
             + spacing * CGFloat(max(0, drawn.count - 1))
 
@@ -286,7 +296,7 @@ enum MessagePanelLayout {
         }
 
         var frames: [(item: Item, frame: CGRect)] = []
-        for (index, item) in row.items.enumerated() where widths[index] >= minimumItemWidth / 2 {
+        for (index, item) in row.items.enumerated() where widths[index] >= item.minimumWidth {
             frames.append((item, CGRect(x: x, y: 0, width: widths[index], height: rowHeight)))
             x += widths[index] + spacing
         }
