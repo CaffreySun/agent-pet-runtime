@@ -1,5 +1,6 @@
 import AgentPetCore
 import AppKit
+import SwiftUI
 import Foundation
 
 /// Renders the pet offscreen and measures what actually lands in the buffer.
@@ -159,6 +160,7 @@ enum RenderSelfTest {
         failures += checkDraggable(view: view)
         failures += checkBehaviourLayers(controller: controller, view: view)
         failures += checkMessagePanel(controller: controller, view: view, petSize: petSize)
+        failures += checkReopenedWindow()
 
         print("")
         print(failures == 0 ? "PASS" : "FAIL (\(failures) problem(s))")
@@ -537,6 +539,107 @@ enum RenderSelfTest {
     /// Worth checking mechanically: the pet renders perfectly whether or not
     /// this works, and the failure mode is silent — a pet that animates but
     /// cannot be moved reads as a broken app with no visible cause.
+    // MARK: - The manager window's lifecycle
+
+    /// Counts how often SwiftUI hands a model change to its view.
+    @MainActor
+    private final class UpdateProbe: ObservableObject {
+        @Published var tick = 0
+        private(set) var deliveries = 0
+        func noteDelivery() { deliveries += 1 }
+    }
+
+    private struct DeliveryCounter: NSViewRepresentable {
+        let probe: UpdateProbe
+        func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+        func updateNSView(_ view: NSView, context: Context) {
+            MainActor.assumeIsolated { probe.noteDelivery() }
+        }
+    }
+
+    private struct ProbeRoot: View {
+        @ObservedObject var probe: UpdateProbe
+        var body: some View {
+            VStack {
+                Text("tick \(probe.tick)")
+                DeliveryCounter(probe: probe)
+            }
+        }
+    }
+
+    /// Does a window's SwiftUI tree come back to life when the window is opened
+    /// again after being closed?
+    ///
+    /// The manager rebuilds its view tree on every reopen because a probe could
+    /// not answer this — a probe process cannot get a window on screen the way
+    /// an app bundle can, and SwiftUI skips updates for windows that are not
+    /// visible, which is indistinguishable from the freeze being asked about.
+    /// The app can answer it, so it does, every run: the answer decides whether
+    /// that rebuild is load-bearing or merely cautious.
+    private static func checkReopenedWindow() -> Int {
+        print("")
+        print("Manager window lifecycle")
+        var failures = 0
+
+        let probe = UpdateProbe()
+        let window = NSWindow(
+            contentRect: NSRect(x: 200, y: 200, width: 260, height: 160),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = NSHostingController(rootView: ProbeRoot(probe: probe))
+        // The way the manager opens its window: on screen, key, app active.
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        let baseline = probe.deliveries
+        probe.tick += 1
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        guard probe.deliveries > baseline else {
+            // No window server, or SwiftUI is not updating windows here at all:
+            // every answer below would be a false alarm.
+            print("  – skipped: SwiftUI is not updating a visible window here "
+                  + "(isVisible=\(window.isVisible), "
+                  + "occlusion=\(window.occlusionState.contains(.visible)))")
+            window.close()
+            return 0
+        }
+        print("  ✓ an open window's tree receives the model's changes")
+
+        window.close()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        let beforeStale = probe.deliveries
+        probe.tick += 1
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        let staleTreeRevives = probe.deliveries > beforeStale
+        print("  – a window reopened with its old view tree receives them again: "
+              + (staleTreeRevives ? "yes" : "no"))
+
+        // The shape the manager uses.
+        window.contentViewController = NSHostingController(rootView: ProbeRoot(probe: probe))
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        let beforeFresh = probe.deliveries
+        probe.tick += 1
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        if probe.deliveries > beforeFresh {
+            print("  ✓ a rebuilt view tree receives them, which is what the manager does")
+        } else {
+            print("  ✗ not even a rebuilt view tree receives updates")
+            failures += 1
+        }
+
+        window.close()
+        return failures
+    }
+
     private static func checkDraggable(view: PetView) -> Int {
         print("")
         print("Drag readiness")
