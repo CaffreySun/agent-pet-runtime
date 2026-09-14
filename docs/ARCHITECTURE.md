@@ -315,6 +315,16 @@ completionDwell = 4.0s   // completed 状态至少展示 4s 才可让位给更�
 
 **`running` 为什么是 5 分钟而不是 30 秒（2026-09-14 修正）**：hook 只在工具调用前后触发，而**单次** Bash 工具可以跑 2 分钟（默认超时上限 10 分钟）、子 Agent 可以跑更久，中间一个事件都没有。30 秒的阈值意味着宠物在 Agent 明明还在干活时放弃动画——这是"宠物不准"的直接来源。代价：会话在回合中被杀（终端被关且没有 `SessionEnd`）时，会以 `running` 多演 5 分钟才沉降。两害相权取其轻。
 
+### 4.5a 会话的保留上限：一天（2026-09-14 修正）
+
+状态超时管的是**状态**，不是**存在**。`SessionEnd` 是唯一干净的结束信号，而终端被杀、agent 崩溃、只装了 status-line tap 没装 hook 的会话都不发它——这三个字典（`activities` / `arrivalOrder` / `lastSeen`）于是只增不减，`currentFocus()` 又把整张表每帧走一遍：实测 2000 个残留会话时单次 `currentFocus()` 4.4 ms，等于 60 fps 下 **263 ms/s 的纯 CPU**，而它们全都看不见（面板 10 分钟就不画 idle 行了，管理器 Activity 列表却还在列）。
+
+现在 `expireStale()` 末尾回收**超过 `silentSessionLifetime`（24h）没被听到**的会话，判据是 `AgentActivity.lastHeardAt = max(updatedAt, context.capturedAt)`——与面板判断"这行还值不值得画"用的是同一个量，status-line reading 证明会话还活着但不算状态变化。三个字典一起清，焦点若在其中则一并清除。
+
+为什么是 24h 而不是面板的 10 分钟：这是**会话不再存在**的时刻，不是"不值得画"的时刻。`waitingInput` 没有静默超时（用户可能离开很久，§4.5），跨夜必须还在——8 小时的测试用例继续通过；一天是上限，不是判决：还活着的 agent 下一个 hook 就会重建它，只是算作新的到达（`arrivalOrder` 一并清掉了）。
+
+测试：`ActivityEngineTests` 四条——50 个被杀会话 23h 时还在、25h 后清空；持续上报 30 小时的不被回收；只有 status-line reading 的会话保持存活且状态不变；复活会话按新到达排序。
+
 ### 4.6 Session 去重
 
 ```
@@ -864,6 +874,8 @@ enum RuntimeConstants {
     static let unknownStale    : TimeInterval = 60
     static let approvalStale   : TimeInterval = 300
     static let failedStale     : TimeInterval = 600
+    // 会话保留上限（与状态无关，见 §4.5a）：一天没被听到就不再保留
+    static let silentSessionLifetime : TimeInterval = 86_400
 
     // Bridge
     static let bridgeProtocolVersion = 1

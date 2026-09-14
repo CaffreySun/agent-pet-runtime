@@ -58,6 +58,17 @@ public struct AgentActivity: Sendable, Equatable, Identifiable {
     public var key: SessionKey {
         SessionKey(agentID: agentID, sessionID: sessionID)
     }
+
+    /// The last moment this session was known to exist: its last event, or the
+    /// most recent status-line reading, whichever is later.
+    ///
+    /// A reading is proof of life without being a state change — a session
+    /// sitting at the prompt renders its status line and sends nothing else —
+    /// so both the panel's row lifetime and the engine's eviction measure from
+    /// here rather than from `updatedAt` alone.
+    public var lastHeardAt: Date {
+        max(updatedAt, context?.capturedAt ?? .distantPast)
+    }
 }
 
 /// Identifies a session across agents. Two agents may reuse the same session
