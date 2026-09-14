@@ -665,6 +665,18 @@ Codex 的悬浮宠物第一次出现时会弹一条 **8 秒**的临时通知（t
 
 Codex 的设置页有 `Tuck Away Pet` / `Wake Pet`（`petVisible`，默认 true）。本项目放在菜单栏（状态菜单与右键菜单同源）：`Tuck Pet Away` / `Wake Pet`，持久化在 `AppConfig.pet.visible`。收纳时窗口 `orderOut` 并 `controller.stop()`（看不见的帧不值得算），唤醒时 `orderFrontRegardless()` 并重新起帧。**应用始终留在菜单栏**——那是唯一的回来的路。
 
+### 6.5c 管理器的窗口：关掉之后 SwiftUI 不再更新它（2026-09-14 修正）
+
+管理器窗口从不释放（AppKit 保留已关闭的窗口与整棵 SwiftUI 树，§6.8 已证），于是留下两个问题：详情页的 30 Hz 预览定时器在关窗后继续空转；整棵视图树在窗口重新打开后可能不再收到 `@Published` 更新。
+
+用探针（`PreviewTimerProbe`）逐条确认过的部分：
+
+- 关窗后定时器继续跑（实测关窗后 0.2 秒内 31 次 tick）；
+- 让定时器每次 tick 检查 `window?.isVisible`，它在下一次 tick 就自行停止（实测 0 次 tick）——**这是定时器的修法**，每个预览在窗口离开屏幕后付出一次 tick 的代价；
+- 视图树在窗口重新打开后**不会**因为 `@Published` 变化而收到 `updateNSView`——但探针进程不是真正的 app bundle，它的窗口在这个会话里始终拿不到 window server 的"可见"状态（`occlusionState` 恒为 false），而 SwiftUI 对不可见窗口本来就跳过更新，所以"重新打开后是否恢复更新"这一条**探针没能定死**。
+
+因此修法选了不依赖这个答案的那条：**每次重新打开都换一棵新的视图树**（`window.contentViewController = NSHostingController(...)`，旧的随之释放、其定时器已自行停止）。新树必然更新，也就同时覆盖了"旧树其实已经冻结"的可能；代价是每次重开要重新解码一次缩略图（8 只约 140 ms，实测单张 17 ms）。管理器当前所在的标签页因此搬进了 model（`AgentPetModel.section`）——`@State` 会随重建丢失，用户上次停在 Agents 页不该被重置。
+
 ### 6.6 状态栏 tap：上下文用量的唯一来源（2026-09-14）
 
 hook payload **不含**任何 token 计数——在 2.1.268 的二进制里逐字段确认过：`used_percentage` / `context_window` 只出现在**状态栏** JSON 的 schema 中（`context_window.used_percentage`、`context_window_size`、`total_input_tokens`、`session_name`、`workspace.repo.name`）。这个数字只有 Claude Code 自己算得对：上下文窗口大小取决于模型，而网关背后的模型名外部无从得知（本机实测同一条会话已占用 302k token）。

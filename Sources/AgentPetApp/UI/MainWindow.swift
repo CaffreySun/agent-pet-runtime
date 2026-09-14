@@ -24,11 +24,10 @@ enum ManagerSection: String, CaseIterable, Identifiable {
 
 struct MainWindowView: View {
     @ObservedObject var model: AgentPetModel
-    @State private var section: ManagerSection = .activity
 
     var body: some View {
         NavigationSplitView {
-            List(ManagerSection.allCases, selection: $section) { item in
+            List(ManagerSection.allCases, selection: $model.section) { item in
                 Label(item.rawValue, systemImage: item.symbol).tag(item)
             }
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
@@ -44,7 +43,7 @@ struct MainWindowView: View {
             // The window is the app, so its title is the app's name; the
             // section is a subtitle rather than something that renames the
             // window every time a sidebar row is clicked.
-            .navigationSubtitle(section.rawValue)
+            .navigationSubtitle(model.section.rawValue)
         }
         .frame(minWidth: 760, minHeight: 520)
         .onAppear { model.refreshAll() }
@@ -52,7 +51,7 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch section {
+        switch model.section {
         case .activity: ActivityView(model: model)
         case .pets:     PetsView(model: model)
         case .agents:   AgentsView(model: model)
@@ -118,13 +117,21 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         startTicking()
 
         if let window {
+            // A fresh view tree, every time it is opened again.
+            //
+            // SwiftUI stops delivering updates to a window that has been off
+            // screen, and reopening it does not bring them back — measured in
+            // both directions with a probe, and the reason the preview timers
+            // had to learn to stop themselves. Rebuilding costs one decode of
+            // the pet thumbnails and buys a window that is alive again; the
+            // chosen section lives in the model so it survives the rebuild.
+            window.contentViewController = Self.makeContent(model: model)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let hosting = NSHostingController(rootView: MainWindowView(model: model))
-        let window = NSWindow(contentViewController: hosting)
+        let window = NSWindow(contentViewController: Self.makeContent(model: model))
         window.title = "Agent Pet Runtime"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 860, height: 580))
@@ -138,6 +145,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         self.window = window
+    }
+
+    private static func makeContent(model: AgentPetModel) -> NSViewController {
+        NSHostingController(rootView: MainWindowView(model: model))
     }
 
     func windowWillClose(_ notification: Notification) {
