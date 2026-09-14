@@ -217,14 +217,63 @@ struct PresentationLayerTests {
         stateElapsed: TimeInterval = 0,
         drag: PetSituation.Drag? = nil,
         gesture: PetSituation.Gesture? = nil,
+        hover: PetSituation.Hover? = nil,
         look: Double? = nil,
         reducedMotion: Bool = false
     ) -> PetSituation {
         PetSituation(
             agentState: state, agentStateElapsed: stateElapsed,
-            drag: drag, gesture: gesture, lookAngle: look,
+            drag: drag, gesture: gesture, hover: hover, lookAngle: look,
             reducedMotion: reducedMotion
         )
+    }
+
+    @Test("the pointer on the pet plays the jump, and the landing pose is held")
+    func hoverPlaysTheJumpAndHolds() {
+        // Codex's mascot is `state: hovered ? "jumping" : state`, and its
+        // sprite timer stops on the last frame of a one-shot. Ported as it is:
+        // one jump per arrival, then the pose it landed in — not a loop, and
+        // not a fall-through to idle.
+        let jumping = track("jumping")
+        let first = resolver.resolve(situation(hover: .init(elapsed: 0)), profile: v1)
+        #expect(first?.trackName == "jumping")
+        #expect(first?.row == 4)
+        #expect(first?.column == 0)
+
+        let held = resolver.resolve(
+            situation(hover: .init(elapsed: jumping.duration + 10)), profile: v1
+        )
+        #expect(held?.column == jumping.frameCount - 1, "the last frame stays put")
+        #expect(held?.isFinished == true)
+    }
+
+    @Test("hovering outranks the agent state, and gives it back on the way out")
+    func hoverOverridesState() {
+        let hovered = resolver.resolve(
+            situation(state: .running, hover: .init(elapsed: 0.1)), profile: v1
+        )
+        #expect(hovered?.trackName == "jumping", "the pet notices the pointer mid-work")
+
+        let left = resolver.resolve(situation(state: .running), profile: v1)
+        #expect(left?.trackName == "running", "the pointer leaving hands the row back")
+    }
+
+    @Test("a drag outranks a hover, and a gesture plays over it")
+    func hoverYieldsToHands() {
+        let dragged = resolver.resolve(
+            situation(
+                drag: .init(direction: .right, elapsed: 0.05),
+                hover: .init(elapsed: 5)
+            ),
+            profile: v1
+        )
+        #expect(dragged?.trackName == "running-right")
+
+        let clicked = resolver.resolve(
+            situation(gesture: .init(trackName: "waving", elapsed: 0.05), hover: .init(elapsed: 5)),
+            profile: v1
+        )
+        #expect(clicked?.trackName == "waving")
     }
 
     @Test("with nothing happening the pet is idle")

@@ -67,12 +67,25 @@ public struct PetSituation: Sendable, Equatable {
         }
     }
 
+    /// The pointer is over the pet. `elapsed` runs from the moment it arrived,
+    /// because the row Codex plays for this is a one-shot that holds its last
+    /// frame rather than a loop.
+    public struct Hover: Sendable, Equatable {
+        public let elapsed: TimeInterval
+
+        public init(elapsed: TimeInterval) {
+            self.elapsed = elapsed
+        }
+    }
+
     public var agentState: AgentState
     public var agentStateElapsed: TimeInterval
     /// Non-nil while the user is moving the pet.
     public var drag: Drag?
     /// Non-nil while a one-shot gesture is playing.
     public var gesture: Gesture?
+    /// Non-nil while the pointer is over the pet.
+    public var hover: Hover?
     /// Degrees clockwise from up, or nil when the pointer is in the deadzone.
     public var lookAngle: Double?
     /// The system asks for reduced motion, and the user has not opted out.
@@ -84,6 +97,7 @@ public struct PetSituation: Sendable, Equatable {
         agentStateElapsed: TimeInterval = 0,
         drag: Drag? = nil,
         gesture: Gesture? = nil,
+        hover: Hover? = nil,
         lookAngle: Double? = nil,
         reducedMotion: Bool = false
     ) {
@@ -91,6 +105,7 @@ public struct PetSituation: Sendable, Equatable {
         self.agentStateElapsed = agentStateElapsed
         self.drag = drag
         self.gesture = gesture
+        self.hover = hover
         self.lookAngle = lookAngle
         self.reducedMotion = reducedMotion
     }
@@ -118,14 +133,16 @@ public struct AnimationResolver: Sendable {
     ///    manipulation, and the contract gives locomotion its own rows
     ///    precisely so the pet can walk as it is carried.
     /// 2. **A playing gesture** — a one-shot reaction, until it finishes.
-    /// 3. **Agent state** — the row for what the agent is doing, played the
+    /// 3. **The pointer on the pet** — Codex plays its `jumping` row and holds
+    ///    the landing pose until the pointer leaves.
+    /// 4. **Agent state** — the row for what the agent is doing, played the
     ///    way Codex plays it: three passes, then the idle row, which is where
     ///    the loop restarts. The pet keeps breathing while the work continues;
     ///    the message beside it is what says the work is still happening.
-    /// 4. **Gaze** — when the pet would otherwise be idle and the pointer gives
+    /// 5. **Gaze** — when the pet would otherwise be idle and the pointer gives
     ///    it a direction to look in. The contract treats this as an
     ///    alternative to idle: with no direction vector it falls back.
-    /// 5. **Idle**.
+    /// 6. **Idle**.
     ///
     /// Under reduced motion every layer collapses to the first frame of
     /// whatever it would have played, which is what Codex does and what the
@@ -157,7 +174,21 @@ public struct AnimationResolver: Sendable {
             if !resolved.isFinished { return resolved }
         }
 
-        // 3. Agent state.
+        // 3. The pointer on the pet.
+        //
+        // Codex's mascot is `state: hovered ? "jumping" : state`, and its
+        // sprite timer stops on the last frame of a one-shot — so a cursor
+        // resting on the pet sees one jump and then the landing pose, held for
+        // as long as the cursor stays. That is the whole effect, and it is
+        // ported rather than "improved": `frameIndex` clamps a one-shot at its
+        // end, which is exactly the hold.
+        if let hover = situation.hover,
+           let jumping = profile.track(named: "jumping"),
+           jumping.frameCount > 0 {
+            return frame(for: jumping, elapsed: hover.elapsed)
+        }
+
+        // 4. Agent state.
         //
         // Inactive states are skipped rather than drawn. `idle` is the
         // fallback, not something with a message of its own — returning it
@@ -181,7 +212,7 @@ public struct AnimationResolver: Sendable {
             return frame(for: track, elapsed: elapsed)
         }
 
-        // 4. Gaze.
+        // 5. Gaze.
         if let angle = situation.lookAngle, profile.hasLookDirections {
             let cell = LookDirection.cell(forAngle: angle)
             if let track = profile.track(atRow: cell.row) {
@@ -191,7 +222,7 @@ public struct AnimationResolver: Sendable {
             }
         }
 
-        // 5. Idle.
+        // 6. Idle.
         guard let idle = profile.track(named: "idle") else { return nil }
         return frame(for: idle, elapsed: situation.agentStateElapsed)
     }

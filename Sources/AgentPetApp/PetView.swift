@@ -47,6 +47,17 @@ final class PetView: NSView {
     /// rather than only at quit — a crash would otherwise lose it.
     var onDragEnded: (() -> Void)?
 
+    /// The pointer arrived on the pet, or left it.
+    ///
+    /// Codex's pet plays its `jumping` row for this and holds the landing pose
+    /// until the pointer goes, so the two events are not the same as a click.
+    var onHoverBegan: (() -> Void)?
+    var onHoverEnded: (() -> Void)?
+
+    /// Tracks the sprite only. Tracking the whole view would make the pet jump
+    /// when the pointer crossed the message panel above it.
+    private var hoverTracking: NSTrackingArea?
+
     /// Distance from the window's origin to the mouse when the drag began,
     /// in screen coordinates.
     private var grabOffset: NSPoint?
@@ -94,6 +105,36 @@ final class PetView: NSView {
         self.panel = panel
         self.panelConfig = config
         needsDisplay = true
+        // The sprite moved: the pointer's idea of where the pet is has to move
+        // with it, or a panel appearing under the cursor would leave the pet
+        // thinking it is still being hovered.
+        updateTrackingAreas()
+    }
+
+    // MARK: - Hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(
+            rect: spriteRect,
+            // `.activeAlways`: the app is an accessory and its pet is almost
+            // never in a key window, which is exactly the case `.activeInKeyWindow`
+            // would drop.
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverBegan?()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverEnded?()
     }
 
     /// What is currently set to be drawn. Read by the render self-test.
