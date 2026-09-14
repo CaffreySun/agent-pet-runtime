@@ -59,6 +59,13 @@ final class AgentPetModel: ObservableObject {
     /// Which pet the desktop is currently showing, so the list can mark it.
     @Published var currentPetID: String?
 
+    /// Which section the manager window is showing.
+    ///
+    /// In the model rather than the view because the window rebuilds its view
+    /// tree every time it is opened again (see `MainWindowController.show`),
+    /// and a `@State` selection would come back as Activity every time.
+    @Published var section: ManagerSection = .activity
+
     /// Persisted user settings.
     @Published var config: AppConfig {
         didSet { if config != oldValue { saveConfig() } }

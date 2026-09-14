@@ -64,7 +64,18 @@ struct AnimatedPetView: NSViewRepresentable {
         private func start(refreshRate: Double) {
             guard timer == nil else { return }
             let timer = Timer(timeInterval: 1.0 / max(1, refreshRate), repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.needsDisplay = true }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    // A closed window keeps its view tree — AppKit does not
+                    // release it — and SwiftUI stops updating a window that is
+                    // off screen, so nothing else will ever tell this timer to
+                    // stop. It notices for itself, once.
+                    guard self.window?.isVisible == true else {
+                        self.stop()
+                        return
+                    }
+                    self.needsDisplay = true
+                }
             }
             // `.common` keeps previews animating while a menu or drag is active.
             RunLoop.main.add(timer, forMode: .common)
