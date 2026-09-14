@@ -66,6 +66,11 @@ final class AgentPetModel: ObservableObject {
     /// and a `@State` selection would come back as Activity every time.
     @Published var section: ManagerSection = .activity
 
+    /// Whether the manager's sidebar is showing. Also in the model, for the
+    /// same reason: a rebuild must not reopen the manager with the sidebar
+    /// back, having just been hidden.
+    @Published var showsSidebar = true
+
     /// Persisted user settings.
     @Published var config: AppConfig {
         didSet { if config != oldValue { saveConfig() } }

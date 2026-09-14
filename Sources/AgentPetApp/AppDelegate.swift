@@ -358,6 +358,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The window's View menu toggles the sidebar the same way its toolbar
+    /// button does.
+    @objc private func toggleManagerSidebar() {
+        guard let model else { return }
+        model.showsSidebar.toggle()
+    }
+
     @objc private func openManager() {
         model?.refreshAll()
         managerWindow?.show()
@@ -678,6 +685,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         editItem.submenu = editMenu
         main.addItem(editItem)
+
+        let viewItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+        let toggleSidebar = NSMenuItem(
+            title: "Toggle Sidebar", action: #selector(toggleManagerSidebar), keyEquivalent: "s"
+        )
+        // ⌃⌘S, the shortcut AppKit gives this command.
+        toggleSidebar.keyEquivalentModifierMask = [.control, .command]
+        viewMenu.addItem(toggleSidebar)
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(
+            withTitle: "Enter Full Screen",
+            action: #selector(NSWindow.toggleFullScreen(_:)),
+            keyEquivalent: "f"
+        )
+        viewMenu.items.last?.keyEquivalentModifierMask = [.control, .command]
+        viewItem.submenu = viewMenu
+        main.addItem(viewItem)
 
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
