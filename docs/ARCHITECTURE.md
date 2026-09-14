@@ -654,6 +654,18 @@ statusLine.command = "<shim>" --agent claude-code --statusline --original <base6
 
 三者共同的**不做**：不读 transcript、不读 rollout 文件、不猜窗口大小——这正是 Claude Code 的 `used_percentage` 值得专门包一层的原因（网关模型窗口只有它知道）。
 
+### 6.8 管理器的预览：一行一张静止图，详情页才留图集（2026-09-14 修正）
+
+Pets 页原本为**每个已装 pet** 保有一份解码后的 `SpriteFrames`（1536×1872 的图集 = 11 MB 像素，而 `makeCGImage` 还会让 CGImage 自己再持有一份拷贝，实测 12.3–14.3 MB/pet），理由是"列表重绘时现解码会卡"。代价是管理器内存随用户装了多只宠物线性增长：8 只 ≈ 100 MB，50 只 ≈ 600 MB。
+
+**而这些内存没有归还路径**：`windowWillClose` 里丢掉窗口引用、清 `contentViewController`、`isReleasedWhenClosed = true`——三种写法都试过（探针 `WindowCloseProbe`），AppKit 保留着已关闭窗口（`NSApp.windows` 仍在列表里）以及它的 SwiftUI 视图树，闭窗后窗口、hosting controller、视图**一个都没释放**。所以修法不是"释放窗口"，而是让被保留的东西变便宜：
+
+- 列表行要的只是 40pt 的静止画面 → `PetLibrary.thumbnail(of:fitting:)` 解码一次、把 idle 第 0 帧画进小 context，得到一张几十 KB 的 `NSImage`，图集随即释放（实测：8 只宠物列表 ≈ 4 MB，且不再随装机量增长）。
+- 详情页是唯一真正播放动画的地方 → 只为**选中**的那只保留 `SpriteFrames`（一张图集），换选择即释放。
+- 行不再各持一个 30 Hz 定时器（20 只 = 630 次/秒的唤醒），只有详情页那一个还在跑。
+
+残留：详情页那一个 30 Hz 定时器在窗口关闭后仍在跑（视图树不会被拆），一次唤醒 30/s——相对宠物本体的 60 Hz 帧循环可忽略；要彻底停掉需要一个由管理器关闭事件驱动的 `isAnimating` 标志。
+
 ---
 
 ## 7. 校验规格（补齐 §8.4 "Validate atlas"）

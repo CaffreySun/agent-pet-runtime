@@ -10,7 +10,13 @@ import SwiftUI
 struct PetsView: View {
 
     @ObservedObject var model: AgentPetModel
-    @State private var sprites: [String: SpriteFrames] = [:]
+    /// One still per installed pet: the list is a wall of 40-point previews,
+    /// and a decoded atlas each is what used to make this window's memory
+    /// scale with the user's library.
+    @State private var thumbnails: [String: NSImage] = [:]
+    /// The selected pet's frames, so the detail pane can animate. Dropped when
+    /// the selection moves on — one atlas at a time is the whole cost.
+    @State private var detailFrames: SpriteFrames?
     @State private var warnings: [String: [String]] = [:]
     @State private var selection: String?
     @State private var previewTrack = "idle"
@@ -24,7 +30,8 @@ struct PetsView: View {
             detail
                 .frame(minWidth: 340)
         }
-        .task { loadSprites() }
+        .task { loadThumbnails() }
+        .onChange(of: selection) { _, _ in loadSelectedPet() }
     }
 
     // MARK: - List
@@ -39,9 +46,11 @@ struct PetsView: View {
                 // change while this window is open.
                 Button {
                     model.refreshPets()
-                    sprites.removeAll()
+                    thumbnails.removeAll()
                     warnings.removeAll()
-                    loadSprites()
+                    detailFrames = nil
+                    loadThumbnails()
+                    loadSelectedPet()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -83,7 +92,7 @@ struct PetsView: View {
 
     private func row(for pet: PetLibrary.Entry) -> some View {
         HStack(spacing: 10) {
-            preview(for: pet, track: "idle", size: 40)
+            thumbnail(for: pet, size: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(pet.name).fontWeight(.medium)
                 Text(pet.id)
@@ -107,10 +116,16 @@ struct PetsView: View {
         if let pet = selection.flatMap(selectedPet) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    preview(for: pet, track: previewTrack, size: 220)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 240)
-                        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+                    Group {
+                        if let frames = detailFrames {
+                            AnimatedPetView(sprite: frames, trackName: previewTrack)
+                        } else {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 240)
+                    .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
 
                     // No title above the segments: in a pane this narrow the
                     // label wraps, and the track names already say what this
@@ -208,12 +223,15 @@ struct PetsView: View {
         .padding(.top, 4)
     }
 
-    // MARK: - Sprite cache
+    // MARK: - Previews
 
-    private func preview(for pet: PetLibrary.Entry, track: String, size: CGFloat) -> some View {
+    /// A still, drawn once and held. The row does not animate: at forty points
+    /// a breathing pet is not readable anyway, and a timer per row is what made
+    /// a list of twenty pets six hundred wake-ups a second.
+    private func thumbnail(for pet: PetLibrary.Entry, size: CGFloat) -> some View {
         Group {
-            if let sprite = sprites[pet.id] {
-                AnimatedPetView(sprite: sprite, trackName: track)
+            if let image = thumbnails[pet.id] {
+                Image(nsImage: image)
             } else {
                 ProgressView().controlSize(.small)
             }
@@ -221,29 +239,39 @@ struct PetsView: View {
         .frame(width: size, height: size * 208 / 192)
     }
 
+    /// Decodes the atlases the list needs, one at a time, and keeps only the
+    /// stills — the pixels are released as each row's image is drawn.
+    private func loadThumbnails() {
+        for pet in model.pets where thumbnails[pet.id] == nil {
+            thumbnails[pet.id] = PetLibrary.thumbnail(of: pet, fitting: 40)
+        }
+    }
+
+    /// The selected pet's frames, decoded on demand: the detail pane is the one
+    /// place a real animation runs, so it is the one place an atlas is kept.
+    private func loadSelectedPet() {
+        guard let pet = selection.flatMap(selectedPet) else {
+            detailFrames = nil
+            return
+        }
+        guard let loaded = try? PetLibrary.load(pet) else {
+            detailFrames = nil
+            warnings[pet.id] = ["could not be read"]
+            return
+        }
+        warnings[pet.id] = (loaded.report.errors + loaded.report.warnings).map(\.message)
+        detailFrames = loaded.atlas.flatMap {
+            try? SpriteFrames(bitmap: $0, profile: loaded.definition.profile)
+        }
+    }
+
     /// Compatibility warnings only appear once the atlas is decoded, so they
-    /// are collected here rather than read off the discovery listing — a row
-    /// that always said "None" would be worse than no row.
+    /// are collected when the selected pet is loaded rather than read off the
+    /// discovery listing — a row that always said "None" would be worse than
+    /// no row.
     private func warningSummary(for pet: PetLibrary.Entry) -> String {
         guard let messages = warnings[pet.id] else { return "Reading…" }
         return messages.isEmpty ? "None" : messages.joined(separator: " · ")
-    }
-
-    /// Atlases are decoded once per pet and held, because decoding an 11 MB
-    /// sheet on every list redraw would make the window unusable.
-    private func loadSprites() {
-        for pet in model.pets where sprites[pet.id] == nil {
-            do {
-                let loaded = try PetPackageLoader().load(from: pet.root)
-                guard let atlas = loaded.atlas else { continue }
-                sprites[pet.id] = try SpriteFrames(
-                    bitmap: atlas, profile: loaded.definition.profile
-                )
-                warnings[pet.id] = loaded.report.warnings.map(\.message)
-            } catch {
-                warnings[pet.id] = ["\(error)"]
-            }
-        }
     }
 
     private var currentPetID: String? { model.currentPetID }
