@@ -17,6 +17,16 @@ public struct ActivityTuning: Sendable, Equatable {
     public var completionDwell: TimeInterval
     /// Repeated identical events within this window collapse into one.
     public var dedupeWindow: TimeInterval
+    /// How long a session nothing has been heard from is kept at all.
+    ///
+    /// `SessionEnd` is the only clean ending, and a killed terminal, a crashed
+    /// agent, or a status-line tap with no hooks behind it never sends one.
+    /// Without a ceiling the engine keeps every session the machine has ever
+    /// opened, and every frame pays for it.
+    ///
+    /// Far longer than the panel's row lifetime on purpose: this is when a
+    /// session stops existing, not when it stops being worth drawing.
+    public var silentSessionLifetime: TimeInterval
 
     public init(
         agingThreshold: TimeInterval = 90,
@@ -24,7 +34,8 @@ public struct ActivityTuning: Sendable, Equatable {
         focusHold: TimeInterval = 3.0,
         urgentOverride: TimeInterval = 1.0,
         completionDwell: TimeInterval = 4.0,
-        dedupeWindow: TimeInterval = 0.5
+        dedupeWindow: TimeInterval = 0.5,
+        silentSessionLifetime: TimeInterval = 24 * 60 * 60
     ) {
         self.agingThreshold = agingThreshold
         self.maxPromotions = maxPromotions
@@ -32,6 +43,7 @@ public struct ActivityTuning: Sendable, Equatable {
         self.urgentOverride = urgentOverride
         self.completionDwell = completionDwell
         self.dedupeWindow = dedupeWindow
+        self.silentSessionLifetime = silentSessionLifetime
     }
 
     public static let `default` = ActivityTuning()
@@ -198,7 +210,12 @@ public final class ActivityEngine {
 
     // MARK: - Time
 
-    /// Applies silence timeouts. Called implicitly by `currentFocus()`.
+    /// Applies silence timeouts, and lets go of sessions that have been silent
+    /// long enough that only a missing `SessionEnd` was keeping them.
+    ///
+    /// Called implicitly by `currentFocus()`, `rankedActivities()`, and
+    /// `allActivities()`, so nothing can report a session the engine has
+    /// already forgotten.
     public func expireStale() {
         let now = clock.now
         var transitions: [(SessionKey, AgentState)] = []
@@ -219,12 +236,46 @@ public final class ActivityEngine {
             activity.enteredStateAt = now
             activities[key] = activity
         }
+
+        evictSilent(now: now)
+    }
+
+    /// Forgets sessions that have not been heard from for
+    /// `tuning.silentSessionLifetime`.
+    ///
+    /// A terminal that was killed, an agent that crashed, and a status-line
+    /// tap with no hooks installed all leave a session that never closes, and
+    /// an unclosed session is not a session that is still there: the panel
+    /// stops drawing an idle row after ten minutes for exactly that reason.
+    /// Left unbounded the three tables grow with every terminal the machine
+    /// has ever opened, and — because `currentFocus()` walks the whole table
+    /// every frame — the cost lands on the animation loop.
+    ///
+    /// Not a state change, and not a verdict: an agent that is still alive
+    /// re-creates its session with its next hook, one event later.
+    private func evictSilent(now: Date) {
+        let cutoff = now.addingTimeInterval(-tuning.silentSessionLifetime)
+        var forgotten: [SessionKey] = []
+        for (key, activity) in activities where activity.lastHeardAt < cutoff {
+            forgotten.append(key)
+        }
+        guard !forgotten.isEmpty else { return }
+
+        for key in forgotten {
+            activities.removeValue(forKey: key)
+            arrivalOrder.removeValue(forKey: key)
+            lastSeen.removeValue(forKey: key)
+            if focusedKey == key { clearFocus() }
+        }
     }
 
     // MARK: - Selection
 
     public func allActivities() -> [AgentActivity] {
-        activities.values.sorted { arrivalOrder[$0.key, default: 0] < arrivalOrder[$1.key, default: 0] }
+        expireStale()
+        return activities.values.sorted {
+            arrivalOrder[$0.key, default: 0] < arrivalOrder[$1.key, default: 0]
+        }
     }
 
     public func activity(for key: SessionKey) -> AgentActivity? {
@@ -277,7 +328,8 @@ public final class ActivityEngine {
     /// sessions in the order the pet itself cares about — the blocked session
     /// above the working one — instead of the order they happened to arrive.
     public func rankedActivities() -> [AgentActivity] {
-        rankedCandidates(now: clock.now)
+        expireStale()
+        return rankedCandidates(now: clock.now)
     }
 
     /// Ranked best-first, fully deterministic.

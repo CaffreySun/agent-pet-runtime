@@ -11,6 +11,7 @@ private func event(
     at: Date = start,
     summary: String? = nil,
     focus: FocusTarget? = nil,
+    context: SessionContext? = nil,
     id: String? = nil
 ) -> AgentEvent {
     AgentEvent(
@@ -21,6 +22,7 @@ private func event(
         confidence: EventConfidence(level: .high, source: "test"),
         summary: summary,
         focusTarget: focus,
+        context: context,
         eventID: id
     )
 }
@@ -60,6 +62,81 @@ struct ActivityLifecycleTests {
         engine.ingest(event(.sessionClosed, at: start.addingTimeInterval(1)))
         #expect(engine.allActivities().isEmpty)
         #expect(engine.currentFocus() == nil)
+    }
+
+    @Test("a session whose terminal was killed is let go after a day")
+    func silentSessionsAreEvicted() {
+        // The regression this exists for: `SessionEnd` is the only clean
+        // ending, and a killed terminal, a crashed agent, or a status-line tap
+        // with no hooks behind it never sends one. The engine kept every
+        // session the machine had ever opened, and `currentFocus()` walks that
+        // table sixty times a second.
+        let (engine, clock) = makeEngine()
+        for index in 0..<50 {
+            engine.ingest(event(.working, session: "killed-\(index)"))
+        }
+        clock.advance(by: 23 * 60 * 60)
+        #expect(engine.allActivities().count == 50, "still inside the day")
+
+        clock.advance(by: 2 * 60 * 60)
+        #expect(engine.allActivities().isEmpty)
+        #expect(engine.currentFocus() == nil)
+    }
+
+    @Test("a session that keeps reporting is kept, however long it runs")
+    func liveSessionsSurvive() {
+        let (engine, clock) = makeEngine()
+        engine.ingest(event(.working, session: "long"))
+        for _ in 0..<30 {
+            clock.advance(by: 60 * 60)
+            engine.ingest(event(.working, session: "long", at: clock.now))
+        }
+        #expect(engine.allActivities().count == 1)
+        #expect(engine.currentFocus()?.state == .running)
+    }
+
+    @Test("a status-line reading keeps a session alive without moving it")
+    func contextUpdatesProveLifeWithoutChangingState() {
+        let (engine, clock) = makeEngine()
+        engine.ingest(event(.waitingInput, session: "away"))
+        for _ in 0..<30 {
+            clock.advance(by: 60 * 60)
+            engine.ingest(event(.contextUpdate, session: "away", at: clock.now, context: SessionContext(
+                usedPercent: 10, capturedAt: clock.now
+            )))
+        }
+        #expect(engine.allActivities().count == 1)
+        #expect(engine.currentFocus()?.state == .waitingInput,
+                "a reading describes a session, it does not move it")
+    }
+
+    @Test("a session waiting for the user survives the night, but not the week")
+    func waitingInputIsKeptForTheDay() {
+        // `waitingInput` has no stale timeout — the user may be away for hours
+        // and the pet should still be asking when they come back. That is not
+        // the same as keeping the session forever.
+        let (engine, clock) = makeEngine()
+        engine.ingest(event(.waitingInput, session: "away"))
+        clock.advance(by: 10 * 60 * 60)
+        #expect(engine.currentFocus()?.state == .waitingInput)
+
+        clock.advance(by: 15 * 60 * 60)
+        #expect(engine.allActivities().isEmpty)
+    }
+
+    @Test("a session that comes back after being let go arrives as a new one")
+    func revivedSessionIsAFreshArrival() {
+        let (engine, clock) = makeEngine()
+        engine.ingest(event(.working, session: "old"))
+        clock.advance(by: 25 * 60 * 60)
+        // Eviction is lazy — it happens when the engine is read, not when a
+        // clock moves — so the read has to come before the revival.
+        _ = engine.allActivities()
+        engine.ingest(event(.working, session: "new", at: clock.now))
+        clock.advance(by: 1)
+        engine.ingest(event(.working, session: "old", at: clock.now))
+        #expect(engine.allActivities().map(\.sessionID) == ["new", "old"],
+                "the bookkeeping went with the session, so the revived one is the newest arrival")
     }
 
     @Test("the same session never yields two activities")
@@ -259,8 +336,11 @@ struct AgingTests {
     func runningDoesNotAge() {
         let (engine, clock) = makeEngine()
         engine.ingest(event(.working, agent: "codex", session: "a"))
-        clock.advance(by: 1000)
+        // Captured before the clock moves, like the other aging tests: reading
+        // the engine ages it, and `running` does not survive sixteen minutes
+        // of real silence as itself.
         let activity = engine.allActivities()[0]
+        clock.advance(by: 1000)
         #expect(engine.effectiveClass(activity, now: clock.now) == .active)
     }
 

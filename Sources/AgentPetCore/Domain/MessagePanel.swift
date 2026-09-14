@@ -235,8 +235,7 @@ public struct MessagePanel: Sendable, Equatable {
         guard activity.state == .idle else { return true }
         // Nothing is waiting on an idle session, so its row is only there to
         // say "this one exists" — and only while it plausibly still does.
-        let lastHeard = max(activity.updatedAt, activity.context?.capturedAt ?? .distantPast)
-        return now.timeIntervalSince(lastHeard) < idleRowLifetime
+        return now.timeIntervalSince(activity.lastHeardAt) < idleRowLifetime
     }
 
     private static func row(
