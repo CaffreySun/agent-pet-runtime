@@ -74,7 +74,7 @@ swift run AgentPet --unconfigure claude-code   # 精确移除它写过的东西
 
 **不需要重启。** Claude Code 在**每次派发 hook 时**重新读取 `~/.claude/settings.json`，所以会话运行中途加的 hook 下一个事件就生效，正在跑长任务的会话不会被打断。（实测方式：给一个已经跑了好几个小时的会话新增 `SubagentStart`/`SubagentStop`，然后看它们触发。）
 
-目前只有 Claude Code 可配置。Grok 的 hook 在 TOML 里，Codex 的 `notify` 是 argv 数组，都不是 JSON 事务能安全处理的格式。所以这两个只做检测，UI 直接显示**不可配置**，而不是半吊子支持。
+目前只有 Claude Code 可配置。Grok 的 hook 在 TOML 里，Codex 的 `notify` 是 argv 数组，都不是 JSON 事务能安全处理的格式；Pi 靠装一个扩展包接入，也不是改配置文件。这三个只做检测，UI 显示**不可配置**并各自说明原因，而不是半吊子支持。
 
 ### 配置到底做了什么
 
@@ -228,7 +228,7 @@ Sources/agentpet-hook/    Agent 执行的 shim。必须永远 exit 0。
 | 会话面板：每会话一行，各项可配置 | 完成 |
 | 上下文占用（读取 Claude Code 状态栏） | 完成——可选开启，包裹你已有的状态栏命令 |
 | 重启/升级后不丢回合中的会话 | 完成——未送达事件在下次启动时回放 |
-| Grok / Codex / Pi 配置 | 未做——它们的格式需要各自的配置器 |
+| Grok / Codex / Pi 配置 | 未做——各自需要专属配置器（TOML、argv 数组、扩展包） |
 | 聚焦到终端窗口 | 改为打开项目目录；hook payload 里没有终端标识 |
 
 ---

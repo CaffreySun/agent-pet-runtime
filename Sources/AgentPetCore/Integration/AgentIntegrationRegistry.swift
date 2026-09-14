@@ -12,19 +12,28 @@ public struct AgentIntegrationProfile: Sendable {
     /// The UI shows it as detectable but not configurable.
     public let configurator: (any AgentConfigurator)?
     public let capabilities: Set<IntegrationCapability>
+    /// Why there is no configurator, in the words that fit this agent.
+    ///
+    /// One shared sentence was a lie for two of the three: Grok's hooks are
+    /// TOML, which the JSON transaction really cannot edit, while Codex's
+    /// `notify` is an argv array and Pi is extended by installing a package —
+    /// neither is a *format* problem. Shown on the card and by `--configure`.
+    public let configurationNote: String?
 
     public init(
         agentID: String,
         displayName: String,
         detection: AgentDetector.Specification,
         configurator: (any AgentConfigurator)?,
-        capabilities: Set<IntegrationCapability>
+        capabilities: Set<IntegrationCapability>,
+        configurationNote: String? = nil
     ) {
         self.agentID = agentID
         self.displayName = displayName
         self.detection = detection
         self.configurator = configurator
         self.capabilities = capabilities
+        self.configurationNote = configurationNote
     }
 }
 
@@ -85,7 +94,9 @@ public enum AgentIntegrationRegistry {
             // edit safely. Reported as detected but not configurable rather
             // than half-supported.
             configurator: nil,
-            capabilities: [.detect]
+            capabilities: [.detect],
+            configurationNote: "Grok's hooks live in TOML, which the JSON transaction cannot "
+                + "edit safely. Detected, and left alone rather than half-supported."
         )
     }
 
@@ -103,7 +114,10 @@ public enum AgentIntegrationRegistry {
                 configFiles: [config]
             ),
             configurator: nil,
-            capabilities: [.detect]
+            capabilities: [.detect],
+            configurationNote: "Codex's notify hook is a single argv array rather than a hook "
+                + "table, so installing into it needs a configurator of its own. "
+                + "Detected, not configurable yet."
         )
     }
 
@@ -120,7 +134,9 @@ public enum AgentIntegrationRegistry {
                 configFiles: [home().appendingPathComponent(".pi/agent/settings.json")]
             ),
             configurator: nil,
-            capabilities: [.detect]
+            capabilities: [.detect],
+            configurationNote: "Pi is extended by installing a package, which is a heavier "
+                + "operation than editing a config file. Detected, not configurable yet."
         )
     }
 
