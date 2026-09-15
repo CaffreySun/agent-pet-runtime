@@ -89,6 +89,11 @@ struct BridgeEndToEndTests {
     /// The spool is always redirected to a throwaway directory, so a test that
     /// deliberately runs the shim with no runtime listening cannot leave
     /// files in the user's real Application Support directory.
+    ///
+    /// `payloadViaEnvironment` models an in-process reporter, which hands the
+    /// payload over in the environment and leaves stdin as a pipe nobody ever
+    /// writes to or closes. A shim that still depended on stdin would deliver
+    /// an empty payload here, which is exactly the failure this covers.
     @discardableResult
     private func runShim(
         socket: URL,
@@ -96,7 +101,8 @@ struct BridgeEndToEndTests {
         event: String,
         payload: String,
         spool: URL? = nil,
-        extraArguments: [String] = []
+        extraArguments: [String] = [],
+        payloadViaEnvironment: Bool = false
     ) throws -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ShimBinary.path!)
@@ -107,6 +113,9 @@ struct BridgeEndToEndTests {
         var environment = ProcessInfo.processInfo.environment
         environment["AGENTPET_SOCKET"] = socket.path
         environment["AGENTPET_SPOOL"] = spoolDirectory.path
+        if payloadViaEnvironment {
+            environment["AGENTPET_PAYLOAD_BASE64"] = Data(payload.utf8).base64EncodedString()
+        }
         process.environment = environment
 
         let input = Pipe()
@@ -115,8 +124,10 @@ struct BridgeEndToEndTests {
         process.standardError = Pipe()
 
         try process.run()
-        input.fileHandleForWriting.write(Data(payload.utf8))
-        input.fileHandleForWriting.closeFile()
+        if !payloadViaEnvironment {
+            input.fileHandleForWriting.write(Data(payload.utf8))
+            input.fileHandleForWriting.closeFile()
+        }
         process.waitUntilExit()
         return process.terminationStatus
     }
@@ -520,6 +531,40 @@ struct BridgeEndToEndTests {
         #expect(event.context?.usedPercent == 8.4)
         #expect(event.context?.modelName == "claude-opus-5")
         #expect(event.sessionID == "pi-session")
+    }
+
+    @Test("a payload handed over in the environment arrives without any use of stdin")
+    func environmentPayload() async throws {
+        // Ported from PR #1 (CaffreySun): an in-process extension spawns the
+        // shim from inside the agent's own runtime, so its write to a pipe is
+        // queued on an event loop the agent may be holding. A busy stretch of
+        // 30 ms between spawn and write was enough for the shim's stdin
+        // deadline to expire, and the event then arrived with no session id —
+        // a row the pet could never fill. The environment is delivered at
+        // spawn, not written afterwards, so there is no deadline to miss.
+        let box = EnvelopeBox()
+        let (server, socket) = try makeServer(box)
+        defer { server.stop() }
+
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        let payload = #"{"sessionId":"env-1","cwd":"/tmp/project"}"#
+        let status = try runShim(
+            socket: socket,
+            agent: "pi",
+            event: "agent_start",
+            payload: payload,
+            spool: spool,
+            payloadViaEnvironment: true
+        )
+        #expect(status == 0)
+        #expect(await waitForEnvelopes(box, count: 1), "no envelope arrived")
+
+        let envelope = try #require(box.envelopes.first)
+        #expect(envelope.agentID == "pi")
+        #expect(envelope.payloadUTF8 == payload, "the payload did not survive the environment")
     }
 
     @Test("Antigravity hooks answer with an empty JSON object")

@@ -70,10 +70,29 @@ guard !agentID.isEmpty else {
 // worth delivering if the agent id is known.
 let eventName = value(of: "--event") ?? value(of: "--event-name") ?? "unknown"
 
-// The agent passes its payload on stdin. It is forwarded verbatim — parsing it
-// here would risk failing on a shape this build does not recognise, and would
-// put JSON work on the critical path for no benefit.
-let payload = readStandardInput()
+// Where the payload comes from.
+//
+// Hooks pass it on stdin, and that is the contract: the writer sends it and
+// closes the pipe. An in-process reporter cannot keep that promise. An
+// extension that spawns this shim from inside the agent's own runtime writes
+// to a pipe that is queued on an event loop the agent may be holding —
+// measured (2026-09-15, found reviewing the Oh My Pi extension, PR #1): a
+// 30 ms busy stretch between spawn and write is enough for the stdin deadline
+// in `readStandardInput` to expire, and the event then arrives with no
+// session id at all.
+//
+// An environment variable is handed to the child by the kernel at spawn
+// time, before this process exists, so there is no such race. It is read
+// first; a hook never sets it. The payload is forwarded verbatim either way:
+// parsing here would risk failing on a shape this build does not recognise,
+// and would put JSON work on the critical path for no benefit.
+let payload: Data = {
+    if let encoded = environment["AGENTPET_PAYLOAD_BASE64"],
+       let decoded = Data(base64Encoded: encoded) {
+        return decoded
+    }
+    return readStandardInput()
+}()
 
 // The shim's parent is the agent: this is the one correlation handle available
 // without Accessibility permissions.
