@@ -171,6 +171,10 @@ enum CommandLineTool {
             if !outcome.didChange {
                 print("  (nothing to change — running this again is always safe)")
             }
+            if let hint = profile.postConfigureHint {
+                print("")
+                print(hint)
+            }
             return 0
         } catch {
             print("Could not configure \(profile.displayName): \(error)")

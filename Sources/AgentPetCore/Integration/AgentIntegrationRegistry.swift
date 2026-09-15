@@ -14,11 +14,17 @@ public struct AgentIntegrationProfile: Sendable {
     public let capabilities: Set<IntegrationCapability>
     /// Why there is no configurator, in the words that fit this agent.
     ///
-    /// Kept current as the agents' own surfaces move: updated 2026-09-15 when
-    /// Grok and Pi were wired (docs/ARCHITECTURE.md §6.7b), leaving Codex the
-    /// one agent whose note still has to explain itself. Shown on the card
-    /// and by `--configure`.
+    /// No agent lacks a configurator today (2026-09-15), but the field stays:
+    /// the next agent whose surface cannot be written safely needs somewhere
+    /// to say so. Shown on the card and by `--configure`.
     public let configurationNote: String?
+
+    /// The one thing the user still has to do after configuring, if any.
+    ///
+    /// Codex skips hooks until they are reviewed and trusted in its own
+    /// `/hooks` panel, so writing the file is not the last step there.
+    /// Shown by `--configure` and in the manager's status line.
+    public let postConfigureHint: String?
 
     public init(
         agentID: String,
@@ -26,7 +32,8 @@ public struct AgentIntegrationProfile: Sendable {
         detection: AgentDetector.Specification,
         configurator: (any AgentConfigurator)?,
         capabilities: Set<IntegrationCapability>,
-        configurationNote: String? = nil
+        configurationNote: String? = nil,
+        postConfigureHint: String? = nil
     ) {
         self.agentID = agentID
         self.displayName = displayName
@@ -34,6 +41,7 @@ public struct AgentIntegrationProfile: Sendable {
         self.configurator = configurator
         self.capabilities = capabilities
         self.configurationNote = configurationNote
+        self.postConfigureHint = postConfigureHint
     }
 }
 
@@ -97,11 +105,13 @@ public enum AgentIntegrationRegistry {
     }
 
     /// Codex's hooks are stable and live in `~/.codex/hooks.json` as
-    /// Claude-shaped JSON, but every non-managed entry must be reviewed and
-    /// trusted by hand in its `/hooks` panel before it runs. Wiring is
-    /// possible; the trust handshake is why there is no configurator yet.
+    /// Claude-shaped JSON, so the same configurator Claude uses applies: it
+    /// merges around other tools' entries (Otty already owns four on this
+    /// machine) and removes only its own. Every non-managed entry must then
+    /// be reviewed and trusted by hand in Codex's `/hooks` panel — that is
+    /// the user's step, and the hint says so.
     public static func codex(transaction: ConfigTransaction) -> AgentIntegrationProfile {
-        let config = home().appendingPathComponent(".codex/config.toml")
+        let config = home().appendingPathComponent(".codex/hooks.json")
         return AgentIntegrationProfile(
             agentID: "codex",
             displayName: "Codex",
@@ -111,12 +121,27 @@ public enum AgentIntegrationRegistry {
                 executableNames: ["codex"],
                 configFiles: [config]
             ),
-            configurator: nil,
-            capabilities: [.detect],
-            configurationNote: "Codex's hooks are stable JSON, but every entry must be "
-                + "trusted by hand in Codex's /hooks panel before it runs. Detected, not configured yet."
+            configurator: JSONHookConfigurator(
+                agentID: "codex",
+                configURL: config,
+                events: codexHookEvents,
+                transaction: transaction
+            ),
+            capabilities: [.detect, .configure, .uninstall, .liveEvents, .testEvent],
+            postConfigureHint: "Codex skips hooks until they are trusted: open Codex and "
+                + "run /hooks to review and trust them once."
         )
     }
+
+    /// Every event the Codex profile has a rule for, and only those.
+    /// `Notification`, `TaskCompleted`, and `StopFailure` are Claude Code's;
+    /// Codex never fires them.
+    public static let codexHookEvents = [
+        "SessionStart", "SessionEnd", "UserPromptSubmit",
+        "PreToolUse", "PostToolUse", "PermissionRequest",
+        "PreCompact", "PostCompact", "SubagentStart", "SubagentStop",
+        "Stop", "Interrupt",
+    ]
 
     /// Pi is extended by one TypeScript file in `~/.pi/agent/extensions/`;
     /// the configurator writes exactly that file (node built-ins only, no

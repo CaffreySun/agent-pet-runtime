@@ -406,17 +406,29 @@ struct AgentIntegrationRegistryTests {
         }
     }
 
-    @Test("the configurator only installs events the normalizer knows about")
-    func installedEventsAreKnown() throws {
+    @Test("Codex's post-configure hint names the step it is asking for")
+    func codexTrustHint() throws {
         let profile = try #require(
-            AgentIntegrationRegistry.profile(for: "claude-code", transaction: transaction)
+            AgentIntegrationRegistry.profile(for: "codex", transaction: transaction)
         )
-        let configurator = try #require(profile.configurator as? JSONHookConfigurator)
-        let normalization = try #require(AgentProfiles.profile(for: "claude-code"))
-        let known = Set(normalization.rules.flatMap(\.matches))
+        let hint = try #require(profile.postConfigureHint)
+        #expect(hint.contains("/hooks"),
+                "the hint has to name Codex's own review step, not gesture at it")
+        #expect(profile.configurator != nil)
+    }
 
-        for event in configurator.events {
-            #expect(known.contains(event), "\(event) is installed but unknown to the normalizer")
+    @Test("every installed event is one the normalizer knows about")
+    func installedEventsAreKnown() throws {
+        for profile in AgentIntegrationRegistry.all(transaction: transaction) {
+            guard let configurator = profile.configurator as? JSONHookConfigurator,
+                  let normalization = AgentProfiles.profile(for: profile.agentID)
+            else { continue }
+            let known = Set(normalization.rules.flatMap(\.matches))
+
+            for event in configurator.events {
+                #expect(known.contains(event),
+                        "\(profile.agentID): \(event) is installed but unknown to the normalizer")
+            }
         }
     }
 }
