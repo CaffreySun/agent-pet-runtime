@@ -81,15 +81,19 @@ Sessions running long jobs are not interrupted. (Verified by adding
 `SubagentStart`/`SubagentStop` to a session that had been running for hours and
 watching them fire.)
 
-Only Claude Code is configurable today. Grok and Pi are wireable but not built
-(Grok's hooks are JSON files; Pi is extended by a single TypeScript file), and
-Codex's stable hooks must be trusted by hand in Codex itself before they can
-run. All three are detected and reported as *not configurable*, each with its
-own reason, rather than half-supported.
+Claude Code and Grok are configurable today. Pi is wireable but not built yet
+(a single TypeScript file), and Codex's stable hooks must be trusted by hand in
+Codex itself before they can run. Both are detected and reported as *not
+configurable*, each with its own reason, rather than half-supported.
 
 ### What configuring does
 
-It adds hook lines to `~/.claude/settings.json` and nothing else:
+What configuring does depends on the agent; nothing else is touched. Claude
+Code gets hook lines in `~/.claude/settings.json`. Grok gets
+`~/.grok/hooks/agentpet.json` — the runtime's own file, deleted on removal —
+plus one appended switch, `[compat.claude] hooks = false` in
+`~/.grok/config.toml`, which stops Grok's Claude-compatibility scan from
+firing the Claude hooks a second time:
 
 - **Backed up first.** The previous file is copied to the runtime's backup
   directory before anything is written.
@@ -98,8 +102,8 @@ It adds hook lines to `~/.claude/settings.json` and nothing else:
 - **Idempotent.** Running Configure twice changes nothing.
 - **Reversible.** Remove Integration deletes only the lines the runtime wrote.
   Hook lines belonging to other tools — and there are usually several — are
-  left alone.
-- **Concurrency-aware.** Claude Code writes that file itself. If it changes
+  left alone, and the appended switch is removed byte for byte.
+- **Concurrency-aware.** The file's owner writes it too. If it changes
   between read and write, the edit is abandoned rather than clobbering it.
 
 It never touches model settings, credentials, or prompts.
@@ -141,10 +145,13 @@ the rest change nothing.
 yields, which happens while a background subagent is still working. The payload
 lists `background_tasks`; if one is still running, the turn has not finished.
 
-**Grok reads Claude Code's config.** Grok Build scans and trusts
-`~/.claude/settings.json`, so hooks installed there fire on Grok events too. The
-shim checks `GROK_HOOK_NAME` and re-labels them rather than reporting every Grok
-session as Claude Code.
+**Grok reads Claude Code's config, so the runtime turns that scan off.**
+Grok Build scans and trusts `~/.claude/settings.json`, which would fire the
+Claude hooks on every Grok event as a second source for the same facts.
+Configuring Grok appends `[compat.claude] hooks = false` to
+`~/.grok/config.toml` and installs Grok's own hooks file instead. The shim
+still checks `GROK_HOOK_NAME` and would re-label anything the scan delivered
+anyway.
 
 ---
 

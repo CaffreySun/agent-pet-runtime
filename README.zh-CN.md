@@ -74,17 +74,17 @@ swift run AgentPet --unconfigure claude-code   # 精确移除它写过的东西
 
 **不需要重启。** Claude Code 在**每次派发 hook 时**重新读取 `~/.claude/settings.json`，所以会话运行中途加的 hook 下一个事件就生效，正在跑长任务的会话不会被打断。（实测方式：给一个已经跑了好几个小时的会话新增 `SubagentStart`/`SubagentStop`，然后看它们触发。）
 
-目前只有 Claude Code 可配置。Grok 的 hook 在 TOML 里，Codex 的 `notify` 是 argv 数组，都不是 JSON 事务能安全处理的格式；Pi 靠装一个扩展包接入，也不是改配置文件。这三个只做检测，UI 显示**不可配置**并各自说明原因，而不是半吊子支持。
+目前 **Claude Code 和 Grok 可配置**。Pi 可用单个 TypeScript 文件接入但还没做；Codex 的稳定 hooks 需要你先在 Codex 里手工信任一次。这两个只做检测，UI 显示**不可配置**并各自说明原因，而不是半吊子支持。
 
 ### 配置到底做了什么
 
-只往 `~/.claude/settings.json` 加 hook 行，别的一概不碰：
+配置做什么因 agent 而异，除此之外一概不碰：Claude Code 是往 `~/.claude/settings.json` 加 hook 行；Grok 是写运行时自己的 `~/.grok/hooks/agentpet.json`（移除时整个删掉），并在 `~/.grok/config.toml` 末尾追加一个开关 `[compat.claude] hooks = false`——否则 Grok 的 Claude 兼容扫描会把 Claude 的 hook 再放一遍：
 
 - **先备份。** 动笔之前先把原文件复制到运行时备份目录。
 - **原子写入。** 写临时文件再 rename，读者要么看到旧文件要么看到新文件，不会看到写了一半的。
 - **幂等。** 连点两次 Configure 什么都不会变。
-- **可逆。** Remove Integration 只删运行时自己写的行。**其他工具的 hook 行原样保留**——而你机器上通常有好几个。
-- **检测并发修改。** Claude Code 自己也会写这个文件。如果读和写之间它变了，就放弃这次编辑而不是覆盖它。
+- **可逆。** Remove Integration 只删运行时自己写的行。**其他工具的 hook 行原样保留**——而你机器上通常有好几个；追加的开关按字节精确删回。
+- **检测并发修改。** 文件的主人自己也会写它。如果读和写之间它变了，就放弃这次编辑而不是覆盖它。
 
 它永远不碰模型配置、凭据和 prompt。
 
@@ -112,7 +112,7 @@ Agent 状态是一个由 hook 事件驱动的小型状态机。**映射是最容
 
 **子 Agent 在跑的时候 `Stop` 会撒谎。** 主 Agent 让出控制权就触发 `Stop`，而后台子 Agent 可能还在干活。payload 里的 `background_tasks` 如果还有 running 的，说明这一轮没结束。
 
-**Grok 会读 Claude Code 的配置。** Grok Build 会扫描并信任 `~/.claude/settings.json`，所以装在那里的 hook 也会在 Grok 事件上触发。shim 检测 `GROK_HOOK_NAME` 并改判，而不是把每个 Grok 会话都报成 Claude Code。
+**Grok 会读 Claude Code 的配置，所以运行时把这个扫描关掉。** Grok Build 会扫描并信任 `~/.claude/settings.json`，那会让每个 Grok 事件被 Claude 的 hook 再放一遍。配置 Grok 时会往 `~/.grok/config.toml` 追加 `[compat.claude] hooks = false`，并改为安装 Grok 自己的 hooks 文件。shim 仍检测 `GROK_HOOK_NAME`，万一仍有扫描来的事件也会被改判成 Grok。
 
 ---
 
