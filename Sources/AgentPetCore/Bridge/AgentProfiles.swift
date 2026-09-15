@@ -182,16 +182,126 @@ public enum AgentProfiles {
         ]
     )
 
-    /// Grok's hook schema and event names match Claude Code's, so the rules
-    /// are shared today — but Grok's payload envelope is camelCase
-    /// (`sessionId`, `toolName`, `notificationType`) where Claude's is
-    /// snake_case, so these rules cannot actually read a Grok payload. Fix
-    /// the field names when wiring (docs/ARCHITECTURE.md §6.7b). Kept as its
-    /// own profile because the two will drift.
+    /// Grok's event names match Claude Code's and its core fields carry
+    /// Claude-style snake_case aliases (`session_id`, `hook_event_name`,
+    /// `tool_name`), but the turn-end body and the background-task list are
+    /// camelCase only, and `Stop` fires once per turn and again at shutdown.
+    /// Field names and the `reason` filter below come from payloads captured
+    /// off the wire (2026-09-15); see docs/ARCHITECTURE.md §6.7b.
     public static let grok = AgentProfile(
         agentID: "grok",
         displayName: "Grok",
-        rules: claudeCode.rules,
+        rules: [
+            // --- Blocked on the user. ---
+
+            // The payload uses the camelCase spelling; the snake_case rule
+            // behind it keeps working if a future build aliases the field.
+            NormalizationRule(
+                matches: ["Notification"],
+                kind: .waitingApproval,
+                summaryField: "message",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd",
+                whenNotificationType: "permission_prompt",
+                notificationTypeField: "notificationType"
+            ),
+            NormalizationRule(
+                matches: ["Notification"],
+                kind: .waitingApproval,
+                summaryField: "message",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd",
+                whenNotificationType: "permission_prompt"
+            ),
+
+            // --- Working. ---
+
+            NormalizationRule(
+                matches: ["UserPromptSubmit"],
+                kind: .working,
+                summaryField: "prompt",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+            NormalizationRule(
+                matches: ["PreToolUse", "PostToolUse"],
+                kind: .working,
+                summaryField: "toolName",
+                toolNameField: "toolName",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+            // A failing tool does not end the turn, and neither does a
+            // subagent starting or finishing.
+            NormalizationRule(
+                matches: ["PostToolUseFailure", "SubagentStart", "SubagentStop", "PreCompact", "PostCompact"],
+                kind: .working,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+
+            // --- Finished. ---
+
+            // Only `end_turn` is a turn ending. The shutdown fire arrives
+            // after `SessionEnd`; mapping it would resurrect a session that
+            // has already closed. `lastAssistantMessage` is the pet's "Ready"
+            // line, the counterpart of Claude's `last_assistant_message`.
+            NormalizationRule(
+                matches: ["Stop"],
+                kind: .completed,
+                detailField: "lastAssistantMessage",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd",
+                whenReason: "end_turn",
+                suppressedByRunningBackgroundTask: true,
+                backgroundTasksField: "backgroundTasks"
+            ),
+            // The suppressed case: the main agent yielded while a background
+            // subagent is still running, which is still work.
+            NormalizationRule(
+                matches: ["Stop"],
+                kind: .working,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd",
+                whenReason: "end_turn"
+            ),
+            // An interrupt is a finished turn too — the user stopped it, and
+            // a session left "working" for the five-minute stale timeout
+            // reads as asleep. Known edge: Grok dispatches cancel reports off
+            // the command loop, so one can land after the next prompt's
+            // `UserPromptSubmit` and briefly show completed over working.
+            NormalizationRule(
+                matches: ["StopCancelled"],
+                kind: .completed,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+
+            // --- Failure. ---
+
+            NormalizationRule(
+                matches: ["StopFailure"],
+                kind: .failed,
+                summaryField: "error",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+
+            // --- Lifecycle. ---
+
+            NormalizationRule(
+                matches: ["SessionStart"],
+                kind: .sessionStarted,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+            NormalizationRule(
+                matches: ["SessionEnd"],
+                kind: .sessionClosed,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+        ],
         fallbackSessionID: "grok-default"
     )
 

@@ -323,10 +323,14 @@ struct NormalizationRobustnessTests {
         #expect(events.first?.sessionID == "12345")
     }
 
-    @Test("Grok shares Claude Code's hook vocabulary")
+    @Test("Grok no longer shares Claude Code's vocabulary")
     func grokProfile() throws {
+        // Grok's rules are its own set now (captured off the wire; the full
+        // mapping lives in GrokProfileTests). Grok has no `PermissionRequest`
+        // — its approval signal is a `Notification` carrying
+        // `notificationType: permission_prompt`.
         let events = normalizer.normalize(envelope(agent: "grok", event: "PermissionRequest"))
-        #expect(events.first?.kind == .waitingApproval)
+        #expect(events.isEmpty)
     }
 
     @Test("process observation is reported at lower confidence than a hook")

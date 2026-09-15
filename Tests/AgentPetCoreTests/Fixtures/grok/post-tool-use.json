@@ -1,0 +1,68 @@
+{
+  "hookEventName": "post_tool_use",
+  "sessionId": "55555555-5555-4555-8555-555555555555",
+  "cwd": "/home/dev/project",
+  "workspaceRoot": "/home/dev/project",
+  "timestamp": "2026-09-15T02:37:35.428661+00:00",
+  "transcriptPath": "/home/dev/.grok/sessions/project/55555555-5555-4555-8555-555555555555/updates.jsonl",
+  "permissionMode": "bypassPermissions",
+  "toolName": "run_terminal_command",
+  "toolUseId": "call-88888888-8888-4888-8888-888888888888-0",
+  "toolInput": {
+    "command": "echo hi",
+    "description": "Run exactly \"echo hi\" as specified"
+  },
+  "toolResult": {
+    "type": "Bash",
+    "output": [
+      104,
+      105,
+      10
+    ],
+    "output_for_prompt": "exit: 0\nhi\n",
+    "exit_code": 0,
+    "command": "echo hi",
+    "truncated": false,
+    "signal": null,
+    "timed_out": false,
+    "description": "Run exactly \"echo hi\" as specified",
+    "current_dir": "/home/dev/project",
+    "output_file": "/home/dev/.grok/sessions/project/55555555-5555-4555-8555-555555555555/terminal/call-88888888-8888-4888-8888-888888888888-0.log",
+    "total_bytes": 3,
+    "was_bare_echo": true
+  },
+  "toolInputTruncated": false,
+  "toolResultTruncated": false,
+  "durationMs": 497,
+  "isBackgrounded": false,
+  "hook_event_name": "PostToolUse",
+  "session_id": "55555555-5555-4555-8555-555555555555",
+  "transcript_path": "/home/dev/.grok/sessions/project/55555555-5555-4555-8555-555555555555/updates.jsonl",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "run_terminal_command",
+  "tool_input": {
+    "command": "echo hi",
+    "description": "Run exactly \"echo hi\" as specified"
+  },
+  "tool_response": {
+    "type": "Bash",
+    "output": [
+      104,
+      105,
+      10
+    ],
+    "output_for_prompt": "exit: 0\nhi\n",
+    "exit_code": 0,
+    "command": "echo hi",
+    "truncated": false,
+    "signal": null,
+    "timed_out": false,
+    "description": "Run exactly \"echo hi\" as specified",
+    "current_dir": "/home/dev/project",
+    "output_file": "/home/dev/.grok/sessions/project/55555555-5555-4555-8555-555555555555/terminal/call-88888888-8888-4888-8888-888888888888-0.log",
+    "total_bytes": 3,
+    "was_bare_echo": true
+  },
+  "tool_use_id": "call-88888888-8888-4888-8888-888888888888-0",
+  "duration_ms": 497
+}

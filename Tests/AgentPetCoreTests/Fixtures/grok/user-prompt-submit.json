@@ -1,0 +1,13 @@
+{
+  "hookEventName": "user_prompt_submit",
+  "sessionId": "55555555-5555-4555-8555-555555555555",
+  "cwd": "/home/dev/project",
+  "workspaceRoot": "/home/dev/project",
+  "timestamp": "2026-09-15T02:37:27.502636+00:00",
+  "promptId": "77777777-7777-4777-8777-777777777777",
+  "permissionMode": "bypassPermissions",
+  "prompt": "Run the tests and tell me what fails",
+  "hook_event_name": "UserPromptSubmit",
+  "session_id": "55555555-5555-4555-8555-555555555555",
+  "permission_mode": "bypassPermissions"
+}

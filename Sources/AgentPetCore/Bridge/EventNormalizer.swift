@@ -31,7 +31,7 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
     /// Top-level payload key holding the working directory.
     public let workingDirectoryField: String?
 
-    /// Only applies when the payload's `notification_type` equals this.
+    /// Only applies when the payload's notification type equals this.
     ///
     /// Claude Code reports several unrelated things through one `Notification`
     /// event, distinguished only by this field. Treating "a permission prompt"
@@ -39,12 +39,29 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
     /// permanently asking for attention.
     public let whenNotificationType: String?
 
+    /// Payload key the notification type is read from. `nil` means Claude
+    /// Code's `notification_type`; Grok spells the same value
+    /// `notificationType`.
+    public let notificationTypeField: String?
+
+    /// Only applies when the payload's `reason` equals this.
+    ///
+    /// Grok fires `Stop` twice per session: once with `reason: "end_turn"`
+    /// when the turn ends, and once with `reason: "shutdown"` after the
+    /// session's `SessionEnd`. Only the first is a turn ending — treating the
+    /// second as one resurrects a session that has already closed.
+    public let whenReason: String?
+
     /// Skips the rule when the payload lists a still-running background task.
     ///
     /// Claude Code fires `Stop` when the main agent yields, which happens while
     /// a background subagent is still working. Reporting that as a finished
     /// turn would make the pet announce completion in the middle of the job.
     public let suppressedByRunningBackgroundTask: Bool
+
+    /// Payload key the background-task list is read from. `nil` means Claude
+    /// Code's `background_tasks`; Grok sends `backgroundTasks`.
+    public let backgroundTasksField: String?
 
     public init(
         matches: [String],
@@ -55,7 +72,10 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
         sessionIDField: String? = nil,
         workingDirectoryField: String? = nil,
         whenNotificationType: String? = nil,
-        suppressedByRunningBackgroundTask: Bool = false
+        notificationTypeField: String? = nil,
+        whenReason: String? = nil,
+        suppressedByRunningBackgroundTask: Bool = false,
+        backgroundTasksField: String? = nil
     ) {
         self.matches = matches
         self.kind = kind
@@ -65,7 +85,10 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
         self.sessionIDField = sessionIDField
         self.workingDirectoryField = workingDirectoryField
         self.whenNotificationType = whenNotificationType
+        self.notificationTypeField = notificationTypeField
+        self.whenReason = whenReason
         self.suppressedByRunningBackgroundTask = suppressedByRunningBackgroundTask
+        self.backgroundTasksField = backgroundTasksField
     }
 }
 
@@ -111,12 +134,19 @@ public extension NormalizationRule {
         guard matches.contains(eventName) else { return false }
 
         if let required = whenNotificationType {
-            let actual = payload["notification_type"] as? String
+            let actual = payload[notificationTypeField ?? "notification_type"] as? String
+            guard actual == required else { return false }
+        }
+
+        if let required = whenReason {
+            let actual = payload["reason"] as? String
             guard actual == required else { return false }
         }
 
         if suppressedByRunningBackgroundTask,
-           EventNormalizer.hasRunningBackgroundTask(payload) {
+           EventNormalizer.hasRunningBackgroundTask(
+               payload, field: backgroundTasksField ?? "background_tasks"
+           ) {
             return false
         }
 
@@ -197,8 +227,11 @@ public struct EventNormalizer: Sendable {
     /// Claude Code's `Stop` fires whenever the main agent yields, which it does
     /// while a background subagent is still working. Without this check every
     /// long job is announced as complete the moment the agent first pauses.
-    static func hasRunningBackgroundTask(_ payload: [String: Any]) -> Bool {
-        guard let tasks = payload["background_tasks"] as? [[String: Any]] else { return false }
+    static func hasRunningBackgroundTask(
+        _ payload: [String: Any],
+        field: String = "background_tasks"
+    ) -> Bool {
+        guard let tasks = payload[field] as? [[String: Any]] else { return false }
         return tasks.contains { task in
             (task["status"] as? String)?.lowercased() == "running"
         }

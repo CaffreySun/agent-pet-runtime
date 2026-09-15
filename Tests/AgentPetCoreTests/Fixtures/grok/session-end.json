@@ -1,0 +1,14 @@
+{
+  "hookEventName": "session_end",
+  "sessionId": "55555555-5555-4555-8555-555555555555",
+  "cwd": "/home/dev/project",
+  "workspaceRoot": "/home/dev/project",
+  "timestamp": "2026-09-15T02:37:37.997642+00:00",
+  "transcriptPath": "/home/dev/.grok/sessions/project/55555555-5555-4555-8555-555555555555/updates.jsonl",
+  "permissionMode": "bypassPermissions",
+  "reason": "shutdown",
+  "hook_event_name": "SessionEnd",
+  "session_id": "55555555-5555-4555-8555-555555555555",
+  "transcript_path": "/home/dev/.grok/sessions/project/55555555-5555-4555-8555-555555555555/updates.jsonl",
+  "permission_mode": "bypassPermissions"
+}
