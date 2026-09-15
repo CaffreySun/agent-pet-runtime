@@ -256,6 +256,36 @@ struct ConfigTransactionBackupTests {
         #expect(kept.count <= 3, "backups grew unbounded: \(kept.count)")
     }
 
+    @Test("a backup taken under a second file name survives the prune it triggers")
+    func pruningFollowsAgeNotTheFileName() throws {
+        // The regression this exists for (2026-09-15; ported from PR #1 by
+        // CaffreySun): backups were pruned by name, and a backup's name starts
+        // with the name of the file it came from — so `agentpet.json.<ts>`
+        // sorted before `settings.json.<ts>` no matter how new it was. The
+        // moment a second integration backed a file up into this directory,
+        // the backup taken during that very call was the first one deleted,
+        // and the path the caller had just been handed was already gone.
+        let sandbox = try Sandbox()
+        let settings = try sandbox.file("settings.json", "{}")
+        let agentpet = try sandbox.file("agentpet.json", "{}")
+        let tx = ConfigTransaction(backupDirectory: sandbox.backups, maxBackups: 3)
+
+        for index in 0..<3 {
+            try tx.perform(on: settings) { $0["n"] = index }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        let outcome = try tx.perform(on: agentpet) { $0["m"] = 1 }
+        let backup = try #require(outcome.backupURL)
+        #expect(FileManager.default.fileExists(atPath: backup.path),
+                "the backup this call reported was pruned by the same call")
+
+        let kept = (try? FileManager.default.contentsOfDirectory(
+            at: sandbox.backups, includingPropertiesForKeys: nil
+        )) ?? []
+        #expect(kept.count <= 3, "backups grew past the limit: \(kept.count)")
+    }
+
     @Test("a backup directory that does not exist yet is created")
     func backupDirectoryCreated() throws {
         let sandbox = try Sandbox()
