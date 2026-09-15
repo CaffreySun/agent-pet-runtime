@@ -48,11 +48,18 @@ if arguments.contains("--statusline") {
 // Claude Code hooks installed there also run on Grok's own hook events. Left
 // unguarded they would report every Grok session as a Claude Code one.
 // `GROK_HOOK_NAME` is injected by Grok's hook runner and never set by Claude
-// Code itself, which makes it a reliable tell.
+// Code itself, which makes it a reliable tell. Antigravity has the same kind
+// of tell in `ANTIGRAVITY_CONVERSATION_ID` (captured on 1.2.3).
 let declaredAgent = value(of: "--agent") ?? "unknown"
-let agentID = ProcessInfo.processInfo.environment["GROK_HOOK_NAME"] != nil
-    ? "grok"
-    : declaredAgent
+let environment = ProcessInfo.processInfo.environment
+let agentID: String
+if environment["GROK_HOOK_NAME"] != nil {
+    agentID = "grok"
+} else if environment["ANTIGRAVITY_CONVERSATION_ID"] != nil {
+    agentID = "antigravity"
+} else {
+    agentID = declaredAgent
+}
 
 guard !agentID.isEmpty else {
     FileHandle.standardError.write(Data("agentpet-hook: --agent is required\n".utf8))
@@ -92,6 +99,16 @@ if !deliver(envelope, to: socketURL) {
     // Nobody was listening. The event is not lost: the next launch of the
     // runtime replays it, reduced to the fields the state machine needs.
     EventSpool.write(envelope, to: resolveSpoolURL())
+}
+
+// Antigravity's hook contract requires the hook's result as a JSON object on
+// stdout, and an empty object is the one answer with no opinion about tool
+// calls or stops. This is the single exception to "never write to stdout":
+// there, the agent is parsing it because its own contract says to. Verified
+// on 1.2.3 — `{}` neither gates a tool call nor blocks a stop, and a hook
+// that fails outright is fail-open anyway.
+if agentID == "antigravity" {
+    print("{}")
 }
 exit(0)
 
@@ -143,7 +160,8 @@ func runStatusLineTap(arguments: [String]) -> Int32 {
     let input = readStandardInput()
 
     let agentID = value(of: "--agent") ?? "claude-code"
-    if let reduced = reducedStatusPayload(input) {
+    let reduced = reducedStatusPayload(input)
+    if let reduced {
         let envelope = BridgeEnvelope(
             agentID: agentID,
             eventName: "Statusline",
@@ -158,6 +176,16 @@ func runStatusLineTap(arguments: [String]) -> Int32 {
         _ = deliver(envelope, to: resolveSocketURL())
     }
 
+    // Antigravity's default status row is visible, and a command there
+    // replaces it rather than wrapping it — so this tap prints a plain
+    // replacement row instead of taking the row away. (Grok's default is no
+    // row at all; there, silence is the preservation.)
+    if arguments.contains("--render-row"), let reduced {
+        if let row = renderStatusRow(reduced) {
+            print(row)
+        }
+    }
+
     let encoded = value(of: "--original") ?? ""
     guard let data = Data(base64Encoded: encoded),
           let original = String(data: data, encoding: .utf8),
@@ -170,6 +198,27 @@ func runStatusLineTap(arguments: [String]) -> Int32 {
     }
 
     return runWrapped(original, stdin: input)
+}
+
+/// One plain row for a status line the tap replaced: the project, the model,
+/// and how full the context window is, whichever of the three the payload
+/// carries. No colors and no escapes — the shim's output is a row, not a
+/// picture, and it must never look like it is trying.
+func renderStatusRow(_ reduced: Data) -> String? {
+    guard let root = try? JSONSerialization.jsonObject(with: reduced) as? [String: Any] else {
+        return nil
+    }
+    var parts: [String] = []
+    if let project = root["project"] as? String, !project.isEmpty {
+        parts.append(project)
+    }
+    if let model = root["model"] as? String, !model.isEmpty {
+        parts.append(model)
+    }
+    if let percent = root["used_percentage"] as? NSNumber {
+        parts.append("\(Int(percent.doubleValue.rounded()))% ctx")
+    }
+    return parts.isEmpty ? nil : parts.joined(separator: " │ ")
 }
 
 /// Reduces Claude Code's status-line JSON to the handful of fields the panel

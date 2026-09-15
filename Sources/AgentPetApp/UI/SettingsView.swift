@@ -161,10 +161,27 @@ struct SettingsView: View {
                     Button("Re-enable Grok Context…") { model.enableGrokContextTap() }
                 }
             }
+
+            HStack {
+                Text(antigravityContextTapSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                switch model.antigravityContextTap {
+                case .notInstalled:
+                    Button("Enable Antigravity Context…") { model.enableAntigravityContextTap() }
+                case .installed:
+                    Button("Stop Feeding Antigravity Context") { model.disableAntigravityContextTap() }
+                case .drifted:
+                    Button("Re-enable Antigravity Context…") { model.enableAntigravityContextTap() }
+                }
+            }
         }
         .onAppear {
             model.refreshContextTap()
             model.refreshGrokContextTap()
+            model.refreshAntigravityContextTap()
         }
     }
 
@@ -199,6 +216,22 @@ struct SettingsView: View {
             return "The [ui.status_line] section in ~/.grok/config.toml is no longer the one "
                 + "the runtime installed — something else changed it. Re-enabling installs "
                 + "the runtime’s block again."
+        }
+    }
+
+    private var antigravityContextTapSummary: String {
+        switch model.antigravityContextTap {
+        case .notInstalled:
+            return "Antigravity reports model, context, and cost only to its status line. "
+                + "Enabling replaces the built-in row with a plain one that feeds the "
+                + "runtime — the terminal keeps a status line, just a simpler one."
+        case .installed:
+            return "Reading model, context, and cost from Antigravity’s status line, "
+                + "which shows a plain replacement row."
+        case .drifted:
+            return "The status line in ~/.gemini/antigravity-cli/settings.json is no longer "
+                + "the one the runtime installed — something else changed it. Re-enabling "
+                + "installs the runtime’s command again."
         }
     }
 

@@ -63,6 +63,19 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
     /// Code's `background_tasks`; Grok sends `backgroundTasks`.
     public let backgroundTasksField: String?
 
+    /// Skips the rule when the named top-level boolean is present and false.
+    ///
+    /// Antigravity's `Stop` carries `fullyIdle`: false means background
+    /// commands or async tasks are still running, so the loop stopping is
+    /// not the job stopping.
+    public let suppressedWhenFalseField: String?
+
+    /// Only applies when the named top-level field is a non-empty string.
+    ///
+    /// Antigravity always sends `error` on `Stop` but leaves it empty on a
+    /// clean stop; presence alone distinguishes nothing, content does.
+    public let requiresNonEmptyField: String?
+
     public init(
         matches: [String],
         kind: AgentEventKind,
@@ -75,7 +88,9 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
         notificationTypeField: String? = nil,
         whenReason: String? = nil,
         suppressedByRunningBackgroundTask: Bool = false,
-        backgroundTasksField: String? = nil
+        backgroundTasksField: String? = nil,
+        suppressedWhenFalseField: String? = nil,
+        requiresNonEmptyField: String? = nil
     ) {
         self.matches = matches
         self.kind = kind
@@ -89,6 +104,8 @@ public struct NormalizationRule: Codable, Sendable, Equatable {
         self.whenReason = whenReason
         self.suppressedByRunningBackgroundTask = suppressedByRunningBackgroundTask
         self.backgroundTasksField = backgroundTasksField
+        self.suppressedWhenFalseField = suppressedWhenFalseField
+        self.requiresNonEmptyField = requiresNonEmptyField
     }
 }
 
@@ -148,6 +165,15 @@ public extension NormalizationRule {
                payload, field: backgroundTasksField ?? "background_tasks"
            ) {
             return false
+        }
+
+        if let field = suppressedWhenFalseField,
+           let flag = payload[field] as? Bool, flag == false {
+            return false
+        }
+
+        if let field = requiresNonEmptyField {
+            guard let value = payload[field] as? String, !value.isEmpty else { return false }
         }
 
         return true
@@ -260,10 +286,21 @@ public struct EventNormalizer: Sendable {
         return object
     }
 
+    /// Reads one top-level key, a dotted path (`toolCall.name`), or — for an
+    /// array of strings like Antigravity's `workspacePaths` — its first entry.
+    /// Anything else has no single answer and reads as absent.
     static func string(_ payload: [String: Any], _ key: String?) -> String? {
-        guard let key, let value = payload[key] else { return nil }
+        guard let key, !key.isEmpty else { return nil }
+
+        var value: Any? = payload
+        for part in key.split(separator: ".") {
+            guard let dictionary = value as? [String: Any] else { return nil }
+            value = dictionary[String(part)]
+        }
+
         if let string = value as? String { return string }
         if let number = value as? NSNumber { return number.stringValue }
+        if let strings = value as? [String] { return strings.first }
         return nil
     }
 }

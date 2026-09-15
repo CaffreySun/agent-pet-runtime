@@ -74,11 +74,11 @@ swift run AgentPet --unconfigure claude-code   # 精确移除它写过的东西
 
 **不需要重启。** Claude Code 在**每次派发 hook 时**重新读取 `~/.claude/settings.json`，所以会话运行中途加的 hook 下一个事件就生效，正在跑长任务的会话不会被打断。（实测方式：给一个已经跑了好几个小时的会话新增 `SubagentStart`/`SubagentStop`，然后看它们触发。）
 
-四个 agent 现在都可配置。Codex 多一步：它的 hooks 要你在 Codex 自己的 `/hooks` 面板里 review 并信任一次才会生效——配置完成的那一刻，运行时会直接把这句话打给你。
+五个 agent 现在都可配置。Codex 多一步：它的 hooks 要你在 Codex 自己的 `/hooks` 面板里 review 并信任一次才会生效——配置完成的那一刻，运行时会直接把这句话打给你。
 
 ### 配置到底做了什么
 
-配置做什么因 agent 而异，除此之外一概不碰：Claude Code 是往 `~/.claude/settings.json` 加 hook 行；Grok 是写运行时自己的 `~/.grok/hooks/agentpet.json`（移除时整个删掉），并在 `~/.grok/config.toml` 末尾追加一个开关 `[compat.claude] hooks = false`——否则 Grok 的 Claude 兼容扫描会把 Claude 的 hook 再放一遍；Pi 是写运行时自己的一个 TypeScript 扩展 `~/.pi/agent/extensions/agentpet.ts`（同样删除即卸载）；Codex 是往 `~/.codex/hooks.json` 加 hook 行，与已有条目合并（比如 Otty 的四条原样保留，卸载时也只删自己写的）：
+配置做什么因 agent 而异，除此之外一概不碰：Claude Code 是往 `~/.claude/settings.json` 加 hook 行；Grok 是写运行时自己的 `~/.grok/hooks/agentpet.json`（移除时整个删掉），并在 `~/.grok/config.toml` 末尾追加一个开关 `[compat.claude] hooks = false`——否则 Grok 的 Claude 兼容扫描会把 Claude 的 hook 再放一遍；Pi 是写运行时自己的一个 TypeScript 扩展 `~/.pi/agent/extensions/agentpet.ts`（同样删除即卸载）；Codex 是往 `~/.codex/hooks.json` 加 hook 行，与已有条目合并（比如 Otty 的四条原样保留，卸载时也只删自己写的）；Antigravity 是往 `~/.gemini/config/hooks.json` 写一个命名钩子（工具事件用 matcher 分组、其余事件是扁平 handler 列表——它的 schema 并不统一），与其它命名钩子合并、卸载只删自己：
 
 - **先备份。** 动笔之前先把原文件复制到运行时备份目录。
 - **原子写入。** 写临时文件再 rename，读者要么看到旧文件要么看到新文件，不会看到写了一半的。

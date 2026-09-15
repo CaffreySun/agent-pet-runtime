@@ -463,6 +463,95 @@ public enum AgentProfiles {
         ]
     )
 
+    /// Antigravity reports through the CLI's own `hooks.json` (named hooks),
+    /// and this profile is written against payloads captured off the real
+    /// 1.2.3 wire (2026-09-15; fixtures in `Tests/.../Fixtures/antigravity/`).
+    ///
+    /// What the capture settled, against the docs: payloads are protojson
+    /// camelCase; `SessionStart` fires although the published event table
+    /// does not list it; `PostToolUse` is registered but never fired in any
+    /// captured turn, so the working signal leans on `PreToolUse` and the
+    /// per-model-call `Pre/PostInvocation`; `Stop` carries `terminationReason`
+    /// (observed `NO_TOOL_CALL`, not the docs' `model_stop`), `fullyIdle`, and
+    /// an `error` string that is present but empty on a clean stop. There is
+    /// no waiting-for-input event to map.
+    public static let antigravity = AgentProfile(
+        agentID: "antigravity",
+        displayName: "Antigravity",
+        rules: [
+            // --- Working. ---
+
+            NormalizationRule(
+                matches: ["PreInvocation", "PostInvocation"],
+                kind: .working,
+                sessionIDField: "conversationId",
+                workingDirectoryField: "workspacePaths"
+            ),
+            NormalizationRule(
+                matches: ["PreToolUse", "PostToolUse"],
+                kind: .working,
+                summaryField: "toolCall.name",
+                toolNameField: "toolCall.name",
+                sessionIDField: "conversationId",
+                workingDirectoryField: "workspacePaths"
+            ),
+
+            // --- Finished. ---
+
+            // An error stop is a failure; a clean stop with work still in
+            // flight is still working; anything else is a finished turn.
+            NormalizationRule(
+                matches: ["Stop"],
+                kind: .failed,
+                summaryField: "error",
+                sessionIDField: "conversationId",
+                workingDirectoryField: "workspacePaths",
+                requiresNonEmptyField: "error"
+            ),
+            NormalizationRule(
+                matches: ["Stop"],
+                kind: .completed,
+                detailField: "finalModelOutput",
+                sessionIDField: "conversationId",
+                workingDirectoryField: "workspacePaths",
+                suppressedWhenFalseField: "fullyIdle"
+            ),
+            NormalizationRule(
+                matches: ["Stop"],
+                kind: .working,
+                sessionIDField: "conversationId",
+                workingDirectoryField: "workspacePaths"
+            ),
+
+            // --- Lifecycle. ---
+
+            // Undocumented but real: the hook fires, with the common fields
+            // only (captured 2026-09-15). `SessionEnd` is registered but was
+            // not observed on a headless exit; it stays mapped for the TUI.
+            NormalizationRule(
+                matches: ["SessionStart"],
+                kind: .sessionStarted,
+                sessionIDField: "conversationId",
+                workingDirectoryField: "workspacePaths"
+            ),
+            NormalizationRule(
+                matches: ["SessionEnd"],
+                kind: .sessionClosed,
+                sessionIDField: "conversationId",
+                workingDirectoryField: "workspacePaths"
+            ),
+
+            // --- Description, not state. ---
+
+            NormalizationRule(
+                matches: ["Statusline"],
+                kind: .contextUpdate,
+                sessionIDField: "session_id"
+            ),
+        ],
+        fallbackSessionID: "antigravity-default"
+    )
+
     /// Fallback for anything reached by process observation alone.
     public static let genericCLI = AgentProfile(
         agentID: "generic-cli",
@@ -477,7 +566,7 @@ public enum AgentProfiles {
         confidence: .low
     )
 
-    public static let all: [AgentProfile] = [claudeCode, grok, codex, pi, genericCLI]
+    public static let all: [AgentProfile] = [claudeCode, grok, codex, pi, antigravity, genericCLI]
 
     public static func profile(for agentID: String) -> AgentProfile? {
         all.first { $0.agentID == agentID }

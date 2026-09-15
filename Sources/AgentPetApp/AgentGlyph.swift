@@ -19,6 +19,7 @@ enum AgentGlyph {
         case "codex":       return "terminal"
         case "grok":        return "bolt"
         case "pi":          return "function"
+        case "antigravity": return "sparkles"
         default:            return "pawprint"
         }
     }

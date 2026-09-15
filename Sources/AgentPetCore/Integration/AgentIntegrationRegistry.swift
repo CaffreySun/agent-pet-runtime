@@ -162,12 +162,34 @@ public enum AgentIntegrationRegistry {
         )
     }
 
+    /// Antigravity reads its hooks from one named entry in
+    /// `~/.gemini/config/hooks.json` (verified against 1.2.3: the CLI logs
+    /// how many named hooks it loaded, and every event it fires was captured
+    /// on this machine, 2026-09-15).
+    public static func antigravity(transaction: ConfigTransaction) -> AgentIntegrationProfile {
+        let hooks = home().appendingPathComponent(".gemini/config/hooks.json")
+        return AgentIntegrationProfile(
+            agentID: "antigravity",
+            displayName: "Antigravity",
+            detection: .init(
+                agentID: "antigravity",
+                displayName: "Antigravity",
+                executableNames: ["agy"],
+                extraSearchPaths: [home().appendingPathComponent(".local/bin")],
+                configFiles: [hooks]
+            ),
+            configurator: AntigravityConfigurator(transaction: transaction),
+            capabilities: [.detect, .configure, .uninstall, .liveEvents, .testEvent]
+        )
+    }
+
     public static func all(transaction: ConfigTransaction) -> [AgentIntegrationProfile] {
         [
             claudeCode(transaction: transaction),
             grok(transaction: transaction),
             codex(transaction: transaction),
             pi(transaction: transaction),
+            antigravity(transaction: transaction),
         ]
     }
 
