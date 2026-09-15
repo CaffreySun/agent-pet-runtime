@@ -74,11 +74,11 @@ swift run AgentPet --unconfigure claude-code   # 精确移除它写过的东西
 
 **不需要重启。** Claude Code 在**每次派发 hook 时**重新读取 `~/.claude/settings.json`，所以会话运行中途加的 hook 下一个事件就生效，正在跑长任务的会话不会被打断。（实测方式：给一个已经跑了好几个小时的会话新增 `SubagentStart`/`SubagentStop`，然后看它们触发。）
 
-目前 **Claude Code 和 Grok 可配置**。Pi 可用单个 TypeScript 文件接入但还没做；Codex 的稳定 hooks 需要你先在 Codex 里手工信任一次。这两个只做检测，UI 显示**不可配置**并各自说明原因，而不是半吊子支持。
+目前 **Claude Code、Grok 和 Pi 可配置**。Codex 的稳定 hooks 需要你先在 Codex 里手工信任一次，所以它只做检测，UI 显示**不可配置**并说明原因，而不是半吊子支持。
 
 ### 配置到底做了什么
 
-配置做什么因 agent 而异，除此之外一概不碰：Claude Code 是往 `~/.claude/settings.json` 加 hook 行；Grok 是写运行时自己的 `~/.grok/hooks/agentpet.json`（移除时整个删掉），并在 `~/.grok/config.toml` 末尾追加一个开关 `[compat.claude] hooks = false`——否则 Grok 的 Claude 兼容扫描会把 Claude 的 hook 再放一遍：
+配置做什么因 agent 而异，除此之外一概不碰：Claude Code 是往 `~/.claude/settings.json` 加 hook 行；Grok 是写运行时自己的 `~/.grok/hooks/agentpet.json`（移除时整个删掉），并在 `~/.grok/config.toml` 末尾追加一个开关 `[compat.claude] hooks = false`——否则 Grok 的 Claude 兼容扫描会把 Claude 的 hook 再放一遍；Pi 是写运行时自己的一个 TypeScript 扩展 `~/.pi/agent/extensions/agentpet.ts`（同样删除即卸载）：
 
 - **先备份。** 动笔之前先把原文件复制到运行时备份目录。
 - **原子写入。** 写临时文件再 rename，读者要么看到旧文件要么看到新文件，不会看到写了一半的。

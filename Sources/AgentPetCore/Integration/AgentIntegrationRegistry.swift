@@ -14,11 +14,10 @@ public struct AgentIntegrationProfile: Sendable {
     public let capabilities: Set<IntegrationCapability>
     /// Why there is no configurator, in the words that fit this agent.
     ///
-    /// Kept current as the agents' own surfaces move: the 2026-09-15 audit
-    /// (docs/ARCHITECTURE.md §6.7b) found Grok and Pi wireable and Codex
-    /// gated only by its one-time trust step, so the notes say what is
-    /// actually missing now rather than what once was. Shown on the card and
-    /// by `--configure`.
+    /// Kept current as the agents' own surfaces move: updated 2026-09-15 when
+    /// Grok and Pi were wired (docs/ARCHITECTURE.md §6.7b), leaving Codex the
+    /// one agent whose note still has to explain itself. Shown on the card
+    /// and by `--configure`.
     public let configurationNote: String?
 
     public init(
@@ -119,9 +118,10 @@ public enum AgentIntegrationRegistry {
         )
     }
 
-    /// Pi is extended by a single TypeScript file in
-    /// `~/.pi/agent/extensions/`, so wiring would be a file drop rather than
-    /// a package install. Not built yet; see docs/ARCHITECTURE.md §6.7b.
+    /// Pi is extended by one TypeScript file in `~/.pi/agent/extensions/`;
+    /// the configurator writes exactly that file (node built-ins only, no
+    /// package install, no settings edit) and deletes it on removal; see
+    /// docs/ARCHITECTURE.md §6.7b.
     public static func pi(transaction: ConfigTransaction) -> AgentIntegrationProfile {
         AgentIntegrationProfile(
             agentID: "pi",
@@ -132,10 +132,8 @@ public enum AgentIntegrationRegistry {
                 executableNames: ["pi"],
                 configFiles: [home().appendingPathComponent(".pi/agent/settings.json")]
             ),
-            configurator: nil,
-            capabilities: [.detect],
-            configurationNote: "Pi is extended by one TypeScript file in ~/.pi/agent/extensions, "
-                + "so wiring is a file drop rather than a package install. Detected, not configured yet."
+            configurator: PiConfigurator(transaction: transaction),
+            capabilities: [.detect, .configure, .uninstall, .liveEvents, .testEvent]
         )
     }
 

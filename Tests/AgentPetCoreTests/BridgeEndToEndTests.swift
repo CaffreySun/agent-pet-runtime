@@ -454,6 +454,39 @@ struct BridgeEndToEndTests {
         #expect(!reduced.contains("\"total_cost_usd\""))
     }
 
+    @Test("a Pi context reading lands through the real shim")
+    func piContextUpdate() async throws {
+        let box = EnvelopeBox()
+        let (server, socket) = try makeServer(box)
+        defer { server.stop() }
+
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        // What the installed extension sends at each settle.
+        let payload = """
+        {"session_id":"pi-session","tokens":88244,"window":1048576,
+         "used_percentage":8.4,"model":"claude-opus-5"}
+        """
+        let status = try runShim(
+            socket: socket, agent: "pi", event: "context_update",
+            payload: payload, spool: spool
+        )
+        #expect(status == 0)
+
+        #expect(await waitForEnvelopes(box, count: 1))
+        let envelope = try #require(box.envelopes.first)
+        #expect(envelope.agentID == "pi")
+
+        let events = EventNormalizer(profiles: AgentProfiles.all).normalize(envelope)
+        let event = try #require(events.first)
+        #expect(event.kind == .contextUpdate)
+        #expect(event.context?.usedPercent == 8.4)
+        #expect(event.context?.modelName == "claude-opus-5")
+        #expect(event.sessionID == "pi-session")
+    }
+
     @Test("the Grok status line feeds the pet and prints nothing")
     func grokStatusLineMode() async throws {
         let box = EnvelopeBox()
