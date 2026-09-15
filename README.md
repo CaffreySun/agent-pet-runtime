@@ -81,10 +81,10 @@ Sessions running long jobs are not interrupted. (Verified by adding
 `SubagentStart`/`SubagentStop` to a session that had been running for hours and
 watching them fire.)
 
-Only Claude Code is configurable today. Grok's hooks live in TOML and Codex's
-`notify` is an argv array, so neither is something the JSON transaction can edit
-safely; Pi is extended by installing a package rather than by editing a config
-file. All three are detected and reported as *not configurable*, each with its
+Only Claude Code is configurable today. Grok and Pi are wireable but not built
+(Grok's hooks are JSON files; Pi is extended by a single TypeScript file), and
+Codex's stable hooks must be trusted by hand in Codex itself before they can
+run. All three are detected and reported as *not configurable*, each with its
 own reason, rather than half-supported.
 
 ### What configuring does

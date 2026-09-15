@@ -764,6 +764,21 @@ statusLine.command = "<shim>" --agent claude-code --statusline --original <base6
 
 三者共同的**不做**：不读 transcript、不读 rollout 文件、不猜窗口大小——这正是 Claude Code 的 `used_percentage` 值得专门包一层的原因（网关模型窗口只有它知道）。
 
+事件面（hooks）的可得性已补测，见 §6.7b（2026-09-15）。
+
+### 6.7b 其他 agent 的事件接口（2026-09-15 调研，扩展 §6.7）
+
+§6.7 量的是**面板数据**（model/context/cost/limits）的可得性；这一节补**事件面**（会话、回合、工具、等待、失败）。证据来自本机二进制、随发行版分发的官方文档与线上官方文档；未运行任何被测 agent 的会话，行为验证留到接线时（先测清单在节尾）。四家的共同点：**没有一家需要读 transcript/rollout**，"不读内容文件"的契约一条都不用破。
+
+- **Grok Build 1.0.24：可完整接线（事件 + 状态行）。** hooks 的官方载体是 **JSON**：`~/.grok/hooks/*.json`（全局、永远信任、无需项目信任），`config.toml` 内联 `[[hooks.<Event>]]` 只是替代写法（`~/.grok/docs/user-guide/10-hooks.md`）。§6.7 表里"TOML 挡住 Grok"只对**状态行**成立。15 个事件，比 Claude 多 `StopCancelled`（中断）、`PostToolUseFailure`、`PermissionDenied`；`Stop.lastAssistantMessage` 就是面板要的正文（文档原话：hooks 不必解析 transcript）；会话结束时额外一次 `Stop`（`reason != "end_turn"`）必须过滤。信封是 **camelCase**（`sessionId` / `toolName` / `notificationType` / `backgroundTasks`）——`AgentProfiles.swift` 里沿用 Claude 字段名的 grok profile 在 wire 上是读不出东西的。
+  **先测**：`26-config-reference.md` 的 `compat.claude.hooks` / `compat.codex.hooks` / `compat.cursor.hooks` 默认 `yes`——Grok 会扫描 `~/.claude/settings.json`（我们已装 14 条）与 `~/.codex/hooks.json`（Otty 已装 4 条）并以其 camelCase 信封重放，事件会被贴上别的 agent 的标签。2026-09-15 本机查无痕迹（hook 成功不写日志），未定案。修法两条并用：shim 按信封键（camelCase `hookEventName`）辨识真实运行时；显式装 `hooks/agentpet.json`，并在同一 TOML 事务里关掉对应 compat 开关防双发。
+- **Pi 0.85.1：可完整接线，改动最小。** 单个 `.ts` 放 `~/.pi/agent/extensions/` 即自动发现、可 `/reload`（pi 包内 `docs/extensions.md`）；只用 node 内建模块，**不需要 npm 包**——registry 旧注"装包是重操作"不成立。事件全覆盖，`ctx.getContextUsage()`（`extensions.md:1066`）给上下文，`ctx.model` 给模型。注意 `agent_settled` 才是"真正停下"（`agent_end` 之后还可能自动重试/压缩/续跑），把完成映射到 `agent_end` 会在这些窗口误报。本机先例：Otty 的 `~/.pi/agent/extensions/otty-integration.ts`（detached spawn、session id 取会话文件 basename，可照抄）。
+- **Codex 0.153.4：事件面已补全，两道坎。** `codex features list` 里 `hooks` 已是 `stable`；官方 hooks 在 `~/.codex/hooks.json`（JSON、Claude 同形 schema 与 payload；事件含 `PermissionRequest` / `Interrupt` / `Subagent*` / `Pre/PostCompact`）。坎一：非托管 hooks 必须在 TUI `/hooks` **人工 review + trust**，按 hook 内容 hash 记录、改动即失效重审，没有程序化信任（openai/codex#21615 仍开放）——"写完了配置"不等于"在跑"；`allow_managed_hooks_only` 之类的企业策略可直接封掉用户钩子。坎二：仍无自定义状态行，§6.7 表里 Codex 那行（面板数据不可得）**继续成立**。另：`~/.codex/hooks.json` 本机已被 Otty 占用（`_otty` 标记），写入必须合并、不碰别人的条目。
+- **Antigravity（2.0 + CLI，2026-05-19 I/O 起）：官方接口存在，但只到"部分"。** 官方 hooks（antigravity.google/docs/hooks）：`hooks.json`，全局 `~/.gemini/config/hooks.json`、工作区 `.agents/`；格式是命名映射（`{"<名>": {"PreToolUse": [...], …}}`），我们只占一个 key，合并与卸载语义最干净；只有 5 个事件：`PreToolUse` / `PostToolUse` / `PreInvocation` / `PostInvocation` / `Stop`。信封带 `conversationId`（=会话 id）、`workspacePaths`、`modelName`；`Stop` 带 `terminationReason`（`model_stop` / `max_steps_exceeded` / `error`，能分完成与失败）和 `fullyIdle`（后台未完，对应 Claude 的 background_tasks 抑制）。**没有 SessionStart/SessionEnd，没有等待输入事件**——宠物画不出"需要你"，这是与 Claude 最主要的差距。官方状态行（/docs/cli/statusline）：`~/.gemini/antigravity-cli/settings.json` 的 `statusLine`（`type = "command"`），payload 含 `session_id`、`model.display_name`、`context_window.used_percentage`——与 Claude 的状态行契约同形，shim 第三度复用。接口还年轻：2026-08 仍在改 hook 排序、同步 hooks、参数改写、compaction 钩子；全局路径近期从 `~/.gemini/antigravity-cli/hooks.json` 修到 `~/.gemini/config/hooks.json`（以装好的版本实测为准）。IDE 2.0 是否读同一 `hooks.json`：文档是产品级、changelog 有 IDE 生命周期 hook 条目，中高置信、待实测。已死的路：VS Code 扩展兼容在 2.0 被移除；语言服务器 `exa.language_server_pb` gRPC（需 CSRF token，本机旧日志可见该服务）是逆向面，**不做**。本机未装 CLI（`agy`，`~/.local/bin/agy`）。
+- §6.7 的旧注里唯一还站得住的：**Codex 的面板数据不可得**。"Grok 是 TOML 所以不能动""Codex 只有 notify""Pi 要装包"三条都已被上面的证据取代。
+
+**接线时的先测清单（行为验证，全部留到实现时）**：Grok compat 是否在实际会话里重放我们的钩子（开 pet 跑一次 grok，看 Activity 是否出现贴错标签的会话）；Codex `Stop` 是否带最后一条助手消息（官方字段表未列，旧版 notify 有 `last-assistant-message`）；Pi 内置权限提示是否走 `ui_prompt_start`；Antigravity 的 IDE 2.0 是否读同一 `hooks.json`、状态行 payload 是否含 cost（2026-08-26 changelog 提到 cost metrics，文档示例未见）。
+
 ### 6.8 管理器的预览：一行一张静止图，详情页才留图集（2026-09-14 修正）
 
 Pets 页原本为**每个已装 pet** 保有一份解码后的 `SpriteFrames`（1536×1872 的图集 = 11 MB 像素，而 `makeCGImage` 还会让 CGImage 自己再持有一份拷贝，实测 12.3–14.3 MB/pet），理由是"列表重绘时现解码会卡"。代价是管理器内存随用户装了多只宠物线性增长：8 只 ≈ 100 MB，50 只 ≈ 600 MB。

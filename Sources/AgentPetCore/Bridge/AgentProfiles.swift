@@ -182,9 +182,12 @@ public enum AgentProfiles {
         ]
     )
 
-    /// Grok documents its hook schema as matching Claude Code's, and its
-    /// config uses the same `PreToolUse`-style event tables, so the mapping is
-    /// shared. Kept as its own profile because the two will drift.
+    /// Grok's hook schema and event names match Claude Code's, so the rules
+    /// are shared today — but Grok's payload envelope is camelCase
+    /// (`sessionId`, `toolName`, `notificationType`) where Claude's is
+    /// snake_case, so these rules cannot actually read a Grok payload. Fix
+    /// the field names when wiring (docs/ARCHITECTURE.md §6.7b). Kept as its
+    /// own profile because the two will drift.
     public static let grok = AgentProfile(
         agentID: "grok",
         displayName: "Grok",
