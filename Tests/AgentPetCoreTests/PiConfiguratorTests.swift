@@ -55,6 +55,17 @@ struct PiConfigurationTests {
         }
     }
 
+    @Test("the extension hands the payload over in the environment, not on a pipe")
+    func payloadGoesThroughTheEnvironment() throws {
+        // Ported from PR #1's finding: a write to a pipe from inside the
+        // agent's runtime queues on the agent's event loop, and the shim's
+        // stdin wait expires before it lands — the event then arrives with no
+        // session at all.
+        let template = PiConfigurator.template(shimPath: piShim)
+        #expect(template.contains("AGENTPET_PAYLOAD_BASE64"))
+        #expect(!template.contains("proc.stdin"), "the payload must not depend on a pipe write")
+    }
+
     @Test("configuring writes one marked file and nothing else")
     func installs() throws {
         let sandbox = try PiSandbox()

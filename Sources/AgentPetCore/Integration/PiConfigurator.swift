@@ -69,15 +69,23 @@ public struct PiConfigurator: AgentConfigurator {
       return `pid-${process.pid}`;
     }
 
+    // The payload goes through the environment, not stdin. This code runs
+    // inside the agent's own runtime, where a write to a pipe is queued on an
+    // event loop the agent may be holding: measured on the sibling extension
+    // (Oh My Pi, PR #1), a 30 ms busy stretch between spawning the shim and
+    // writing to it is enough for the shim's stdin deadline to expire, and the
+    // event then arrives with no session at all. The environment is handed to
+    // the child by the kernel at spawn time, so there is nothing to be late for.
     function report(event, payload) {
       try {
+        const env = { ...process.env };
+        env.AGENTPET_PAYLOAD_BASE64 = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
         const proc = spawn(SHIM, ["--agent", "pi", "--event", event], {
-          stdio: ["pipe", "ignore", "ignore"],
+          stdio: ["ignore", "ignore", "ignore"],
           detached: true,
+          env,
         });
         proc.on("error", () => {});
-        proc.stdin.on("error", () => {});
-        proc.stdin.end(JSON.stringify(payload));
         proc.unref();
       } catch {}
     }
