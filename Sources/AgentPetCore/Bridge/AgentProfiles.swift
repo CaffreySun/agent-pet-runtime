@@ -317,20 +317,95 @@ public enum AgentProfiles {
         fallbackSessionID: "grok-default"
     )
 
-    /// Codex's `notify` hook passes a fixed argv rather than a JSON payload, so
-    /// sessions cannot be distinguished and confidence is limited to what the
-    /// process boundary proves.
+    /// Codex reports through its own hooks — stable since 0.124 and shipped
+    /// in the installed 0.153.4, where `codex features list` shows `hooks`
+    /// stable. The config is `~/.codex/hooks.json` (JSON, Claude-shaped) and
+    /// the payload is Claude-shaped too: the binary's wire structs carry
+    /// `session_id`, `hook_event_name`, `model`, `permission_mode`, and the
+    /// `tool_*` fields (verified 2026-09-15). Two differences from Claude
+    /// Code: an interrupted turn reports `Interrupt` instead of `Stop`, and
+    /// there is no `Notification`, `TaskCompleted`, or `StopFailure`.
+    ///
+    /// Codex skips untrusted hooks silently until the user reviews them in
+    /// its `/hooks` panel. That gate is the user's, not ours; when events do
+    /// arrive they are hook-grade.
     public static let codex = AgentProfile(
         agentID: "codex",
         displayName: "Codex",
         rules: [
-            NormalizationRule(matches: ["turn-ended", "notify"], kind: .completed),
-            NormalizationRule(matches: ["session-start"], kind: .sessionStarted),
-            NormalizationRule(matches: ["working", "turn-started"], kind: .working),
-            NormalizationRule(matches: ["session-end"], kind: .sessionClosed),
+            // --- Blocked on the user. ---
+
+            NormalizationRule(
+                matches: ["PermissionRequest"],
+                kind: .waitingApproval,
+                summaryField: "tool_name",
+                toolNameField: "tool_name",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+
+            // --- Working. ---
+
+            NormalizationRule(
+                matches: ["UserPromptSubmit"],
+                kind: .working,
+                summaryField: "prompt",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+            NormalizationRule(
+                matches: ["PreToolUse", "PostToolUse"],
+                kind: .working,
+                summaryField: "tool_name",
+                toolNameField: "tool_name",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+            NormalizationRule(
+                matches: ["SubagentStart", "SubagentStop", "PreCompact", "PostCompact"],
+                kind: .working,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+
+            // --- Finished. ---
+
+            // `last_assistant_message` is what Claude Code carries; Codex
+            // does not promise it, so the preview appears only when the
+            // field is there.
+            NormalizationRule(
+                matches: ["Stop"],
+                kind: .completed,
+                detailField: "last_assistant_message",
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+            // An interrupt is a finished turn too — the user stopped it, and
+            // a session left "working" for the five-minute stale timeout
+            // reads as asleep.
+            NormalizationRule(
+                matches: ["Interrupt"],
+                kind: .completed,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+
+            // --- Lifecycle. ---
+
+            NormalizationRule(
+                matches: ["SessionStart"],
+                kind: .sessionStarted,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
+            NormalizationRule(
+                matches: ["SessionEnd"],
+                kind: .sessionClosed,
+                sessionIDField: "session_id",
+                workingDirectoryField: "cwd"
+            ),
         ],
-        fallbackSessionID: "codex-default",
-        confidence: .medium
+        fallbackSessionID: "codex-default"
     )
 
     /// Pi reports through the runtime's own extension

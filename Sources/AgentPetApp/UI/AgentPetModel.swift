@@ -332,9 +332,15 @@ final class AgentPetModel: ObservableObject {
                 shimPath: shimPath,
                 transaction: transaction
             )
-            statusMessage = outcome.didChange
+            var message = outcome.didChange
                 ? "Wrote hooks to \(outcome.changedFiles.joined(separator: ", "))"
                 : "Already configured — nothing to change."
+            // Codex's file alone is not enough: its hooks stay skipped until
+            // the user trusts them in Codex itself.
+            if let hint = status.profile.postConfigureHint {
+                message += " " + hint
+            }
+            statusMessage = message
             refreshAgents()
         }
     }

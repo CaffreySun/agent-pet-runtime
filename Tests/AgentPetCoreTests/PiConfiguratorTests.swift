@@ -42,6 +42,19 @@ private let piNow = Date(timeIntervalSince1970: 1_700_000_000)
 @Suite("Pi configuration")
 struct PiConfigurationTests {
 
+    @Test("every event the extension sends is one the normalizer knows about")
+    func emittedEventsAreKnown() throws {
+        let rules = try #require(AgentProfiles.profile(for: "pi"))
+        let known = Set(rules.rules.flatMap(\.matches))
+        let emitted = [
+            "session_start", "agent_start", "tool_execution_start",
+            "ui_prompt_start", "agent_settled", "session_shutdown", "context_update",
+        ]
+        for event in emitted {
+            #expect(known.contains(event), "\(event) is sent but unknown to the normalizer")
+        }
+    }
+
     @Test("configuring writes one marked file and nothing else")
     func installs() throws {
         let sandbox = try PiSandbox()

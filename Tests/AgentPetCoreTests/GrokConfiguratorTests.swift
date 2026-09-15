@@ -49,6 +49,15 @@ private let grokNow = Date(timeIntervalSince1970: 1_700_000_000)
 @Suite("Grok configuration")
 struct GrokConfigurationTests {
 
+    @Test("every installed event is one the normalizer knows about")
+    func installedEventsAreKnown() throws {
+        let rules = try #require(AgentProfiles.profile(for: "grok"))
+        let known = Set(rules.rules.flatMap(\.matches))
+        for event in GrokConfigurator.events {
+            #expect(known.contains(event), "\(event) is installed but unknown to the normalizer")
+        }
+    }
+
     @Test("configuring writes the hooks file and the compat switch")
     func installs() throws {
         let sandbox = try GrokSandbox(configExisting: "model = \"grok-4.6\"\n")

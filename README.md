@@ -81,10 +81,10 @@ Sessions running long jobs are not interrupted. (Verified by adding
 `SubagentStart`/`SubagentStop` to a session that had been running for hours and
 watching them fire.)
 
-Claude Code, Grok, and Pi are configurable today. Codex's stable hooks must be
-trusted by hand in Codex itself before they can run, so it is detected and
-reported as *not configurable*, with its own reason, rather than
-half-supported.
+All four agents are configurable today. Codex's hooks carry one extra step:
+Codex skips a hook until you review and trust it in Codex's own `/hooks`
+panel, and the runtime says so — and nothing else about the pet — the moment
+it configures them.
 
 ### What configuring does
 
@@ -94,7 +94,10 @@ Code gets hook lines in `~/.claude/settings.json`. Grok gets
 plus one appended switch, `[compat.claude] hooks = false` in
 `~/.grok/config.toml`, which stops Grok's Claude-compatibility scan from
 firing the Claude hooks a second time. Pi gets one TypeScript extension of the
-runtime's own, `~/.pi/agent/extensions/agentpet.ts`, also deleted on removal:
+runtime's own, `~/.pi/agent/extensions/agentpet.ts`, also deleted on removal.
+Codex gets hook lines in `~/.codex/hooks.json`, merged around whatever is
+already there — other tools' hooks are left alone, and so are they on
+removal:
 
 - **Backed up first.** The previous file is copied to the runtime's backup
   directory before anything is written.
@@ -358,7 +361,7 @@ corrected specification.
 | Session panel: one row per session, configurable items | done |
 | Context usage from the status line | done — opt-in: wraps Claude Code's, adds a hidden row for Grok |
 | Survives restarts and upgrades mid-turn | done — undelivered events are replayed at the next launch |
-| Codex configuration | not built — its hooks need a one-time trust inside Codex itself |
+| Codex configuration | done — one manual trust step inside Codex, prompted for after configuring |
 | Window focusing | opens the project folder; hooks carry no terminal identity |
 
 ---
