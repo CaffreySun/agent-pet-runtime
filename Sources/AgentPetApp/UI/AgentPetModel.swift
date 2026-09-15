@@ -283,6 +283,46 @@ final class AgentPetModel: ObservableObject {
         }
     }
 
+    // MARK: - Grok context usage (its own status-line tap)
+
+    /// Grok reports the same numbers to its status line, so it gets the same
+    /// switch — a separate record and toggle, because the two are installed
+    /// and removed independently.
+    func grokStatusLine() -> GrokStatusLine {
+        GrokStatusLine(
+            configURL: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".grok/config.toml"),
+            store: IntegrationStore(directory: root.appendingPathComponent("integrations")),
+            transaction: transaction
+        )
+    }
+
+    @Published private(set) var grokContextTap: GrokStatusLine.State = .notInstalled
+
+    func refreshGrokContextTap() {
+        grokContextTap = grokStatusLine().state()
+    }
+
+    func enableGrokContextTap() {
+        run("Grok context usage is on") {
+            let outcome = try grokStatusLine().configure(shimPath: shimPath)
+            statusMessage = outcome.didChange
+                ? "Grok's status line now feeds the runtime. It prints nothing."
+                : "Already installed — nothing to change."
+            refreshGrokContextTap()
+        }
+    }
+
+    func disableGrokContextTap() {
+        run("Grok context usage is off") {
+            let outcome = try grokStatusLine().uninstall()
+            statusMessage = outcome.didChange
+                ? "Grok's status line is back to disabled."
+                : "Nothing to remove."
+            refreshGrokContextTap()
+        }
+    }
+
     // MARK: - Agent actions
 
     func configureAgent(_ status: AgentStatus) {

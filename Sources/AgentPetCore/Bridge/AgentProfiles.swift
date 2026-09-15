@@ -301,6 +301,18 @@ public enum AgentProfiles {
                 sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
             ),
+
+            // --- Description, not state. ---
+
+            // Arrives only when the status-line tap is installed: Grok runs
+            // the command with its own JSON, the shim reduces it to the same
+            // handful of fields it keeps for Claude, and the session id is
+            // the one the hooks use.
+            NormalizationRule(
+                matches: ["Statusline"],
+                kind: .contextUpdate,
+                sessionIDField: "session_id"
+            ),
         ],
         fallbackSessionID: "grok-default"
     )

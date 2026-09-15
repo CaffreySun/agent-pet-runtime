@@ -351,12 +351,13 @@ struct BridgeEndToEndTests {
         socket: URL,
         original: String?,
         stdin: String,
-        spool: URL
+        spool: URL,
+        agent: String = "claude-code"
     ) throws -> (status: Int32, stdout: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ShimBinary.path!)
         let encoded = Data((original ?? "").utf8).base64EncodedString()
-        process.arguments = ["--agent", "claude-code", "--statusline", "--original", encoded]
+        process.arguments = ["--agent", agent, "--statusline", "--original", encoded]
 
         var environment = ProcessInfo.processInfo.environment
         environment["AGENTPET_SOCKET"] = socket.path
@@ -451,6 +452,60 @@ struct BridgeEndToEndTests {
         #expect(event.context?.sevenDayPercent == 12)
         // The raw key it came from must not survive; the reduced one must.
         #expect(!reduced.contains("\"total_cost_usd\""))
+    }
+
+    @Test("the Grok status line feeds the pet and prints nothing")
+    func grokStatusLineMode() async throws {
+        let box = EnvelopeBox()
+        let (server, socket) = try makeServer(box)
+        defer { server.stop() }
+
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        // Grok's status-line payload: the same convention as Claude's, with
+        // Grok's own values (captured shape, 2026-09-15).
+        let payload = """
+        {
+          "cwd": "/home/dev/project",
+          "session_id": "8f2a4c1e-0000-4000-8000-000000000000",
+          "conversation_id": "8f2a4c1e-0000-4000-8000-000000000000",
+          "model": { "id": "grok-4.6", "display_name": "Grok 4.6" },
+          "workspace": { "current_dir": "/home/dev/project",
+                         "project_dir": "/home/dev/project" },
+          "version": "1.0.24",
+          "context_window": {
+            "total_input_tokens": 88244,
+            "total_output_tokens": 61074,
+            "context_window_size": 1048576,
+            "used_percentage": 14.24,
+            "remaining_percentage": 85.76
+          },
+          "trigger": "state"
+        }
+        """
+        let result = try runStatusLineShim(
+            socket: socket, original: nil, stdin: payload, spool: spool, agent: "grok"
+        )
+
+        #expect(result.status == 0)
+        #expect(result.stdout.isEmpty,
+                "the row must stay absent — nothing in the user's terminal")
+
+        #expect(await waitForEnvelopes(box, count: 1))
+        let envelope = try #require(box.envelopes.first)
+        #expect(envelope.agentID == "grok")
+        #expect(envelope.eventName == "Statusline")
+        let reduced = try #require(envelope.payloadUTF8)
+        #expect(reduced.contains("14.24"))
+        #expect(reduced.contains("Grok 4.6"))
+        #expect(!reduced.contains("transcript"))
+
+        let events = EventNormalizer(profiles: AgentProfiles.all).normalize(envelope)
+        #expect(events.first?.kind == .contextUpdate)
+        #expect(events.first?.context?.usedPercent == 14.24)
+        #expect(events.first?.context?.modelName == "Grok 4.6")
     }
 
     @Test("the wrapped status line still runs when the runtime is not")

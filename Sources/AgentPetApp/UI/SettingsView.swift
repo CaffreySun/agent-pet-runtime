@@ -145,8 +145,27 @@ struct SettingsView: View {
                     Button("Re-enable Context Usage…") { model.enableContextTap() }
                 }
             }
+
+            HStack {
+                Text(grokContextTapSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                switch model.grokContextTap {
+                case .notInstalled:
+                    Button("Enable Grok Context…") { model.enableGrokContextTap() }
+                case .installed:
+                    Button("Stop Feeding Grok Context") { model.disableGrokContextTap() }
+                case .drifted:
+                    Button("Re-enable Grok Context…") { model.enableGrokContextTap() }
+                }
+            }
         }
-        .onAppear { model.refreshContextTap() }
+        .onAppear {
+            model.refreshContextTap()
+            model.refreshGrokContextTap()
+        }
     }
 
     private var contextTapSummary: String {
@@ -164,6 +183,22 @@ struct SettingsView: View {
         case .drifted:
             return "The status line in ~/.claude/settings.json is no longer the one the runtime "
                 + "installed — something else changed it. Re-enabling wraps whatever is there now."
+        }
+    }
+
+    private var grokContextTapSummary: String {
+        switch model.grokContextTap {
+        case .notInstalled:
+            return "Grok reports model, context, and cost only to its status line. "
+                + "Enabling adds one section to ~/.grok/config.toml that feeds the runtime "
+                + "and prints nothing — nothing appears in your terminal."
+        case .installed:
+            return "Reading model, context, and cost from Grok’s status line. "
+                + "The row itself stays hidden."
+        case .drifted:
+            return "The [ui.status_line] section in ~/.grok/config.toml is no longer the one "
+                + "the runtime installed — something else changed it. Re-enabling installs "
+                + "the runtime’s block again."
         }
     }
 

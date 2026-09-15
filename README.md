@@ -224,6 +224,12 @@ about 2 ms per render, and it never reads a transcript. If the app is ever
 deleted while the tap is on, the wrapper notices the shim is gone and hands the
 status line back to your own command.
 
+Grok reports the same numbers to its status line, so it gets its own switch in
+Settings: one `[ui.status_line]` section added to `~/.grok/config.toml` whose
+command feeds the runtime and prints nothing — the row stays hidden, so nothing
+about your terminal changes. It is a separate toggle, off until you turn it on,
+and removing it takes the section back out byte for byte.
+
 ---
 
 ## Where pets come from
@@ -346,12 +352,12 @@ corrected specification.
 | Tuck the pet away and wake it again | done — the menu bar item, remembered across launches |
 | Event bridge, verified against the real binary | done |
 | Pet Manager: list Codex's pets, preview, pick one | done — read-only; pets are installed with Codex's own tooling |
-| Agent Integrations: detect, configure, remove | Claude Code only |
+| Agent Integrations: detect, configure, remove | Claude Code and Grok |
 | Activity Center, Settings, diagnostics export | done |
 | Session panel: one row per session, configurable items | done |
-| Context usage from Claude Code's status line | done — opt-in, wraps your existing status line |
+| Context usage from the status line | done — opt-in: wraps Claude Code's, adds a hidden row for Grok |
 | Survives restarts and upgrades mid-turn | done — undelivered events are replayed at the next launch |
-| Grok / Codex / Pi configuration | not built — each needs its own configurator (TOML, argv array, extension package) |
+| Codex / Pi configuration | not built — Codex's hooks need a one-time trust inside Codex; Pi needs its extension file |
 | Window focusing | opens the project folder; hooks carry no terminal identity |
 
 ---
