@@ -392,8 +392,8 @@ struct AgentIntegrationRegistryTests {
         where profile.configurator == nil {
             let note = profile.configurationNote ?? ""
             #expect(!note.isEmpty, "\(profile.agentID) is not configurable and says nothing about it")
-            // Grok, Codex and Pi are unconfigurable for three different
-            // reasons; one recycled sentence was wrong for two of them.
+            // Codex and Pi are unconfigurable for their own reasons; one
+            // recycled sentence was wrong for both of them.
             #expect(seen.insert(note).inserted, "\(profile.agentID) reuses another agent's note")
         }
     }

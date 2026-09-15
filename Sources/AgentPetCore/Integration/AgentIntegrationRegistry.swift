@@ -76,10 +76,11 @@ public enum AgentIntegrationRegistry {
         )
     }
 
-    /// Grok's hooks are JSON files under `~/.grok/hooks/` (its config.toml
-    /// can carry `[[hooks.<Event>]]` as an alternative), and its hook payload
-    /// is camelCase where Claude's is snake_case. Wiring is possible but not
-    /// built; see docs/ARCHITECTURE.md §6.7b.
+    /// Grok's hooks live in `~/.grok/hooks/` as JSON (its config.toml can
+    /// carry `[[hooks.<Event>]]` as an alternative). The configurator writes
+    /// one dedicated file there and flips Grok's Claude-compat scan off in
+    /// `config.toml`, so Grok is the only source of its own events; see
+    /// docs/ARCHITECTURE.md §6.7b.
     public static func grok(transaction: ConfigTransaction) -> AgentIntegrationProfile {
         let config = home().appendingPathComponent(".grok/config.toml")
         return AgentIntegrationProfile(
@@ -91,13 +92,8 @@ public enum AgentIntegrationRegistry {
                 executableNames: ["grok"],
                 configFiles: [config]
             ),
-            // Grok's hooks live in TOML, which the JSON transaction cannot
-            // edit safely. Reported as detected but not configurable rather
-            // than half-supported.
-            configurator: nil,
-            capabilities: [.detect],
-            configurationNote: "Grok's hooks are JSON files in ~/.grok/hooks, so wiring is "
-                + "possible; only its status line needs a TOML edit. Detected, not configured yet."
+            configurator: GrokConfigurator(transaction: transaction),
+            capabilities: [.detect, .configure, .uninstall, .liveEvents, .testEvent]
         )
     }
 

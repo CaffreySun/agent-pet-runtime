@@ -201,6 +201,108 @@ public struct ConfigTransaction: Sendable {
         )
     }
 
+    // MARK: - Editing text files
+
+    /// Applies `transform` to a file that is not JSON — Grok's `config.toml` —
+    /// with the same discipline the JSON path uses: snapshot, re-check the
+    /// fingerprint, back up, write atomically, verify, and restore on failure.
+    ///
+    /// There is no TOML parser here on purpose. The caller edits lines and
+    /// `verify` gets the last word on whether the result is acceptable;
+    /// anything it rejects is rolled back byte for byte, so a file this app
+    /// cannot fully parse is still never left damaged.
+    @discardableResult
+    public func performText(
+        on url: URL,
+        retries: Int = 2,
+        transform: (inout String) throws -> Void,
+        verify: (String) -> Bool
+    ) throws -> TransactionOutcome {
+        var lastError: Error = ConfigTransactionError.gaveUpAfterRetries(attempts: 0)
+
+        for attempt in 1...(retries + 1) {
+            do {
+                return try attemptTextOnce(
+                    url: url, attempt: attempt, transform: transform, verify: verify
+                )
+            } catch let error as ConfigTransactionError {
+                // Only a concurrent edit is worth retrying: the fix is to
+                // start over from what is now on disk.
+                guard case .concurrentModification = error else { throw error }
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    private func attemptTextOnce(
+        url: URL,
+        attempt: Int,
+        transform: (inout String) throws -> Void,
+        verify: (String) -> Bool
+    ) throws -> TransactionOutcome {
+
+        let original = try snapshot(url)
+        guard let originalText = String(data: original.contents, encoding: .utf8) else {
+            throw ConfigTransactionError.unreadable(path: url.path, detail: "not valid UTF-8")
+        }
+
+        var text = originalText
+        try transform(&text)
+
+        if text == originalText {
+            return TransactionOutcome(
+                snapshot: original, backupURL: nil, didChange: false, attempts: attempt
+            )
+        }
+
+        // The caller's own judgement of the result, before anything is written.
+        guard verify(text) else {
+            throw ConfigTransactionError.validationFailed(
+                path: url.path, detail: "the edit failed its own verification"
+            )
+        }
+
+        let newContents = Data(text.utf8)
+
+        // Re-read immediately before writing. The gap between the first read
+        // and here is where another process could have written.
+        let current = try snapshot(url)
+        guard current.fingerprint == original.fingerprint else {
+            throw ConfigTransactionError.concurrentModification(path: url.path)
+        }
+
+        let backup = try original.existed ? backUp(original) : nil
+
+        do {
+            try writeAtomically(newContents, to: url)
+        } catch {
+            throw ConfigTransactionError.writeFailed(path: url.path, detail: "\(error)")
+        }
+
+        do {
+            let onDisk = try Data(contentsOf: url)
+            guard onDisk == newContents else {
+                throw ConfigTransactionError.validationFailed(
+                    path: url.path, detail: "file on disk does not match what was written"
+                )
+            }
+        } catch {
+            // The file on disk is now unusable; put back exactly what was
+            // there, or remove it if there was nothing.
+            try? restore(original)
+            throw ConfigTransactionError.validationFailed(
+                path: url.path,
+                detail: "written content failed verification, previous state restored"
+            )
+        }
+
+        let written = try snapshot(url)
+        return TransactionOutcome(
+            snapshot: written, backupURL: backup, didChange: true, attempts: attempt
+        )
+    }
+
     // MARK: - Rollback
 
     /// Restores a file to a snapshot, byte for byte.
