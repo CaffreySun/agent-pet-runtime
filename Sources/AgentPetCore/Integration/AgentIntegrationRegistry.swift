@@ -14,10 +14,11 @@ public struct AgentIntegrationProfile: Sendable {
     public let capabilities: Set<IntegrationCapability>
     /// Why there is no configurator, in the words that fit this agent.
     ///
-    /// One shared sentence was a lie for two of the three: Grok's hooks are
-    /// TOML, which the JSON transaction really cannot edit, while Codex's
-    /// `notify` is an argv array and Pi is extended by installing a package —
-    /// neither is a *format* problem. Shown on the card and by `--configure`.
+    /// Kept current as the agents' own surfaces move: the 2026-09-15 audit
+    /// (docs/ARCHITECTURE.md §6.7b) found Grok and Pi wireable and Codex
+    /// gated only by its one-time trust step, so the notes say what is
+    /// actually missing now rather than what once was. Shown on the card and
+    /// by `--configure`.
     public let configurationNote: String?
 
     public init(
@@ -75,10 +76,10 @@ public enum AgentIntegrationRegistry {
         )
     }
 
-    /// Grok documents its hook schema as matching Claude Code's, and reads
-    /// `[[hooks.<Event>]]` from its own config. The events Grok fires are not
-    /// documented as exhaustively, so the same set is installed and unlisted
-    /// ones are simply ignored by the normalizer.
+    /// Grok's hooks are JSON files under `~/.grok/hooks/` (its config.toml
+    /// can carry `[[hooks.<Event>]]` as an alternative), and its hook payload
+    /// is camelCase where Claude's is snake_case. Wiring is possible but not
+    /// built; see docs/ARCHITECTURE.md §6.7b.
     public static func grok(transaction: ConfigTransaction) -> AgentIntegrationProfile {
         let config = home().appendingPathComponent(".grok/config.toml")
         return AgentIntegrationProfile(
@@ -95,13 +96,15 @@ public enum AgentIntegrationRegistry {
             // than half-supported.
             configurator: nil,
             capabilities: [.detect],
-            configurationNote: "Grok's hooks live in TOML, which the JSON transaction cannot "
-                + "edit safely. Detected, and left alone rather than half-supported."
+            configurationNote: "Grok's hooks are JSON files in ~/.grok/hooks, so wiring is "
+                + "possible; only its status line needs a TOML edit. Detected, not configured yet."
         )
     }
 
-    /// Codex has a `notify` setting but it is a single argv array, not a hook
-    /// table, so installing into it needs its own configurator.
+    /// Codex's hooks are stable and live in `~/.codex/hooks.json` as
+    /// Claude-shaped JSON, but every non-managed entry must be reviewed and
+    /// trusted by hand in its `/hooks` panel before it runs. Wiring is
+    /// possible; the trust handshake is why there is no configurator yet.
     public static func codex(transaction: ConfigTransaction) -> AgentIntegrationProfile {
         let config = home().appendingPathComponent(".codex/config.toml")
         return AgentIntegrationProfile(
@@ -115,14 +118,14 @@ public enum AgentIntegrationRegistry {
             ),
             configurator: nil,
             capabilities: [.detect],
-            configurationNote: "Codex's notify hook is a single argv array rather than a hook "
-                + "table, so installing into it needs a configurator of its own. "
-                + "Detected, not configurable yet."
+            configurationNote: "Codex's hooks are stable JSON, but every entry must be "
+                + "trusted by hand in Codex's /hooks panel before it runs. Detected, not configured yet."
         )
     }
 
-    /// Pi is extended by installing an npm/git package, which is a heavier
-    /// operation than editing a config file.
+    /// Pi is extended by a single TypeScript file in
+    /// `~/.pi/agent/extensions/`, so wiring would be a file drop rather than
+    /// a package install. Not built yet; see docs/ARCHITECTURE.md §6.7b.
     public static func pi(transaction: ConfigTransaction) -> AgentIntegrationProfile {
         AgentIntegrationProfile(
             agentID: "pi",
@@ -135,8 +138,8 @@ public enum AgentIntegrationRegistry {
             ),
             configurator: nil,
             capabilities: [.detect],
-            configurationNote: "Pi is extended by installing a package, which is a heavier "
-                + "operation than editing a config file. Detected, not configurable yet."
+            configurationNote: "Pi is extended by one TypeScript file in ~/.pi/agent/extensions, "
+                + "so wiring is a file drop rather than a package install. Detected, not configured yet."
         )
     }
 
