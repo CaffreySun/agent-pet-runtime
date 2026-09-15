@@ -323,6 +323,46 @@ final class AgentPetModel: ObservableObject {
         }
     }
 
+    // MARK: - Antigravity context usage (its own status-line tap)
+
+    /// Antigravity's status row is visible by default, so this tap renders a
+    /// plain replacement row instead of taking the row away — the one tap
+    /// that prints something.
+    func antigravityStatusLine() -> AntigravityStatusLine {
+        AntigravityStatusLine(
+            configURL: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".gemini/antigravity-cli/settings.json"),
+            store: IntegrationStore(directory: root.appendingPathComponent("integrations")),
+            transaction: transaction
+        )
+    }
+
+    @Published private(set) var antigravityContextTap: AntigravityStatusLine.State = .notInstalled
+
+    func refreshAntigravityContextTap() {
+        antigravityContextTap = antigravityStatusLine().state()
+    }
+
+    func enableAntigravityContextTap() {
+        run("Antigravity context usage is on") {
+            let outcome = try antigravityStatusLine().configure(shimPath: shimPath)
+            statusMessage = outcome.didChange
+                ? "Antigravity's status line now feeds the runtime and renders a simple one."
+                : "Already installed — nothing to change."
+            refreshAntigravityContextTap()
+        }
+    }
+
+    func disableAntigravityContextTap() {
+        run("Antigravity context usage is off") {
+            let outcome = try antigravityStatusLine().uninstall()
+            statusMessage = outcome.didChange
+                ? "Antigravity's original status line is back."
+                : "Nothing to remove."
+            refreshAntigravityContextTap()
+        }
+    }
+
     // MARK: - Agent actions
 
     func configureAgent(_ status: AgentStatus) {

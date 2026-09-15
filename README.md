@@ -81,7 +81,7 @@ Sessions running long jobs are not interrupted. (Verified by adding
 `SubagentStart`/`SubagentStop` to a session that had been running for hours and
 watching them fire.)
 
-All four agents are configurable today. Codex's hooks carry one extra step:
+All five agents are configurable today. Codex's hooks carry one extra step:
 Codex skips a hook until you review and trust it in Codex's own `/hooks`
 panel, and the runtime says so — and nothing else about the pet — the moment
 it configures them.
@@ -97,7 +97,9 @@ firing the Claude hooks a second time. Pi gets one TypeScript extension of the
 runtime's own, `~/.pi/agent/extensions/agentpet.ts`, also deleted on removal.
 Codex gets hook lines in `~/.codex/hooks.json`, merged around whatever is
 already there — other tools' hooks are left alone, and so are they on
-removal:
+removal. Antigravity gets one named hook in `~/.gemini/config/hooks.json`,
+merged around any other named hooks (its schema is not uniform: tool events
+take matcher groups, the rest take flat handler lists):
 
 - **Backed up first.** The previous file is copied to the runtime's backup
   directory before anything is written.
@@ -232,7 +234,10 @@ Grok reports the same numbers to its status line, so it gets its own switch in
 Settings: one `[ui.status_line]` section added to `~/.grok/config.toml` whose
 command feeds the runtime and prints nothing — the row stays hidden, so nothing
 about your terminal changes. It is a separate toggle, off until you turn it on,
-and removing it takes the section back out byte for byte.
+and removing it takes the section back out byte for byte. Antigravity reports
+them to a status row that is visible by default, so its switch replaces the
+built-in row with a plain `dir │ model │ N% ctx` one that feeds the runtime —
+the terminal keeps a status line, just a simpler one.
 
 ---
 
@@ -356,12 +361,11 @@ corrected specification.
 | Tuck the pet away and wake it again | done — the menu bar item, remembered across launches |
 | Event bridge, verified against the real binary | done |
 | Pet Manager: list Codex's pets, preview, pick one | done — read-only; pets are installed with Codex's own tooling |
-| Agent Integrations: detect, configure, remove | Claude Code and Grok |
+| Agent Integrations: detect, configure, remove | Claude Code, Grok, Pi, Codex, and Antigravity |
 | Activity Center, Settings, diagnostics export | done |
 | Session panel: one row per session, configurable items | done |
-| Context usage from the status line | done — opt-in: wraps Claude Code's, adds a hidden row for Grok |
+| Context usage from the status line | done — opt-in: wraps Claude Code's, hidden row for Grok, plain replacement row for Antigravity |
 | Survives restarts and upgrades mid-turn | done — undelivered events are replayed at the next launch |
-| Codex configuration | done — one manual trust step inside Codex, prompted for after configuring |
 | Window focusing | opens the project folder; hooks carry no terminal identity |
 
 ---

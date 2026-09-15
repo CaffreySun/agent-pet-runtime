@@ -121,6 +121,40 @@ struct BridgeEndToEndTests {
         return process.terminationStatus
     }
 
+    /// Like `runShim`, with the shim's stdout captured — Antigravity's hook
+    /// contract is a JSON object on stdout, so that answer is the one shim
+    /// behavior only its output can prove.
+    private func runShimCapturing(
+        socket: URL,
+        agent: String,
+        event: String,
+        payload: String,
+        spool: URL
+    ) throws -> (status: Int32, stdout: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ShimBinary.path!)
+        process.arguments = ["--agent", agent, "--event", event]
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["AGENTPET_SOCKET"] = socket.path
+        environment["AGENTPET_SPOOL"] = spool.path
+        process.environment = environment
+
+        let input = Pipe()
+        let output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        try process.run()
+        input.fileHandleForWriting.write(Data(payload.utf8))
+        input.fileHandleForWriting.closeFile()
+
+        let out = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: out, as: UTF8.self))
+    }
+
     private func waitForEnvelopes(_ box: EnvelopeBox, count: Int, timeout: TimeInterval = 5) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -352,12 +386,13 @@ struct BridgeEndToEndTests {
         original: String?,
         stdin: String,
         spool: URL,
-        agent: String = "claude-code"
+        agent: String = "claude-code",
+        extraArguments: [String] = []
     ) throws -> (status: Int32, stdout: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ShimBinary.path!)
         let encoded = Data((original ?? "").utf8).base64EncodedString()
-        process.arguments = ["--agent", agent, "--statusline", "--original", encoded]
+        process.arguments = ["--agent", agent, "--statusline", "--original", encoded] + extraArguments
 
         var environment = ProcessInfo.processInfo.environment
         environment["AGENTPET_SOCKET"] = socket.path
@@ -485,6 +520,69 @@ struct BridgeEndToEndTests {
         #expect(event.context?.usedPercent == 8.4)
         #expect(event.context?.modelName == "claude-opus-5")
         #expect(event.sessionID == "pi-session")
+    }
+
+    @Test("Antigravity hooks answer with an empty JSON object")
+    func antigravityHookAnswer() async throws {
+        let box = EnvelopeBox()
+        let (server, socket) = try makeServer(box)
+        defer { server.stop() }
+
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        let payload = #"{"conversationId":"ag-1","workspacePaths":["/tmp/proj"]}"#
+        let result = try runShimCapturing(
+            socket: socket, agent: "antigravity", event: "SessionStart",
+            payload: payload, spool: spool
+        )
+
+        #expect(result.status == 0)
+        #expect(result.stdout == "{}\n",
+                "the hook contract wants a JSON object back; the empty one has no opinion")
+
+        #expect(await waitForEnvelopes(box, count: 1))
+        let envelope = try #require(box.envelopes.first)
+        #expect(envelope.agentID == "antigravity")
+    }
+
+    @Test("the Antigravity status line prints a replacement row")
+    func antigravityStatusLineRow() async throws {
+        let box = EnvelopeBox()
+        let (server, socket) = try makeServer(box)
+        defer { server.stop() }
+
+        let spool = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-e2e-spool-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: spool) }
+
+        let payload = """
+        {"session_id":"ag-1",
+         "model":{"id":"gemini-3.8-flash-high","display_name":"Gemini 3.8 Flash"},
+         "workspace":{"current_dir":"/home/dev/proj","project_dir":"/home/dev/proj"},
+         "context_window":{"used_percentage":42,"context_window_size":1000000,"total_input_tokens":420000}}
+        """
+        let withRow = try runStatusLineShim(
+            socket: socket, original: nil, stdin: payload, spool: spool,
+            agent: "antigravity", extraArguments: ["--render-row"]
+        )
+        #expect(withRow.status == 0)
+        #expect(withRow.stdout == "proj │ Gemini 3.8 Flash │ 42% ctx\n",
+                "the row replaces a visible default, so it has to say something")
+
+        #expect(await waitForEnvelopes(box, count: 1))
+        let envelope = try #require(box.envelopes.first)
+        let events = EventNormalizer(profiles: AgentProfiles.all).normalize(envelope)
+        #expect(events.first?.kind == .contextUpdate)
+        #expect(events.first?.context?.usedPercent == 42)
+
+        // Without the flag the tap stays silent, like every agent whose
+        // default row is absence.
+        let silent = try runStatusLineShim(
+            socket: socket, original: nil, stdin: payload, spool: spool, agent: "antigravity"
+        )
+        #expect(silent.stdout.isEmpty)
     }
 
     @Test("the Grok status line feeds the pet and prints nothing")

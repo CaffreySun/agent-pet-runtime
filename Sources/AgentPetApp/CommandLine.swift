@@ -21,7 +21,7 @@ enum CommandLineTool {
       --configure <agent-id>          Install hooks for an agent
       --unconfigure <agent-id>        Remove exactly the hooks it wrote
 
-      Agents: claude-code, grok, codex, pi
+      Agents: claude-code, grok, codex, pi, antigravity
 
     DIAGNOSTICS
       --diagnose                      Report what is discoverable, and why

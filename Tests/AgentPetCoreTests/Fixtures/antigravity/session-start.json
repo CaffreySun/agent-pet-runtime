@@ -1,0 +1,7 @@
+{
+  "artifactDirectoryPath": "/home/dev/.gemini/antigravity-cli/brain/aaaa1111-2222-4333-8444-555555555555",
+  "conversationId": "aaaa1111-2222-4333-8444-555555555555",
+  "modelName": "gemini-3.8-flash-high",
+  "transcriptPath": "/home/dev/.gemini/antigravity-cli/brain/aaaa1111-2222-4333-8444-555555555555/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": []
+}
