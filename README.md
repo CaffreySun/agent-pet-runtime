@@ -81,10 +81,10 @@ Sessions running long jobs are not interrupted. (Verified by adding
 `SubagentStart`/`SubagentStop` to a session that had been running for hours and
 watching them fire.)
 
-Claude Code and Grok are configurable today. Pi is wireable but not built yet
-(a single TypeScript file), and Codex's stable hooks must be trusted by hand in
-Codex itself before they can run. Both are detected and reported as *not
-configurable*, each with its own reason, rather than half-supported.
+Claude Code, Grok, and Pi are configurable today. Codex's stable hooks must be
+trusted by hand in Codex itself before they can run, so it is detected and
+reported as *not configurable*, with its own reason, rather than
+half-supported.
 
 ### What configuring does
 
@@ -93,7 +93,8 @@ Code gets hook lines in `~/.claude/settings.json`. Grok gets
 `~/.grok/hooks/agentpet.json` — the runtime's own file, deleted on removal —
 plus one appended switch, `[compat.claude] hooks = false` in
 `~/.grok/config.toml`, which stops Grok's Claude-compatibility scan from
-firing the Claude hooks a second time:
+firing the Claude hooks a second time. Pi gets one TypeScript extension of the
+runtime's own, `~/.pi/agent/extensions/agentpet.ts`, also deleted on removal:
 
 - **Backed up first.** The previous file is copied to the runtime's backup
   directory before anything is written.
@@ -357,7 +358,7 @@ corrected specification.
 | Session panel: one row per session, configurable items | done |
 | Context usage from the status line | done — opt-in: wraps Claude Code's, adds a hidden row for Grok |
 | Survives restarts and upgrades mid-turn | done — undelivered events are replayed at the next launch |
-| Codex / Pi configuration | not built — Codex's hooks need a one-time trust inside Codex; Pi needs its extension file |
+| Codex configuration | not built — its hooks need a one-time trust inside Codex itself |
 | Window focusing | opens the project folder; hooks carry no terminal identity |
 
 ---

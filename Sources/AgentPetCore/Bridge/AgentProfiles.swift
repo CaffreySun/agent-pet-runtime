@@ -333,8 +333,14 @@ public enum AgentProfiles {
         confidence: .medium
     )
 
-    /// Pi reports through an in-process extension that emits the same payload
-    /// shape as the normalized events themselves.
+    /// Pi reports through the runtime's own extension
+    /// (`~/.pi/agent/extensions/agentpet.ts`, installed by `PiConfigurator`):
+    /// it forwards lifecycle events, and at each settle a context reading in
+    /// the same reduced shape the status-line taps deliver.
+    ///
+    /// `agent_settled` — not `agent_end` — is the moment to settle on: after
+    /// `agent_end` Pi may still auto-retry, auto-compact, or run queued
+    /// follow-ups, so only the settle means the turn is really over.
     public static let pi = AgentProfile(
         agentID: "pi",
         displayName: "Pi",
@@ -342,33 +348,42 @@ public enum AgentProfiles {
             NormalizationRule(
                 matches: ["session_start"],
                 kind: .sessionStarted,
-                sessionIDField: "sessionId",
+                sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
             ),
             NormalizationRule(
-                matches: ["agent_start", "turn_start", "tool_execution_start"],
+                matches: ["agent_start", "tool_execution_start"],
                 kind: .working,
                 summaryField: "toolName",
-                sessionIDField: "sessionId",
+                toolNameField: "toolName",
+                sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
             ),
+            // Pi raises these while one of its own UI prompts (a permission
+            // gate, a picker) is on screen — the one "it is waiting for you"
+            // signal the extension can draw from.
             NormalizationRule(
                 matches: ["ui_prompt_start"],
                 kind: .waitingInput,
-                sessionIDField: "sessionId",
+                sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
             ),
             NormalizationRule(
-                matches: ["agent_end", "turn_end"],
+                matches: ["agent_settled"],
                 kind: .completed,
-                sessionIDField: "sessionId",
+                sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
             ),
             NormalizationRule(
                 matches: ["session_shutdown"],
                 kind: .sessionClosed,
-                sessionIDField: "sessionId",
+                sessionIDField: "session_id",
                 workingDirectoryField: "cwd"
+            ),
+            NormalizationRule(
+                matches: ["context_update"],
+                kind: .contextUpdate,
+                sessionIDField: "session_id"
             ),
         ]
     )
