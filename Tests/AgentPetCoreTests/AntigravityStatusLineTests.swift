@@ -49,7 +49,7 @@ struct AntigravityStatusLineTests {
     @Test("installing writes the row-rendering command and leaves settings alone")
     func installs() throws {
         let sandbox = try AntigravitySettingsSandbox(
-            settingsExisting: #"{"trustedWorkspaces": ["/Users/dev/Documents"]}"#
+            settingsExisting: #"{"trustedWorkspaces": ["/Users/x/Documents"]}"#
         )
         let outcome = try sandbox.tap().configure(shimPath: agTapShim, now: agTapNow)
 
