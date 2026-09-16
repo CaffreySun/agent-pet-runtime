@@ -240,16 +240,51 @@ struct MessagePanelConfigTests {
         var config = AppConfig()
         config.messagePanel.alwaysVisible = false
         config.messagePanel.items = [.init(.context), .init(.agent, isEnabled: false)]
+        config.messagePanel.widthPercent = 275
+        config.messagePanel.messageFontSize = 14
         try AppConfigStore(url: url).save(config)
 
         let reloaded = AppConfigStore(url: url).load()
         #expect(!reloaded.messagePanel.alwaysVisible)
+        #expect(reloaded.messagePanel.widthPercent == 275, "300% is allowed now, and used")
+        #expect(reloaded.messagePanel.messageFontSize == 14)
         // The user's two entries stay where they put them, switched off as
         // they left them; every kind they have never seen joins the end.
         #expect(Array(reloaded.messagePanel.items.prefix(2)) == config.messagePanel.items)
         #expect(reloaded.messagePanel.items.dropFirst(2).map(\.kind)
             == MessagePanelConfig.Kind.allCases.filter { $0 != .context && $0 != .agent })
         #expect(reloaded.messagePanel.items.dropFirst(2).allSatisfy { $0.isEnabled })
+    }
+
+    @Test("the panel may be three times the pet wide, but no wider")
+    func widthCeiling() {
+        #expect(MessagePanelConfig.maximumWidthPercent == 300)
+        #expect(MessagePanelConfig.clampWidth(500) == 300)
+        #expect(MessagePanelConfig.clampWidth(80) == 100)
+        // Raising the ceiling must not widen a panel nobody asked to widen:
+        // 200 stays what a config with no `widthPercent` comes back as.
+        #expect(MessagePanelConfig().widthPercent == 200)
+    }
+
+    @Test("a config written before the text size existed gets today's size")
+    func fontSizeBackwardCompatible() throws {
+        // No `messageFontSize` key: 10.5pt is what the line has always drawn
+        // at, so an upgrade changes nothing on screen.
+        let stored = Data(#"{"schemaVersion":1,"messagePanel":{"widthPercent":150}}"#.utf8)
+        let config = try JSONDecoder().decode(AppConfig.self, from: stored)
+        #expect(config.messagePanel.messageFontSize == 10.5)
+        #expect(config.messagePanel.widthPercent == 150)
+    }
+
+    @Test("the text size is clamped to what the slider offers")
+    func fontSizeClamping() throws {
+        #expect(MessagePanelConfig.clampFontSize(2) == 8)
+        #expect(MessagePanelConfig.clampFontSize(64) == 20)
+        #expect(MessagePanelConfig.clampFontSize(12.5) == 12.5)
+
+        let stored = Data(#"{"schemaVersion":1,"messagePanel":{"messageFontSize":99}}"#.utf8)
+        let config = try JSONDecoder().decode(AppConfig.self, from: stored)
+        #expect(config.messagePanel.messageFontSize == 20)
     }
 }
 

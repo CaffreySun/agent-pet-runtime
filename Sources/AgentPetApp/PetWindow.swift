@@ -9,15 +9,17 @@ import AppKit
 /// session it is reporting on.
 final class PetWindow: NSPanel {
 
-    /// The window a pet of this size is drawn in. The sprite fills it, so the
+    /// The window a pet of this width is drawn in. The sprite fills it, so the
     /// window *is* the pet's size.
-    nonisolated static func size(for petSize: PetSize) -> NSSize {
-        NSSize(width: petSize.width, height: petSize.height)
+    nonisolated static func size(forWidth width: CGFloat) -> NSSize {
+        NSSize(width: width, height: CGFloat(AppConfig.PetConfig.height(forWidth: Double(width))))
     }
 
     /// Codex's own size — its `avatar-overlay-mascot-width-px` defaults to
     /// 112, which is the width of the sprite this project draws.
-    nonisolated static var defaultSize: NSSize { size(for: .standard) }
+    nonisolated static var defaultSize: NSSize {
+        size(forWidth: CGFloat(AppConfig.PetConfig.defaultWidth))
+    }
 
     /// Where the pet appears the first time it is run.
     ///

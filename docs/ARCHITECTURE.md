@@ -179,7 +179,7 @@ agent-pet-runtime/
 
 `completed` 与 `failed` 走 §3.1a 的播放形状：整行三遍，然后落进 idle 段循环。**没有任何状态会冻结在最后一帧**，也不需要"once"特例——沉降本身就是停止表达。
 
-**reduced motion**：系统要求 + 设置允许时，每一层都退化为所选中帧的第 0 帧（App 的 `uer(e, true)` 就是 `frames:[n[0]]`）。此前 `respectsReduceMotion` 只是个无人读取的设置项，现已接通。
+**reduced motion**：系统要求 + 设置允许时，每一个**动画**都退化为所选中帧的第 0 帧（App 的 `uer(e, true)` 就是 `frames:[n[0]]`）。此前 `respectsReduceMotion` 只是个无人读取的设置项，现已接通。**静态姿态（`LoopMode.staticPose`）除外（2026-09-16 修正）**：注视姿态的列是"看哪个方向"的**选择**，不是时间轴上的帧，归零不是"定格"而是给出错误答案——光标在宠物右侧半屏时显示 `000`、左侧半屏时显示 `180`。见 §3.4。
 
 ### 3.4 注视方向（V2 row 9–10）——原方案标为 [未验证] 的问题
 
@@ -203,7 +203,11 @@ column = sector mod 8
 
 半扇区偏移让每个姿态落在扇区中心，指针在 45° 附近抖动时不会来回跳两个姿态。
 
-"Neutral/front 是 deadzone" 的含义是：**没有方向向量时无法确定角度**，回落到 idle。本实现取指针到宠物中心距离小于 28pt 为 deadzone。
+"Neutral/front 是 deadzone" 的含义是：**没有方向向量时无法确定角度**，回落到 idle。本实现取指针到**精灵中心**距离小于 1pt 为 deadzone（Codex 的 `uuo = 1`），所以屏幕上有光标时宠物几乎一直在看着它。
+
+**角度的坐标系（2026-09-16 修正）**：`LookDirection.angle` 说的是 **AppKit 屏幕坐标**——`NSEvent.mouseLocation`、`NSWindow.frame` 所在的空间，原点在主屏左下、**y 向上**，因此"上"是 `+dy`。Codex 自己是在 DOM 坐标里算这个角（y 向下，`atan2(dx, -dy)`），移植时公式照抄而调用方喂的是 AppKit 点，于是**垂直方向整体镜像**：光标在宠物上方时它低头、下方时抬头，**水平方向却是对的**——所以不容易被发现。活的指针路径此前没有任何覆盖（`--selftest` 的注视断言全部走 `aimGaze(at:)` 强制角度），修正后 `LookDirectionTests` 里有了 AppKit 空间的象限断言。别把它再改回 DOM 的符号，除非调用方换成 y 向下的点。
+
+**注视原点是精灵中心，不是窗口中心（2026-09-16 修正）**。窗口为了面板向上长，`window.frame.midY` 比精灵中心高 `面板高/2`（一行 40pt 面板 → 20pt；四行 → 50pt；精灵本身只有 112×121），指针近时足以偏掉一整档。`petCenterProvider` 现在把 `petView.spriteRect` 的中心换算到屏幕坐标，`--selftest` 在面板拉起的现场核对这一点。
 
 ### 3.5 此前版本的四处错误
 
@@ -688,7 +692,7 @@ Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可
 | `limits` | `5h 41% · 7d 13%` | 状态栏 tap |
 | `message` | §6.4 的标签（+ 正文） | 每个会话自己的状态 |
 
-**字号、宽度、对齐（2026-09-14 追加）**：行高 18pt，agent 11.5pt semibold、其余 10.5pt、session 用等宽；面板宽度 = 宠物宽度的百分比（设置里 100–200%，滑杆 + 数值框 + 加减按钮，默认 200%），文字可宽于宠物本体；对齐可选左/中/右——**对齐只动行内文字，不动宠物**（窗口始终以精灵为轴左右对称生长）。
+**字号、宽度、对齐（2026-09-14 追加，2026-09-16 扩展）**：基准行高 18pt，agent 11.5pt semibold、其余 10.5pt、session 用等宽；面板宽度 = 宠物宽度的百分比（设置里 100–300%，滑杆 + 数值框 + 加减按钮，默认 200%），文字可宽于宠物本体；对齐可选左/中/右——**对齐只动行内文字，不动宠物**（窗口始终以精灵为轴左右对称生长）。**状态消息行是唯一跟着宠物缩放的一行**（2026-09-16）：字号设置以"默认 112pt 宠物下的点数"记（默认 10.5pt = 它一直以来的大小，范围 8–20pt），实际大小 = 设置值 × 宠物宽/112，设置界面同时显示换算后的值；行高按同一比例放大但**不低于 18pt**（行内其余项不缩），消息自身的宽度上限与最小宽度也按比例走。**宽度不跟字号**：面板宽度只是宠物的百分比，字号变化不移动它——三者的关系就这一句，别把它们耦合起来。
 
 规则与理由：
 
@@ -696,9 +700,9 @@ Codex 的 ambient pet 带一个 notification：四种状态、一行标签、可
 - **完成/失败的行显示正文，running 的行不显示**——与 §6.4 同一条取舍。
 - **idle 行有寿命**：终端被关掉时不会有 `SessionEnd`，一行"闲置会话"如果常驻，就会在宠物旁边飘一辈子。闲置行（`state == .idle`）在 `max(updatedAt, context.capturedAt)` 之后 10 分钟消失；状态栏还在报数的会话因此一直可见（它确实还活着）。
 - **`alwaysVisible=false`** 时，面板仅在存在非 idle 会话时出现；出现后显示全部行。
-- **窗口横向也要长**：面板最宽 520pt（超出则截断文本），窗口以精灵为轴左右对称加宽，底边不动——这样宠物在屏幕上纹丝不动。位置持久化存的是**还原到默认宽度时的原点**，否则宽面板一次、窄面板一次地退出会把宠物一步步挪走。
-- **宠物尺寸是可设置的，默认就是 Codex 的尺寸**（2026-09-14 修正）：此前窗口硬编码 144×156pt，是 Codex 的 **1.29 倍**（不是 DPI 问题——两边都是 point，只是数字不同）。Codex 自己的设置是 `avatar-overlay-mascot-width-px`，默认 **112**、范围 **80–224**（设置页里是 80–224 的连续滑杆），渲染规则 `width: var(--codex-pet-width); aspect-ratio: 192/208`。本项目取它的默认值与两个端点作三档：**小 80×87 / 默认 112×121 / 大 224×243**——用户能选的每一档都是 Codex 自己允许的。窗口即宠物（精灵按 aspect-fit 填满），面板宽度是宠物宽度的百分比，所以**面板跟着一起缩放**：默认档下面板最宽 224pt（原先 288pt），九项全开时行会被挤掉一些；想要原来的面板宽度就选大档（448pt）。
-- **配置**（`AppConfig.messagePanel`）：`alwaysVisible` + 有序 `items`（开关与顺序即数组顺序）+ `widthPercent` + `alignment`。两处逐字段 `decodeIfPresent`：`AppConfig` 与 `MessagePanelConfig` 各自实现——合成解码会让"旧版本写下的配置文件缺新键"变成整份配置解码失败，而 store 拒绝半读，结果就是用户的所有设置被静默重置。**新增 item kind 时不需要迁移**：解码时把 items 里不存在的 kind 追加到末尾（管理器只能开关、不能删除条目，所以"缺失"只可能意味着"旧文件"）。
+- **窗口横向也要长**：窗口以精灵为轴左右对称加宽，底边不动——这样宠物在屏幕上纹丝不动。位置持久化存的是**还原到默认宽度时的原点**，否则宽面板一次、窄面板一次地退出会把宠物一步步挪走。
+- **宠物尺寸是 Codex 自己的连续滑杆**（2026-09-14 引入，2026-09-16 改成滑杆）：此前窗口硬编码 144×156pt，是 Codex 的 **1.29 倍**（不是 DPI 问题——两边都是 point，只是数字不同）。Codex 自己的设置是 `avatar-overlay-mascot-width-px`，默认 **112**、范围 **80–224**，设置页里就是一根 80–224 的连续滑杆，渲染规则 `width: var(--codex-pet-width); aspect-ratio: 192/208`。本项目 2026-09-14 先做成了它的两端加默认值三档，2026-09-16 改回**同一根滑杆（80–224，默认 112，步进 4）**——三档只是当时的简化，Codex 没有档位。窗口即宠物（精灵按 aspect-fit 填满），面板宽度是宠物宽度的百分比，所以**面板跟着一起缩放**：默认 112pt 宠物 + 默认 200% 时面板最宽 224pt，宠物拉到 224pt 就是 448pt，300% 时 672pt——旧代码里那两个固定上限（288pt 的默认面板、520pt 的窗口）都已不再适用，超出窗口宽度的部分照旧截断文本。
+- **配置**（`AppConfig.messagePanel`）：`alwaysVisible` + 有序 `items`（开关与顺序即数组顺序）+ `widthPercent` + `messageFontSize` + `alignment`；宠物尺寸在 `AppConfig.pet.width`（点数）。逐字段 `decodeIfPresent`：`AppConfig`、`PetConfig`、`MessagePanelConfig` 各自实现——合成解码会让"旧版本写下的配置文件缺新键"变成整份配置解码失败，而 store 拒绝半读，结果就是用户的所有设置被静默重置。`pet.width` 还兼容旧键 `"size": "small|standard|large"`（映射 80/112/224，只读不写；旧键用一个独立的 `LegacyKeys` 读，因为带无对应存储属性的 coding key 会让合成编码器直接编译不过）。**新增 item kind 时不需要迁移**：解码时把 items 里不存在的 kind 追加到末尾（管理器只能开关、不能删除条目，所以"缺失"只可能意味着"旧文件"）。
 - **重建时机**：每次事件 + 至多每秒一次（状态机会按时钟老化，只在事件时重建会错过它）。管理器不参与：[`MainWindow` 的 1s ticker] 只刷管理器的副本，宠物自己走这条路径。
 - **诊断行与画面同源**：`--verbose` 的 `[pet] panel:` 行用与绘制相同的 `MessagePanelLayout.items(for:config:)` 构造，不会打印用户已关掉的项。
 - **布局按 (panel, config) 记忆**（2026-09-14）：`AppDelegate.resizeWindow` 每帧都要 plan，而建一张 plan 要逐个 item 量文字（实测 5 行×9 项 = 460 µs，60 fps 下 27.6 ms/s）。面板与配置是"按事件变"而不是"按帧变"的量，所以 `MessagePanelLayout.plan` 记住上一条结果，命中时只做一次相等比较（实测 1.5 µs，约 0.1 ms/s）。
@@ -1090,10 +1094,10 @@ enum RuntimeConstants {
     // 初次问候（= Codex 的 first-awake：8 秒、每只宠物一次、waving）
     static let greetingLifetime : TimeInterval = 8
 
-    // 宠物尺寸（= Codex 的 avatar-overlay-mascot-width-px 默认值与两端）
-    static let petWidthSmall    = 80
-    static let petWidthStandard = 112
-    static let petWidthLarge    = 224
+    // 宠物尺寸（= Codex 的 avatar-overlay-mascot-width-px：范围与默认值，滑杆）
+    static let petWidthMinimum  = 80
+    static let petWidthMaximum  = 224
+    static let petWidthDefault  = 112
 
     // Bridge
     static let bridgeProtocolVersion = 1

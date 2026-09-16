@@ -12,6 +12,9 @@ import AppKit
 @MainActor
 enum MessagePanelLayout {
 
+    /// The row's height at the baseline — the size everything below is
+    /// measured from, and the floor a bigger message must never go under: the
+    /// other items in the row keep their own size.
     nonisolated static let rowHeight: CGFloat = 18
     nonisolated static let rowSpacing: CGFloat = 2
     nonisolated static let padding: CGFloat = 9
@@ -20,6 +23,9 @@ enum MessagePanelLayout {
     /// Narrower than this and an item says nothing useful.
     nonisolated static let minimumItemWidth: CGFloat = 34
     nonisolated static let contextBarSize = CGSize(width: 46, height: 7)
+    /// The width a message's own text may ask for before it is treated as
+    /// flexible, at the baseline size.
+    nonisolated static let messageWidthCap: CGFloat = 300
 
     /// Fluorescent green, the one colour in the panel that is not a system
     /// colour: how full a context window is has to be readable at a glance
@@ -29,12 +35,44 @@ enum MessagePanelLayout {
     static let agentFont = NSFont.systemFont(ofSize: 11.5, weight: .semibold)
     static let itemFont = NSFont.systemFont(ofSize: 10.5)
     static let sessionFont = NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular)
-    static let messageFont = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+
+    /// What one panel draws at, for one pet size and one configuration.
+    ///
+    /// **Only the message line follows the pet.** It is the line the user
+    /// reads, and at a 224pt pet the 10.5pt default would be a fifth of the
+    /// pet's height. The other items keep the size they have always had, the
+    /// row only grows to fit whatever is largest in it, and the panel's
+    /// *width* stays a percentage of the pet — a bigger pet widens the panel,
+    /// a bigger font must not.
+    struct Typography: Equatable {
+        let messageFont: NSFont
+        /// How much larger than the baseline this message is drawn, from the
+        /// pet size and the setting together. The row height and the message's
+        /// own width limits are proportional to it.
+        let textScale: CGFloat
+        let rowHeight: CGFloat
+    }
+
+    static func typography(for config: MessagePanelConfig, petWidth: CGFloat) -> Typography {
+        let base = CGFloat(MessagePanelConfig.defaultFontSize)
+        let points = CGFloat(MessagePanelConfig.clampFontSize(config.messageFontSize))
+            * (petWidth / CGFloat(AppConfig.PetConfig.defaultWidth))
+        let textScale = max(0.1, points / base)
+        return Typography(
+            messageFont: NSFont.systemFont(ofSize: points, weight: .semibold),
+            textScale: textScale,
+            // At the default setting this is the row height it has always
+            // been: a scaled row is only ever taller, never shorter.
+            rowHeight: max(rowHeight, (rowHeight * textScale).rounded())
+        )
+    }
 
     /// The panel's width, in points, for a configuration and a pet.
     ///
     /// A percentage of the pet's own width, clamped to the range the settings
     /// allow, so "200%" means twice the pet at whatever size the pet is drawn.
+    /// The message's font size deliberately does not appear here: the width
+    /// follows the pet.
     static func panelWidth(for config: MessagePanelConfig, petWidth: CGFloat) -> CGFloat {
         (petWidth * CGFloat(MessagePanelConfig.clampWidth(config.widthPercent)) / 100)
             .rounded()
@@ -93,10 +131,11 @@ enum MessagePanelLayout {
     struct Plan {
         let rows: [Row]
         let alignment: MessagePanelConfig.Alignment
+        let typography: Typography
 
         var height: CGFloat {
             guard !rows.isEmpty else { return 0 }
-            return CGFloat(rows.count) * rowHeight
+            return CGFloat(rows.count) * typography.rowHeight
                 + CGFloat(rows.count - 1) * rowSpacing
                 + padding * 2 + tailHeight
         }
@@ -109,8 +148,13 @@ enum MessagePanelLayout {
     /// Content that does not exist is left out rather than drawn as a blank:
     /// a session with no status line has no context figure, and an empty bar
     /// would read as a full one at a glance.
-    static func items(for row: MessagePanel.Row, config: MessagePanelConfig) -> [Item] {
-        config.items.compactMap { item in
+    static func items(
+        for row: MessagePanel.Row,
+        config: MessagePanelConfig,
+        petWidth: CGFloat
+    ) -> [Item] {
+        let text = typography(for: config, petWidth: petWidth)
+        return config.items.compactMap { item in
             guard item.isEnabled else { return nil }
             switch item.kind {
             case .agent:
@@ -158,9 +202,14 @@ enum MessagePanelLayout {
             case .message:
                 guard let message = row.message else { return nil }
                 let full = message.body.map { "\(message.label) — \($0)" } ?? message.label
+                // The caps scale with the text: a squeezed line at twice the
+                // size needs twice the room to still say anything.
                 return Item(kind: .message, primary: message.label, secondary: message.body,
-                            context: nil, width: min(width(of: full, font: messageFont), 300),
-                            isFlexible: true)
+                            context: nil,
+                            width: min(width(of: full, font: text.messageFont),
+                                       messageWidthCap * text.textScale),
+                            isFlexible: true,
+                            minimumWidth: minimumItemWidth / 2 * text.textScale)
             }
         }
     }
@@ -210,24 +259,32 @@ enum MessagePanelLayout {
     /// in every row. The panel and its configuration change on the scale of an
     /// event, not of a frame, so one remembered layout is enough to keep the
     /// frame loop out of text measurement entirely.
-    private static var remembered: (panel: MessagePanel, config: MessagePanelConfig, plan: Plan)?
+    private static var remembered: (
+        panel: MessagePanel, config: MessagePanelConfig, petWidth: CGFloat, plan: Plan
+    )?
 
-    static func plan(for panel: MessagePanel, config: MessagePanelConfig) -> Plan {
-        if let remembered, remembered.panel == panel, remembered.config == config {
+    static func plan(for panel: MessagePanel, config: MessagePanelConfig, petWidth: CGFloat) -> Plan {
+        if let remembered, remembered.panel == panel, remembered.config == config,
+           remembered.petWidth == petWidth {
             return remembered.plan
         }
-        let plan = build(panel, config)
-        remembered = (panel, config, plan)
+        let plan = build(panel, config, petWidth)
+        remembered = (panel, config, petWidth, plan)
         return plan
     }
 
-    private static func build(_ panel: MessagePanel, _ config: MessagePanelConfig) -> Plan {
+    private static func build(
+        _ panel: MessagePanel,
+        _ config: MessagePanelConfig,
+        _ petWidth: CGFloat
+    ) -> Plan {
+        let type = typography(for: config, petWidth: petWidth)
         let rows = panel.rows.map { row in
             Row(id: row.id, isFocused: row.isFocused, alignment: config.alignment,
-                items: items(for: row, config: config))
+                items: items(for: row, config: config, petWidth: petWidth))
         }.filter { !$0.items.isEmpty }
 
-        return Plan(rows: rows, alignment: config.alignment)
+        return Plan(rows: rows, alignment: config.alignment, typography: type)
     }
 
     /// Lay one row out inside `width`, shrinking the flexible items first and
@@ -235,7 +292,11 @@ enum MessagePanelLayout {
     ///
     /// Rectangles are returned in order; nothing is dropped silently except
     /// items squeezed below the width at which they would say anything.
-    static func frames(for row: Row, in width: CGFloat) -> [(item: Item, frame: CGRect)] {
+    static func frames(
+        for row: Row,
+        in width: CGFloat,
+        typography type: Typography
+    ) -> [(item: Item, frame: CGRect)] {
         let available = width - padding * 2
         let gaps = spacing * CGFloat(max(0, row.items.count - 1))
         let budget = max(0, available - gaps)
@@ -279,7 +340,7 @@ enum MessagePanelLayout {
 
         var frames: [(item: Item, frame: CGRect)] = []
         for (index, item) in row.items.enumerated() where widths[index] >= item.minimumWidth {
-            frames.append((item, CGRect(x: x, y: 0, width: widths[index], height: rowHeight)))
+            frames.append((item, CGRect(x: x, y: 0, width: widths[index], height: type.rowHeight)))
             x += widths[index] + spacing
         }
         return frames

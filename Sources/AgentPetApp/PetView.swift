@@ -14,16 +14,25 @@ final class PetView: NSView {
     private var panel: MessagePanel = .empty
     private var panelConfig = MessagePanelConfig()
 
+    /// How wide the pet is drawn, in points. Told by the owner rather than
+    /// derived from the bounds: with a wide panel up, the view is wider than
+    /// the pet, and the message line is sized from the pet.
+    var petWidth: CGFloat = CGFloat(AppConfig.PetConfig.defaultWidth)
+
     /// How tall the panel strip must be for a panel.
-    static func panelHeight(for panel: MessagePanel, config: MessagePanelConfig) -> CGFloat {
-        MessagePanelLayout.plan(for: panel, config: config).height
+    static func panelHeight(
+        for panel: MessagePanel,
+        config: MessagePanelConfig,
+        petWidth: CGFloat
+    ) -> CGFloat {
+        MessagePanelLayout.plan(for: panel, config: config, petWidth: petWidth).height
     }
 
     /// The part of the view the sprite occupies. The panel, when present,
     /// takes the strip above it, so the pet itself never moves — the window
     /// grows upward (and, for a wide panel, sideways) instead.
     var spriteRect: CGRect {
-        let inset = Self.panelHeight(for: panel, config: panelConfig)
+        let inset = Self.panelHeight(for: panel, config: panelConfig, petWidth: petWidth)
         return CGRect(
             x: bounds.minX, y: bounds.minY,
             width: bounds.width, height: max(0, bounds.height - inset)
@@ -164,7 +173,7 @@ final class PetView: NSView {
         context.draw(image, in: target)
         context.restoreGState()
 
-        let plan = MessagePanelLayout.plan(for: panel, config: panelConfig)
+        let plan = MessagePanelLayout.plan(for: panel, config: panelConfig, petWidth: petWidth)
         if !plan.rows.isEmpty {
             drawPanel(plan, spriteRect: sprite)
         }
@@ -174,6 +183,7 @@ final class PetView: NSView {
 
     /// Draws the session rows in the strip above the pet.
     private func drawPanel(_ plan: MessagePanelLayout.Plan, spriteRect: CGRect) {
+        let type = plan.typography
         let height = plan.height
         let area = CGRect(
             x: bounds.minX, y: bounds.maxY - height, width: bounds.width, height: height
@@ -217,28 +227,34 @@ final class PetView: NSView {
         for row in plan.rows {
             let rowRect = CGRect(
                 x: bodyRect.minX,
-                y: rowTop - MessagePanelLayout.rowHeight,
+                y: rowTop - type.rowHeight,
                 width: bodyRect.width,
-                height: MessagePanelLayout.rowHeight
+                height: type.rowHeight
             )
-            drawRow(row, in: rowRect)
+            drawRow(row, in: rowRect, typography: type)
             rowTop = rowRect.minY - MessagePanelLayout.rowSpacing
         }
     }
 
-    private func drawRow(_ row: MessagePanelLayout.Row, in rowRect: CGRect) {
-        for (item, frame) in MessagePanelLayout.frames(for: row, in: rowRect.width) {
+    private func drawRow(
+        _ row: MessagePanelLayout.Row,
+        in rowRect: CGRect,
+        typography type: MessagePanelLayout.Typography
+    ) {
+        for (item, frame) in MessagePanelLayout.frames(
+            for: row, in: rowRect.width, typography: type
+        ) {
             let rect = CGRect(
                 x: rowRect.minX + frame.minX,
                 y: rowRect.minY,
                 width: frame.width,
-                height: MessagePanelLayout.rowHeight
+                height: type.rowHeight
             )
             switch item.kind {
             case .context:
                 drawContext(item, in: rect)
             case .message:
-                drawMessage(item, in: rect, isFocused: row.isFocused)
+                drawMessage(item, in: rect, isFocused: row.isFocused, font: type.messageFont)
             case .agent:
                 if !drawSymbol(item, in: rect) {
                     Self.text(item.primary, font: MessagePanelLayout.agentFont)
@@ -325,14 +341,15 @@ final class PetView: NSView {
     private func drawMessage(
         _ item: MessagePanelLayout.Item,
         in rect: CGRect,
-        isFocused: Bool
+        isFocused: Bool,
+        font: NSFont
     ) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         let string = NSMutableAttributedString(
             string: item.primary,
             attributes: [
-                .font: MessagePanelLayout.messageFont,
+                .font: font,
                 .foregroundColor: isFocused ? NSColor.labelColor : NSColor.secondaryLabelColor,
                 .paragraphStyle: paragraph,
             ]
@@ -341,7 +358,7 @@ final class PetView: NSView {
             string.append(NSAttributedString(
                 string: " — \(body)",
                 attributes: [
-                    .font: MessagePanelLayout.itemFont,
+                    .font: NSFont.systemFont(ofSize: font.pointSize),
                     .foregroundColor: NSColor.tertiaryLabelColor,
                     .paragraphStyle: paragraph,
                 ]

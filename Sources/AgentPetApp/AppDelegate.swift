@@ -12,11 +12,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
 
-    /// How big the pet is drawn. Seeded from the stored settings before the
-    /// window exists, then kept in step with the manager's copy of them —
-    /// `resizeWindow` is where a change is noticed, because it is already the
-    /// one thing that runs every frame.
-    private var petSize: PetSize = .standard
+    /// How big the pet is drawn, in points across. Seeded from the stored
+    /// settings before the window exists, then kept in step with the manager's
+    /// copy of them — the frame callback is where a change is noticed, because
+    /// it is already the one thing that runs every frame.
+    private var petWidth: CGFloat = CGFloat(AppConfig.PetConfig.defaultWidth)
 
     /// Whether the pet is on screen. Codex calls putting it away "tuck away";
     /// the app stays in the menu bar either way, which is the only way back.
@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Read before the window exists: the size decides the window's frame,
         // and the model that owns the settings is built later still.
         let stored = AppConfigStore().load()
-        petSize = stored.pet.size
+        petWidth = CGFloat(stored.pet.width)
         isPetVisible = stored.pet.visible
         buildWindow()
         buildStatusItem()
@@ -88,6 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ))
             }
             guard let self else { return }
+            // The size setting can change while the pet is on screen, and the
+            // view needs the width for the message line's own size.
+            if let configured = self.model?.config.pet.width {
+                self.petWidth = CGFloat(configured)
+            }
+            self.petView.petWidth = self.petWidth
             self.petView.show(image)
             self.petView.show(panel, config: panelConfig())
             self.resizeWindow(for: panel, config: panelConfig())
@@ -143,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         checkForUpdatesInBackground()
 
         if CommandLine.arguments.contains("--selftest") {
-            let status = RenderSelfTest.run(controller: controller, view: petView, petSize: petSize)
+            let status = RenderSelfTest.run(controller: controller, view: petView, petWidth: petWidth)
             exit(status)
         }
 
@@ -373,12 +379,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Window
 
     private func buildWindow() {
-        let size = PetWindow.size(for: petSize)
+        let size = PetWindow.size(forWidth: petWidth)
         let origin = restoredOrigin() ?? defaultOrigin(for: size)
         window = PetWindow(contentRect: NSRect(origin: origin, size: size))
 
         petView = PetView(frame: NSRect(origin: .zero, size: size))
         petView.autoresizingMask = [.width, .height]
+        petView.petWidth = petWidth
         petView.onDragBegan = { [weak self] in
             self?.controller.beginDrag()
         }
@@ -420,11 +427,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSMenu.popUpContextMenu(self.makeMenu(), with: event, for: self.petView)
         }
 
-        // Lets the pet aim its gaze at the pointer.
+        // Lets the pet aim its gaze at the pointer, from the sprite's own
+        // centre — not the window's. The window grows upward to hold the
+        // panel, so its centre sits `panelHeight / 2` above the pet whenever a
+        // session is on screen (20pt for one row), and a pointer aimed from
+        // there resolves a neighbouring look pose at close range. Screen
+        // coordinates, which is what `LookDirection.angle` expects.
         controller.petCenterProvider = { [weak self] in
-            guard let window = self?.window else { return nil }
-            let frame = window.frame
-            return CGPoint(x: frame.midX, y: frame.midY)
+            guard let self, let window = self.window else { return nil }
+            let sprite = petView.spriteRect
+            let centre = CGPoint(x: sprite.midX, y: sprite.midY)
+            return window.convertPoint(toScreen: petView.convert(centre, to: nil))
         }
         window.contentView = petView
         window.orderFrontRegardless()
@@ -462,7 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let text = panel.rows.isEmpty
             ? "cleared"
             : panel.rows.map { row in
-                MessagePanelLayout.items(for: row, config: config).map { item in
+                MessagePanelLayout.items(for: row, config: config, petWidth: petWidth).map { item in
                     item.secondary.map { "\(item.primary) — \($0)" } ?? item.primary
                 }.joined(separator: " · ")
             }.joined(separator: " | ")
@@ -479,13 +492,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// downward would move the pet every time a session went to work.
     private func resizeWindow(for panel: MessagePanel, config: MessagePanelConfig) {
         guard let window else { return }
-        if let configured = model?.config.pet.size { petSize = configured }
-
-        let plan = MessagePanelLayout.plan(for: panel, config: config)
+        let plan = MessagePanelLayout.plan(for: panel, config: config, petWidth: petWidth)
+        let pet = PetWindow.size(forWidth: petWidth)
         let width = plan.rows.isEmpty
-            ? petSize.width
-            : MessagePanelLayout.panelWidth(for: config, petWidth: petSize.width)
-        let height = petSize.height + plan.height
+            ? pet.width
+            : MessagePanelLayout.panelWidth(for: config, petWidth: petWidth)
+        let height = pet.height + plan.height
 
         let frame = window.frame
         guard abs(frame.width - width) > 0.5 || abs(frame.height - height) > 0.5 else { return }
@@ -511,7 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // trusted.
         guard WindowDrag.isReachable(
             origin: point,
-            size: PetWindow.size(for: petSize),
+            size: PetWindow.size(forWidth: petWidth),
             screens: NSScreen.screens.map(\.visibleFrame)
         ) else { return nil }
 
@@ -524,7 +536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the saved point is the sprite's anchor rather than the frame's
         // corner. Otherwise a wide panel at one quit and a narrow one at the
         // next would walk the pet sideways a little on every relaunch.
-        let anchorX = frame.minX + (frame.width - petSize.width) / 2
+        let anchorX = frame.minX + (frame.width - petWidth) / 2
         UserDefaults.standard.set("\(anchorX),\(frame.minY)", forKey: Self.positionKey)
     }
 

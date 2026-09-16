@@ -227,7 +227,9 @@ that stopped moving three seconds into a ten-minute turn would read as asleep.
 A finished turn or a failure is a moment rather than a condition: its row
 plays three times (Codex's own shape) and then the pet settles into the breath,
 which is what stops it holding a pose. When the system asks for reduced motion,
-everything holds a single frame.
+every animation holds its first frame — the gaze is exempt, because a look pose
+is already a single frame and holding "still" must not mean looking the wrong
+way.
 
 Playback is layered, first match wins:
 
@@ -265,9 +267,11 @@ its context window is, the session's estimated cost, how much of the 5-hour and
 7-day usage windows is gone, and the status message above. Every item can be
 toggled and reordered in the manager's Settings; the panel can be set to stay
 up or to appear only while something is happening; its width is a percentage of
-the pet's own width (100–200%, slider, number field, and stepper) so it can be
-wider than the pet; and the rows can be aligned left, centred, or right — the
-pet itself never moves. The second line of the status message is what the event
+the pet's own width (100–300%, slider, number field, and stepper) so it can be
+up to three times the pet; the message's text size is yours to set (8–20pt at
+the default pet, and it grows with the pet, while the width stays a percentage
+of the pet and never follows the text); and the rows can be aligned left,
+centred, or right — the pet itself never moves. The second line of the status message is what the event
 knows: which tool an approval is waiting on, what failed, and — when a turn
 finishes — a preview of the assistant's last message, which Claude Code hands
 to hooks as `last_assistant_message` and Codex shows the same way. It is tidied
@@ -413,7 +417,7 @@ corrected specification.
 |---|---|
 | Core, pet loading, validation, activity engine | done |
 | Floating pet, drag, gaze, position memory | done |
-| Pet size — Codex's own 112pt, or its two ends | done — set in the manager's Settings |
+| Pet size — Codex's own 80–224 slider, defaulting to its 112 | done — set in the manager's Settings |
 | The pointer landing on the pet plays the jump | done — Codex's hover, held on the last frame |
 | The pet introduces itself once, waving | done — eight seconds, once per pet |
 | Tuck the pet away and wake it again | done — the menu bar item, remembered across launches |

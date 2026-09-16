@@ -38,20 +38,60 @@ struct AppConfigTests {
 
         #expect(config.pet.defaultPetID == "clippy")
         #expect(config.pet.alwaysOnTop == false)
-        #expect(config.pet.size == .standard, "no choice stored means Codex's own size")
+        #expect(config.pet.width == 112, "no choice stored means Codex's own size")
         #expect(config.pet.visible, "and a file from before the switch means the pet is on screen")
     }
 
-    @Test("the three pet sizes are Codex's default and its two ends")
-    func petSizes() {
-        #expect(PetSize.standard.width == 112)
-        #expect(PetSize.small.width == 80)
-        #expect(PetSize.large.width == 224)
+    @Test("the pet is drawn across Codex's own range, with its own default")
+    func petSizeRange() {
+        // Codex's setting is `avatar-overlay-mascot-width-px`, a slider from
+        // 80 to 224 that starts at 112 — so this one is a slider over the same
+        // numbers rather than named sizes.
+        #expect(AppConfig.PetConfig.minimumWidth == 80)
+        #expect(AppConfig.PetConfig.maximumWidth == 224)
+        #expect(AppConfig.PetConfig.defaultWidth == 112)
+
+        #expect(AppConfig.PetConfig.clampWidth(40) == 80)
+        #expect(AppConfig.PetConfig.clampWidth(400) == 224)
+        #expect(AppConfig.PetConfig.clampWidth(150) == 150)
+        #expect(AppConfig.PetConfig(width: 1000).width == 224, "a bad value is not stored raw")
+
         // 192x208 cells: the height follows from the width, as it does in
         // Codex's own `calc(var(--codex-pet-width) * 208 / 192)`.
-        for size in PetSize.allCases {
-            #expect(abs(size.height - (size.width * 208 / 192)) <= 0.5, "\(size)")
+        for width in [80.0, 112, 150, 224] {
+            #expect(abs(AppConfig.PetConfig.height(forWidth: width) - (width * 208 / 192)) <= 0.5)
         }
+    }
+
+    @Test("the three named sizes this setting used to have still load")
+    func legacyPetSizesDecode() throws {
+        // Configs on disk from before the slider say `"size": "large"`. The
+        // key is never written again, but reading it is what keeps a user's
+        // chosen pet size across the upgrade.
+        for (named, width) in [("small", 80.0), ("standard", 112.0), ("large", 224.0)] {
+            let stored = Data(#"{"schemaVersion":1,"pet":{"size":"\#(named)"}}"#.utf8)
+            let config = try JSONDecoder().decode(AppConfig.self, from: stored)
+            #expect(config.pet.width == width, "\(named) should mean \(width)pt")
+        }
+
+        // And a value it cannot make sense of falls back rather than throwing
+        // away the rest of the file.
+        let unknown = Data(#"{"schemaVersion":1,"pet":{"size":"enormous","defaultPetID":"clippy"}}"#.utf8)
+        let config = try JSONDecoder().decode(AppConfig.self, from: unknown)
+        #expect(config.pet.width == AppConfig.PetConfig.defaultWidth)
+        #expect(config.pet.defaultPetID == "clippy")
+
+        // `width` wins when both keys are there, which is what a downgrade and
+        // an upgrade back again leaves behind: the old version reads `size`,
+        // ignores `width`, and writes `size` again without touching `width`.
+        let both = Data(#"{"schemaVersion":1,"pet":{"size":"small","width":200}}"#.utf8)
+        #expect(try JSONDecoder().decode(AppConfig.self, from: both).pet.width == 200)
+    }
+
+    @Test("a stored width out of range is clamped on the way in")
+    func widthIsClampedOnLoad() throws {
+        let stored = Data(#"{"schemaVersion":1,"pet":{"width":900}}"#.utf8)
+        #expect(try JSONDecoder().decode(AppConfig.self, from: stored).pet.width == 224)
     }
 
     @Test("settings round-trip through disk")
@@ -60,11 +100,15 @@ struct AppConfigTests {
         var config = AppConfig()
         config.pet.defaultPetID = "clippy"
         config.pet.alwaysOnTop = false
-        config.pet.size = .large
+        config.pet.width = 224
         config.agents.autoConfigureNewAgents = true
         try store.save(config)
 
         #expect(store.load() == config)
+
+        let written = try String(contentsOf: store.url, encoding: .utf8)
+        #expect(written.contains("\"width\" : 224"), "the size is a number on disk now")
+        #expect(!written.contains("\"size\""), "and the name it replaced is never written again")
     }
 
     @Test("a config from a future schema is ignored rather than half-applied")

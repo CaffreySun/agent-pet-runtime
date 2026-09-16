@@ -158,13 +158,24 @@ public enum LookDirection {
         return (row: clamped < 8 ? 9 : 10, column: clamped % 8)
     }
 
-    /// Angle from `origin` to `target` in screen coordinates, clockwise from up.
+    /// Angle from `origin` to `target`, clockwise from up.
     ///
-    /// Screen y grows downward, so up is `-y`.
+    /// Both points are in **AppKit screen coordinates** — the space
+    /// `NSEvent.mouseLocation` and `NSWindow.frame` live in, where the origin
+    /// is the bottom left of the primary display and **y grows upward**. Up is
+    /// therefore `+dy`, and this is the space the pet is placed in, so a caller
+    /// can hand over a window's centre and the pointer unchanged.
+    ///
+    /// Codex's own code computes this angle in DOM coordinates, where y grows
+    /// *downward* (`atan2(dx, -dy)`); the sign of `dy` is the whole difference,
+    /// and getting it backwards mirrors the pet's gaze vertically — it looks
+    /// down when the pointer is above it — while leaving left and right
+    /// correct, which is quiet enough to go unnoticed. `LookDirectionTests`
+    /// pins the space.
     public static func angle(from origin: CGPoint, to target: CGPoint) -> Double {
         let dx = target.x - origin.x
         let dy = target.y - origin.y
-        let radians = atan2(dx, -dy)
+        let radians = atan2(dx, dy)
         let degrees = radians * 180 / .pi
         return degrees < 0 ? degrees + 360 : degrees
     }
