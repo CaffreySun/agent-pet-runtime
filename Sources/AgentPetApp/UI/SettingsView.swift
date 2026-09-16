@@ -10,15 +10,27 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Pet") {
-                Picker("Size", selection: binding(\.pet.size)) {
-                    ForEach(PetSize.allCases) { size in
-                        Text(size.displayName).tag(size)
+                LabeledContent("Size") {
+                    HStack(spacing: 8) {
+                        Slider(value: petWidthBinding,
+                               in: AppConfig.PetConfig.minimumWidth...AppConfig.PetConfig.maximumWidth,
+                               step: 4)
+                            .frame(minWidth: 120)
+                        TextField("", value: petWidthBinding,
+                                  format: .number.precision(.fractionLength(0)))
+                            .frame(width: 46)
+                            .multilineTextAlignment(.trailing)
+                        Text("pt")
+                        Stepper("", value: petWidthBinding,
+                                in: AppConfig.PetConfig.minimumWidth...AppConfig.PetConfig.maximumWidth,
+                                step: 4)
+                            .labelsHidden()
                     }
                 }
-                .pickerStyle(.segmented)
-                .help("How big the pet is drawn. Default is the size Codex draws its "
-                      + "own pet at (112pt wide); Small and Large are the ends of Codex's "
-                      + "own range. The message panel follows the pet.")
+                .help("How big the pet is drawn, in points across — Codex's own slider "
+                      + "runs 80–224 and defaults to 112, and this is the same range. "
+                      + "The sprite keeps its own proportions, the panel is a percentage "
+                      + "of this width, and the message's text follows it.")
                 Toggle("Animate the pet", isOn: binding(\.pet.animationEnabled))
                 Toggle("Keep the pet above other windows", isOn: binding(\.pet.alwaysOnTop))
                 Toggle("Respect Reduce Motion", isOn: binding(\.pet.respectsReduceMotion))
@@ -86,17 +98,50 @@ struct SettingsView: View {
 
             LabeledContent("Width") {
                 HStack(spacing: 8) {
-                    Slider(value: widthPercentBinding, in: 100...200, step: 5)
+                    Slider(value: widthPercentBinding,
+                           in: MessagePanelConfig.minimumWidthPercent...MessagePanelConfig.maximumWidthPercent,
+                           step: 5)
                         .frame(minWidth: 120)
                     TextField("", value: widthPercentBinding, format: .number.precision(.fractionLength(0)))
                         .frame(width: 46)
                         .multilineTextAlignment(.trailing)
                     Text("%")
-                    Stepper("", value: widthPercentBinding, in: 100...200, step: 5)
+                    Stepper("", value: widthPercentBinding,
+                            in: MessagePanelConfig.minimumWidthPercent...MessagePanelConfig.maximumWidthPercent,
+                            step: 5)
                         .labelsHidden()
                 }
             }
-            .help("Panel width as a percentage of the pet's own width. 200% is twice the pet.")
+            .help("Panel width as a percentage of the pet's own width. 200% is twice "
+                  + "the pet, 300% three times it. The message's text size does not "
+                  + "come into it — only the pet does.")
+
+            LabeledContent("Text size") {
+                HStack(spacing: 8) {
+                    Slider(value: messageFontSizeBinding,
+                           in: MessagePanelConfig.minimumFontSize...MessagePanelConfig.maximumFontSize,
+                           step: 0.5)
+                        .frame(minWidth: 120)
+                    TextField("", value: messageFontSizeBinding,
+                              format: .number.precision(.fractionLength(1)))
+                        .frame(width: 46)
+                        .multilineTextAlignment(.trailing)
+                    Text("pt")
+                    Stepper("", value: messageFontSizeBinding,
+                            in: MessagePanelConfig.minimumFontSize...MessagePanelConfig.maximumFontSize,
+                            step: 0.5)
+                        .labelsHidden()
+                }
+            }
+            .help("The status message's text — the line that says what the pet is "
+                  + "doing — in points at the default 112pt pet. It grows with the pet "
+                  + "so it keeps its place beside one, and the panel's width stays a "
+                  + "percentage of the pet rather than following the text.")
+
+            Text("The message draws at \(effectiveMessageSize) pt with a "
+                 + "\(Int(model.config.pet.width))pt pet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Picker("Align", selection: binding(\.messagePanel.alignment)) {
                 ForEach(MessagePanelConfig.Alignment.allCases) { alignment in
@@ -243,6 +288,35 @@ struct SettingsView: View {
                 model.saveConfig()
             }
         )
+    }
+
+    private var petWidthBinding: Binding<Double> {
+        Binding(
+            get: { model.config.pet.width },
+            set: { newValue in
+                model.config.pet.width = AppConfig.PetConfig.clampWidth(newValue)
+                model.saveConfig()
+            }
+        )
+    }
+
+    private var messageFontSizeBinding: Binding<Double> {
+        Binding(
+            get: { model.config.messagePanel.messageFontSize },
+            set: { newValue in
+                model.config.messagePanel.messageFontSize =
+                    MessagePanelConfig.clampFontSize(newValue)
+                model.saveConfig()
+            }
+        )
+    }
+
+    /// What the text-size setting means at the pet size on screen now — the
+    /// number the slider alone cannot tell you.
+    private var effectiveMessageSize: String {
+        let points = MessagePanelConfig.clampFontSize(model.config.messagePanel.messageFontSize)
+            * model.config.pet.width / AppConfig.PetConfig.defaultWidth
+        return points.formatted(.number.precision(.fractionLength(1)))
     }
 
     private func itemEnabledBinding(_ index: Int) -> Binding<Bool> {

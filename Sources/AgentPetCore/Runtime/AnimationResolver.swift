@@ -148,12 +148,17 @@ public struct AnimationResolver: Sendable {
     ///    back to the row it would have played.
     /// 6. **Idle**.
     ///
-    /// Under reduced motion every layer collapses to the first frame of
+    /// Under reduced motion every animation collapses to the first frame of
     /// whatever it would have played, which is what Codex does and what the
-    /// system setting asks for.
+    /// system setting asks for. A **static pose** is exempt: its column is a
+    /// *selection* — which of the sixteen directions the pet is looking in —
+    /// and not a point in time, so zeroing it would not hold the pet still. It
+    /// would show pose `000` when the pointer was in one half of the screen and
+    /// pose `180` in the other, which is a wrong answer, not a still one.
     public func resolve(_ situation: PetSituation, profile: CompatibilityProfile) -> AnimationFrame? {
         guard let frame = resolveAnimating(situation, profile: profile) else { return nil }
         guard situation.reducedMotion else { return frame }
+        guard profile.track(named: frame.trackName)?.loop != .staticPose else { return frame }
         return AnimationFrame(
             trackName: frame.trackName, row: frame.row, column: 0, isFinished: false
         )

@@ -189,17 +189,40 @@ struct LookDirectionTests {
         #expect(LookDirection.cell(forAngle: angle) == (9, 4))
     }
 
-    @Test("up is 0 degrees even though screen y grows downward")
+    @Test("up is 0 degrees in the screen space the pet is placed in")
     func upIsZero() {
-        let angle = LookDirection.angle(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: -100))
+        // AppKit screen coordinates: y grows *upward*, so a pointer above the
+        // pet has the larger y. Reading this the other way round — Codex's own
+        // DOM space — mirrors the gaze vertically, which is a bug this test
+        // exists to keep out.
+        let angle = LookDirection.angle(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: 100))
         #expect(abs(angle) < 0.001)
+        #expect(LookDirection.cell(forAngle: angle) == (9, 0))
     }
 
     @Test("down is 180 degrees and lives in the second look row")
     func downIsOneEighty() {
-        let angle = LookDirection.angle(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: 100))
+        let angle = LookDirection.angle(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: -100))
         #expect(abs(angle - 180) < 0.001)
         #expect(LookDirection.cell(forAngle: angle) == (10, 0))
+    }
+
+    @Test("a pointer in each quadrant resolves to the pose facing it")
+    func quadrants() {
+        let origin = CGPoint(x: 500, y: 300)
+        let expected: [(CGPoint, row: Int, column: Int)] = [
+            (CGPoint(x: 600, y: 400), 9, 2),    // up and right → 045°
+            (CGPoint(x: 600, y: 200), 9, 6),    // down and right → 135°
+            (CGPoint(x: 400, y: 200), 10, 2),   // down and left → 225°
+            (CGPoint(x: 400, y: 400), 10, 6),   // up and left → 315°
+        ]
+        for (pointer, row, column) in expected {
+            let cell = LookDirection.cell(
+                forAngle: LookDirection.angle(from: origin, to: pointer)
+            )
+            #expect(cell == (row, column),
+                    "pointer at \(pointer) gave \(cell), expected (\(row), \(column))")
+        }
     }
 
     @Test("angles wrap rather than going out of range", arguments: [
@@ -561,10 +584,15 @@ struct PresentationLayerTests {
         #expect(dragged?.trackName == "running-right")
         #expect(dragged?.column == 0, "a dragged pet holds still too")
 
+        // A look pose is a selection, not a point in time: holding it still
+        // means holding *the pose the pointer asks for*. Zeroing its column
+        // would show 000 for a pointer on one side of the pet and 180 for the
+        // other — a wrong answer rather than a still one.
         let gazing = resolver.resolve(
             situation(look: 90, reducedMotion: true), profile: v2
         )
-        #expect(gazing?.column == 0, "the gaze pose does not wander")
+        #expect(gazing == resolver.resolve(situation(look: 90), profile: v2))
+        #expect(gazing?.column == 4, "the gaze still points at the pointer")
     }
 
     @Test("every state resolves to a playable frame in both profiles")

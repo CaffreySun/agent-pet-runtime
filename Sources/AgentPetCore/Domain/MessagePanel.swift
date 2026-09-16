@@ -12,27 +12,49 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
     /// A percentage rather than points because the pet is what it sits beside:
     /// 200% is "twice the pet", whatever size that pet draws at.
     public static let minimumWidthPercent: Double = 100
-    public static let maximumWidthPercent: Double = 200
+    public static let maximumWidthPercent: Double = 300
+
+    /// Unchanged from when 200 was also the ceiling: raising it must not
+    /// quietly widen a panel nobody asked to widen.
+    public static let defaultWidthPercent: Double = 200
+
+    /// The status message's text size, in points **at the default pet size**.
+    ///
+    /// The message is the line the user reads, so it grows with the pet: at a
+    /// 224pt pet the 10.5pt default would be a fifth of the pet's own height.
+    /// The panel's *width* does not follow the font — it stays a percentage of
+    /// the pet, which the pet size already scales.
+    public static let minimumFontSize: Double = 8
+    public static let maximumFontSize: Double = 20
+    public static let defaultFontSize: Double = 10.5
+
+    public static func clampFontSize(_ points: Double) -> Double {
+        min(max(points, minimumFontSize), maximumFontSize)
+    }
 
     /// Whether the panel stays up while sessions are idle, or only appears
     /// when something is actually happening.
     public var alwaysVisible: Bool
     /// Display order, left to right within a row.
     public var items: [Item]
-    /// Panel width as a percentage of the pet's width, 100–200.
+    /// Panel width as a percentage of the pet's width, 100–300.
     public var widthPercent: Double
+    /// The message line's text size, in points at the default pet size.
+    public var messageFontSize: Double
     /// Where the rows sit inside the panel.
     public var alignment: Alignment
 
     public init(
         alwaysVisible: Bool = true,
         items: [Item] = Kind.allCases.map { Item($0) },
-        widthPercent: Double = MessagePanelConfig.maximumWidthPercent,
+        widthPercent: Double = MessagePanelConfig.defaultWidthPercent,
+        messageFontSize: Double = MessagePanelConfig.defaultFontSize,
         alignment: Alignment = .left
     ) {
         self.alwaysVisible = alwaysVisible
         self.items = items
         self.widthPercent = widthPercent
+        self.messageFontSize = messageFontSize
         self.alignment = alignment
     }
 
@@ -47,6 +69,10 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
             ?? defaults.alwaysVisible
         widthPercent = Self.clampWidth(
             try container.decodeIfPresent(Double.self, forKey: .widthPercent) ?? defaults.widthPercent
+        )
+        messageFontSize = Self.clampFontSize(
+            try container.decodeIfPresent(Double.self, forKey: .messageFontSize)
+                ?? defaults.messageFontSize
         )
         alignment = try container.decodeIfPresent(Alignment.self, forKey: .alignment)
             ?? defaults.alignment

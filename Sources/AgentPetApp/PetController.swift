@@ -363,6 +363,12 @@ final class PetController {
 
     /// Where the pointer is, relative to the pet, as degrees clockwise from up.
     ///
+    /// Both points are AppKit screen coordinates — `NSEvent.mouseLocation` and
+    /// whatever the centre provider answers — which is the space
+    /// `LookDirection.angle` speaks. A provider that answered in window
+    /// coordinates would introduce the same vertical mirror the angle's own
+    /// sign convention used to have.
+    ///
     /// Only computed for profiles that have gaze rows: a V1 pet has nowhere to
     /// put the answer, so polling the pointer for it would be work with no
     /// purpose.

@@ -77,7 +77,7 @@ enum RenderSelfTest {
         return samples.joined(separator: "+")
     }
 
-    static func run(controller: PetController, view: PetView, petSize: PetSize) -> Int32 {
+    static func run(controller: PetController, view: PetView, petWidth: CGFloat) -> Int32 {
         print("Render self-test")
         print("")
 
@@ -159,7 +159,7 @@ enum RenderSelfTest {
 
         failures += checkDraggable(view: view)
         failures += checkBehaviourLayers(controller: controller, view: view)
-        failures += checkMessagePanel(controller: controller, view: view, petSize: petSize)
+        failures += checkMessagePanel(controller: controller, view: view, petWidth: petWidth)
         failures += checkReopenedWindow()
         failures += checkManagerSidebar()
 
@@ -263,7 +263,9 @@ enum RenderSelfTest {
         // session row has: a blank agent name or session id reads as a bug,
         // and the pet's own line has neither.
         if let greetingRow {
-            let items = MessagePanelLayout.items(for: greetingRow, config: view.currentPanelConfig)
+            let items = MessagePanelLayout.items(
+                for: greetingRow, config: view.currentPanelConfig, petWidth: view.petWidth
+            )
             let sessionColumns = items.filter { $0.kind == .agent || $0.kind == .session }
             if sessionColumns.isEmpty {
                 print("  ✓ the introduction carries no session's columns")
@@ -361,7 +363,7 @@ enum RenderSelfTest {
     /// Driven by real events through the real engine — the panel is a view of
     /// the activity list, and a test that hand-built the rows would prove
     /// nothing about whether sessions reach it.
-    private static func checkMessagePanel(controller: PetController, view: PetView, petSize: PetSize) -> Int {
+    private static func checkMessagePanel(controller: PetController, view: PetView, petWidth: CGFloat) -> Int {
         print("")
         print("Message panel")
         var failures = 0
@@ -434,8 +436,8 @@ enum RenderSelfTest {
         }
 
         // Positions and sizes, as the window sees them.
-        let plan = MessagePanelLayout.plan(for: panel, config: view.currentPanelConfig)
-        let pet = PetWindow.size(for: petSize)
+        let plan = MessagePanelLayout.plan(for: panel, config: view.currentPanelConfig, petWidth: petWidth)
+        let pet = PetWindow.size(forWidth: petWidth)
         let configuredWidth = MessagePanelLayout.panelWidth(
             for: view.currentPanelConfig, petWidth: pet.width
         )
@@ -456,6 +458,34 @@ enum RenderSelfTest {
             print("  ✗ the window is wrong: "
                   + "\(view.window.map { "\($0.frame.width)x\($0.frame.height)" } ?? "no window") "
                   + "wanting \(configuredWidth) wide")
+            failures += 1
+        }
+
+        // The gaze has to be aimed from the sprite, not from the window: the
+        // panel lives inside the window, so the window's centre is above the
+        // pet by half the panel's height and the pose it resolves would be a
+        // neighbour of the right one. Checked here, with a panel up, because
+        // with no panel the two centres are the same point and nothing is
+        // being asked of the provider.
+        let spriteCentre = view.convert(
+            CGPoint(x: view.spriteRect.midX, y: view.spriteRect.midY), to: nil
+        )
+        if let window = view.window, plan.height > 0,
+           let aim = controller.petCenterProvider?() {
+            let want = window.convertPoint(toScreen: spriteCentre)
+            let drift = abs(aim.x - want.x) + abs(aim.y - want.y)
+            // Screen y grows upward, so the panel puts the window's centre
+            // *above* the sprite's.
+            let reserved = window.frame.midY - aim.y
+            if drift < 0.5, reserved > 1 {
+                print("  ✓ the gaze aims from the sprite's centre, "
+                      + "\(Int(reserved))pt below the window's own")
+            } else {
+                print("  ✗ the gaze aims from \(aim), the sprite's centre is \(want)")
+                failures += 1
+            }
+        } else {
+            print("  ✗ no panel, no window, or no gaze origin to check")
             failures += 1
         }
 
@@ -523,7 +553,7 @@ enum RenderSelfTest {
         // most of the panel's width, and the name is what the Agents page is
         // for. The name stays on the item for the verbose log.
         let agentItems = MessagePanelLayout.items(
-            for: panel.rows[0], config: view.currentPanelConfig
+            for: panel.rows[0], config: view.currentPanelConfig, petWidth: petWidth
         ).filter { $0.kind == .agent }
         if let agent = agentItems.first,
            let symbol = agent.symbolName,
@@ -543,14 +573,45 @@ enum RenderSelfTest {
         // the item list still looked right.
         let fullConfig = MessagePanelConfig()   // every item on, 200% of the pet
         let squeezed = MessagePanelLayout.panelWidth(for: fullConfig, petWidth: pet.width)
-        let firstRow = MessagePanelLayout.plan(for: panel, config: fullConfig).rows.first
+        let firstRow = MessagePanelLayout.plan(for: panel, config: fullConfig, petWidth: pet.width).rows.first
         let drawnKinds = firstRow.map {
-            MessagePanelLayout.frames(for: $0, in: squeezed).map(\.item.kind)
+            MessagePanelLayout.frames(
+                for: $0, in: squeezed,
+                typography: MessagePanelLayout.typography(for: fullConfig, petWidth: pet.width)
+            ).map(\.item.kind)
         } ?? []
         if drawnKinds.contains(.agent) {
             print("  ✓ it survives a row too narrow for everything else (\(drawnKinds.count) of 9 items fit)")
         } else {
             print("  ✗ the agent glyph was squeezed out of the row entirely")
+            failures += 1
+        }
+
+        // The message line follows the pet; nothing else follows the message,
+        // and in particular the width does not. The default has to stay
+        // exactly what it has always been — 10.5pt in an 18pt row — or the
+        // panel would move for every existing user the moment they upgrade.
+        let baseType = MessagePanelLayout.typography(for: fullConfig, petWidth: 112)
+        let bigType = MessagePanelLayout.typography(for: fullConfig, petWidth: 224)
+        var largeText = fullConfig
+        largeText.messageFontSize = 20
+        let wideText = MessagePanelLayout.typography(for: largeText, petWidth: 112)
+        let largeWidth = MessagePanelLayout.panelWidth(for: largeText, petWidth: 224)
+        if abs(baseType.messageFont.pointSize - 10.5) < 0.01, baseType.rowHeight == 18 {
+            print("  ✓ at the default pet the message is still 10.5pt in an 18pt row")
+        } else {
+            print("  ✗ the default message size moved: "
+                  + "\(baseType.messageFont.pointSize)pt, row \(baseType.rowHeight)")
+            failures += 1
+        }
+        if abs(bigType.messageFont.pointSize - 21) < 0.01, abs(bigType.rowHeight - 36) <= 1,
+           abs(wideText.messageFont.pointSize - 20) < 0.01,
+           largeWidth == MessagePanelLayout.panelWidth(for: fullConfig, petWidth: 224) {
+            print("  ✓ a 224pt pet draws the message at 21pt — the text size never moves the width")
+        } else {
+            print("  ✗ the message does not follow the pet: "
+                  + "\(bigType.messageFont.pointSize)pt in a \(bigType.rowHeight)pt row, "
+                  + "and the width became \(largeWidth)")
             failures += 1
         }
 

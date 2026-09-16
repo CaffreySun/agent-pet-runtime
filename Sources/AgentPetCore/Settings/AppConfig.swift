@@ -1,39 +1,4 @@
-import CoreGraphics
 import Foundation
-
-/// How big the pet is drawn.
-///
-/// Codex's own setting is a slider over 80–224 px
-/// (`avatar-overlay-mascot-width-px`, default 112), so the three sizes on
-/// offer are its default and its two ends: every choice here is one Codex
-/// itself allows, and the default is the size its own pet is drawn at.
-public enum PetSize: String, Codable, Sendable, Equatable, CaseIterable, Identifiable {
-    case small
-    case standard
-    case large
-
-    /// The sprite's width in points. The atlas cell is 192×208, so the
-    /// height follows from it.
-    public var width: CGFloat {
-        switch self {
-        case .small:    return 80
-        case .standard: return 112
-        case .large:    return 224
-        }
-    }
-
-    public var height: CGFloat { (width * 208 / 192).rounded() }
-
-    public var displayName: String {
-        switch self {
-        case .small:    return "Small"
-        case .standard: return "Default"
-        case .large:    return "Large"
-        }
-    }
-
-    public var id: String { rawValue }
-}
 
 /// User-visible settings, persisted as JSON.
 ///
@@ -85,14 +50,35 @@ public struct AppConfig: Codable, Sendable, Equatable {
     }
 
     public struct PetConfig: Codable, Sendable, Equatable {
+
+        /// How big the pet is drawn, in points across.
+        ///
+        /// Codex's own setting is a slider over these bounds
+        /// (`avatar-overlay-mascot-width-px`, default 112), so this is one too
+        /// — the three named sizes it used to be were only ever its default
+        /// and its two ends.
+        public static let minimumWidth: Double = 80
+        public static let maximumWidth: Double = 224
+        public static let defaultWidth: Double = 112
+
+        public static func clampWidth(_ points: Double) -> Double {
+            min(max(points, minimumWidth), maximumWidth)
+        }
+
+        /// The height that width draws at: the atlas cell's own aspect ratio,
+        /// as Codex's `calc(var(--codex-pet-width) * 208 / 192)`.
+        public static func height(forWidth width: Double) -> Double {
+            (width * 208 / 192).rounded()
+        }
+
         /// The pet shown on the desktop. `nil` means "first one found".
         public var defaultPetID: String?
         public var animationEnabled: Bool
         public var alwaysOnTop: Bool
         /// Honours the system Reduce Motion setting when true.
         public var respectsReduceMotion: Bool
-        /// How big the pet is drawn. `standard` is Codex's own size.
-        public var size: PetSize
+        /// How big the pet is drawn, 80–224 points across.
+        public var width: Double
         /// Whether the pet is on screen. Codex calls putting it away "tuck
         /// away"; the app stays in the menu bar either way.
         public var visible: Bool
@@ -102,19 +88,38 @@ public struct AppConfig: Codable, Sendable, Equatable {
             animationEnabled: Bool = true,
             alwaysOnTop: Bool = true,
             respectsReduceMotion: Bool = true,
-            size: PetSize = .standard,
+            width: Double = PetConfig.defaultWidth,
             visible: Bool = true
         ) {
             self.defaultPetID = defaultPetID
             self.animationEnabled = animationEnabled
             self.alwaysOnTop = alwaysOnTop
             self.respectsReduceMotion = respectsReduceMotion
-            self.size = size
+            self.width = Self.clampWidth(width)
             self.visible = visible
         }
 
+        /// The widths the three named sizes stood for, for a config written
+        /// before this setting was a slider.
+        private static let legacyWidths: [String: Double] = [
+            "small": minimumWidth, "standard": defaultWidth, "large": maximumWidth,
+        ]
+
+        private enum CodingKeys: String, CodingKey {
+            case defaultPetID, animationEnabled, alwaysOnTop, respectsReduceMotion
+            case visible, width
+        }
+
+        /// The named size this setting used before it was a slider. Read
+        /// through a key type of its own, because a synthesised encoder
+        /// refuses to build when a coding key has no stored property behind it
+        /// — and nothing should ever write `size` again.
+        private enum LegacyKeys: String, CodingKey {
+            case size
+        }
+
         /// Decoded field by field, for the same reason `AppConfig` is: a config
-        /// written before `size` existed has no key for it, and a synthesised
+        /// written before `width` existed has no key for it, and a synthesised
         /// decode would fail the whole nested object — taking the user's chosen
         /// pet down with the missing size.
         public init(from decoder: any Decoder) throws {
@@ -127,7 +132,15 @@ public struct AppConfig: Codable, Sendable, Equatable {
                 ?? defaults.alwaysOnTop
             respectsReduceMotion = try container.decodeIfPresent(Bool.self, forKey: .respectsReduceMotion)
                 ?? defaults.respectsReduceMotion
-            size = try container.decodeIfPresent(PetSize.self, forKey: .size) ?? defaults.size
+            if let points = try container.decodeIfPresent(Double.self, forKey: .width) {
+                width = Self.clampWidth(points)
+            } else if let named = try decoder.container(keyedBy: LegacyKeys.self)
+                        .decodeIfPresent(String.self, forKey: .size),
+                      let legacy = Self.legacyWidths[named] {
+                width = legacy
+            } else {
+                width = defaults.width
+            }
             visible = try container.decodeIfPresent(Bool.self, forKey: .visible) ?? defaults.visible
         }
     }
