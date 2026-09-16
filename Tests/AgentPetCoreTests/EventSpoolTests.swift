@@ -95,18 +95,20 @@ struct EventSpoolTests {
     @Test("a camelCase reporter keeps the identity it was spooled with")
     func camelCasePayloadKeepsItsSession() throws {
         // The regression this exists for (2026-09-15; ported from PR #1 by
-        // CaffreySun): an in-process extension names the session `sessionId`,
-        // and the allowlist only knew the hook spelling `session_id`. An event
-        // that arrived while the app was down was spooled without its session,
-        // so replaying it after the restart drew the session under a
-        // process-derived name — a second row for a session that was already
-        // on screen under its real one.
+        // CaffreySun, wording corrected from PR #2): the allowlist knew only
+        // Claude Code's `session_id` / `tool_name`, so a payload that spelled
+        // its session id only in camelCase was spooled without one, and
+        // replaying it after a restart drew that session under a
+        // process-derived name, beside the real one. The envelope below is
+        // shaped like such a payload; the redaction path does not care which
+        // agent it came from, so it is not named after one whose wire someone
+        // might go and check.
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
         EventSpool.write(
             BridgeEnvelope(
-                agentID: "pi",
+                agentID: "generic-cli",
                 eventName: "tool_execution_start",
                 receivedAt: origin,
                 proc: BridgeProcessInfo(pid: 100, ppid: 50, tty: nil),
