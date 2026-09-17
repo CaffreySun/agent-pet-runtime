@@ -33,11 +33,26 @@ bridge is measured and bounded, and nothing is recorded that should not be.
 
 ```bash
 brew tap dncore/agent-pet-runtime
-brew install --cask agent-pet-runtime
+brew install --cask dncore/agent-pet-runtime/agent-pet-runtime
 ```
 
-The app is ad-hoc signed rather than notarised, so the cask strips macOS's
-quarantine attribute on install. If Gatekeeper still objects:
+The name on the second line is spelled in full on purpose. Homebrew treats a
+third-party tap as untrusted until it is told otherwise, and refuses to load a
+cask out of one: `brew install --cask agent-pet-runtime` stops with
+
+```
+Error: Refusing to load cask dncore/agent-pet-runtime/agent-pet-runtime from untrusted tap dncore/agent-pet-runtime.
+```
+
+The fully qualified name is Homebrew's own way past that — asking for
+`tap/name` trusts the cask it was asked for, and says so. `brew trust
+dncore/agent-pet-runtime` does the same for the whole tap if you would rather
+(`brew trust --help`, and https://docs.brew.sh/Tap-Trust).
+
+The app is ad-hoc signed rather than notarised. A copy that macOS quarantined —
+one downloaded through a browser, or dragged out of the zip in Finder — is
+reported by Gatekeeper as damaged; a `brew install` is not quarantined in the
+first place. If it does object:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/AgentPet.app"

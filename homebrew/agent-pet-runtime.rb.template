@@ -14,12 +14,24 @@ cask "agent-pet-runtime" do
 
   app "AgentPet.app"
 
-  # The app is ad-hoc signed, not notarised, so macOS quarantines it on
-  # download and Gatekeeper reports it as damaged. Stripping the attribute on
-  # install is what makes a downloaded copy behave like a built one.
-  postflight_steps do
-    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/AgentPet.app"]
-  end
+  # Deliberately no install steps here.
+  #
+  # This cask used to strip `com.apple.quarantine` in a `postflight_steps`
+  # block, on the theory that a downloaded copy arrives quarantined and
+  # Gatekeeper then calls an ad-hoc signed bundle damaged. It does not:
+  # Homebrew downloads with curl, and nothing quarantines that — in Homebrew's
+  # own code `Quarantine.propagate` returns early unless the container it just
+  # unpacked already carries the attribute, and `Quarantine.cask!` is an empty
+  # stub — so the step was a no-op on every install it ever ran in.
+  #
+  # What it did do is pin the cask to `run`, an install step Homebrew only
+  # added on 2026-07-26: on anything older, the cask failed to load at all. A
+  # cask that uses nothing but stanzas loads on every version, which is worth
+  # more than a command that never ran.
+  #
+  # The Gatekeeper case is real for a copy that *was* quarantined — downloaded
+  # through a browser, or dragged out of the zip in Finder — and the caveats
+  # below carry the one-line fix for it.
 
   # Stop the running pet before the bundle is replaced. Without this the old
   # binary keeps running from memory, holding the bridge socket, so hook events
