@@ -261,14 +261,14 @@ landing on the pet.
 
 Gaze is folded into the rows rather than layered under them, which is how
 Codex's own sprite works: the look frame *replaces* the animation for the rows
-whose state offers one — `idle` and `waving` here. Codex offers one to `running`
-as well, and that one is dropped on purpose: a look pose is a single static
-frame, and it replaced `idle` and `running` with the *same* cell, so a working
-pet was drawn exactly like a resting one whenever the pointer was anywhere on
-screen. The state that says "it is working" has to be visible. A waiting pet
-keeps asking, a working one keeps running, and the deadzone is a single point:
-the pet looks at your cursor wherever it is, and only stops when it is exactly
-on its centre.
+its state offers one to. Codex offers it to `idle`, `running` and `waving`; this
+runtime offers it to `idle` alone, because a look pose is a single *static*
+frame and everything it replaced lost its content for as long as the pointer
+was on screen. `running` made a working pet pixel-identical to a resting one;
+`waving` drew the pet's hello as a stare. A waiting pet keeps asking, a working
+one keeps running, the pet waves when it greets you, and the deadzone is a
+single point: an idle pet looks at your cursor wherever it is, and only stops
+when it is exactly on its centre.
 
 ## What the pet says
 
@@ -336,6 +336,14 @@ exactly those directories, previews each pet, and puts the one you choose on
 your desktop; it does not install, import, or delete anything itself, so the
 app and your terminal Codex can never disagree about what is installed. Your
 choice is remembered across launches.
+
+A folder that looks like a pet and cannot be played — a manifest whose version
+contradicts the sheet, a field of the wrong type, a spritesheet that is not an
+image — is **shown rather than dropped**: the manager lists it under "Not
+listed" with the reason, `--diagnose` prints the same thing, and a launch with
+no playable pet says which folders were refused instead of claiming the
+directory is empty. The profile is decided by the atlas's measured size (V1
+`1536x1872`, V2 `1536x2288`), never by the manifest's word alone.
 
 ---
 

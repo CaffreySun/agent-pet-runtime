@@ -69,8 +69,20 @@ struct PetsView: View {
             if model.pets.isEmpty {
                 emptyState
             } else {
-                List(model.pets, id: \.id, selection: $selection) { pet in
-                    row(for: pet).tag(pet.id)
+                List(selection: $selection) {
+                    ForEach(model.pets, id: \.id) { pet in
+                        row(for: pet).tag(pet.id)
+                    }
+                    // Folders that look like pets and are not listed, with the
+                    // reason `--diagnose` also prints. Last, and in its own
+                    // section: they are not pets this window can offer.
+                    if !model.skippedPets.isEmpty {
+                        Section("Not listed") {
+                            ForEach(model.skippedPets, id: \.root) { skip in
+                                skippedRow(for: skip)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -78,16 +90,36 @@ struct PetsView: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Text("No pets found")
+            Text(model.skippedPets.isEmpty ? "No pets found" : "No pets could be listed")
                 .foregroundStyle(.secondary)
-            Text("Codex reads \(PetLibrary.petsDirectory.path).\nInstall one with:\n\nnpx codex-pets add <pet-id>")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .textSelection(.enabled)
+            if model.skippedPets.isEmpty {
+                Text("Codex reads \(PetLibrary.petsDirectory.path).\nInstall one with:\n\nnpx codex-pets add <pet-id>")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+            } else {
+                // The empty list is where a missing pet is looked for, so the
+                // reason has to be here and not only in `--diagnose`.
+                Text("\(PetLibrary.petsDirectory.path) holds \(model.skippedPets.count) "
+                     + "folder(s) that look like pets but cannot be played:")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                skippedList
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+
+    private var skippedList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(model.skippedPets, id: \.root) { skip in
+                skippedRow(for: skip)
+            }
+        }
+        .frame(maxWidth: 420)
     }
 
     private func row(for pet: PetLibrary.Entry) -> some View {
@@ -105,6 +137,34 @@ struct PetsView: View {
                     .foregroundStyle(.tint)
                     .help("Currently on the desktop")
             }
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// A folder that carries a manifest and cannot be listed: the folder the
+    /// user sees, and the sentence that says why it is not a pet here.
+    private func skippedRow(for skip: PetLibraryScanner.Skipped) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .help("This folder cannot be listed")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(skip.name)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Text(skip.reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([skip.root])
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .buttonStyle(.borderless)
+            .help("Reveal \(skip.name) in the Finder")
         }
         .padding(.vertical, 2)
     }

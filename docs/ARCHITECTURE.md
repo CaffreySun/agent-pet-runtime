@@ -234,17 +234,20 @@ column = sector mod 8
 2. 手势播放中    → waving / jumping               （one-shot，播完下沉）
 3. 指针停在宠物上 → jumping                        （三遍，然后接 idle 段，见下）
 4. Agent 状态    → 见 §3.3                        （inactive 状态跳过）
-5. 注视方向      → row 9/10                       （仅 V2，且只在上面某一行的"可被注视替换"时，见下）
+5. 注视方向      → row 9/10                       （仅 V2，且只在 idle 兜底上，见下）
 6. idle
 ```
 
-**注视不是独立一层，而是折进别的行里的**（2026-09-14 照抄 Codex；2026-09-17 摘掉 running）：Codex 的 mascot 只在将要播放的行是 `idle`/`running`/`waving` 时才把 look frame 传下去（`lookFrame: animates ? lookFrame : null`），而 sprite 元素**用 look frame 直接顶掉那一行的播放**（`if (n != null) { backgroundPosition = Glo(n, rows); return }`，定时器根本不启动）。本项目照此实现，**只把 `running` 从集合里摘掉**：
+**注视不是独立一层，而是折进别的行里的**（2026-09-14 照抄 Codex；2026-09-17 两次摘除后只剩 idle）：Codex 的 mascot 只在将要播放的行是 `idle`/`running`/`waving` 时才把 look frame 传下去（`lookFrame: animates ? lookFrame : null`），而 sprite 元素**用 look frame 直接顶掉那一行的播放**（`if (n != null) { backgroundPosition = Glo(n, rows); return }`，定时器根本不启动）。本项目**把这三行里的两行都摘掉了**，理由只有一个：注视姿态是**单帧静态**，被它顶掉的那一行在指针位于屏幕上时（也就是一直）**内容整个消失**。
 
-- **工作中的宠物不再被注视顶掉（2026-09-17 偏离，用户实测）**。注视姿态是**单帧静态**，顶掉 idle 和 running 时用的又是**同一个格子**——所以在有 look 行的宠物（V2）身上，干活时和发呆时画出来的**是同一张图**，只要屏幕上有指针（也就是一直）就分不出来。宠物存在的意义是说清 agent 在干什么，而唯一表示"在干活"的状态恰好成了唯一看不见的那个。现在 running 照播 row 7，注视只折进 `waving` 和 idle 兜底。与 idle 时长（§3.1a）同一类取舍：照抄 Codex 输给宠物读数正确。**别不看一整轮活儿就把它改回去**；
-- `waiting` / `failed` / `review`、跳跃、拖拽 locomotion 都不在集合里，该播什么播什么（所以"等待你输入"的宠物不会被光标带走）；
-- 一个 moment（`completed`/`failed`）播完沉入 idle 尾段时，Codex 的状态仍是 `review`/`failed`，因此**不**接受注视——本项目照此实现（只有状态本身是 idle/waving 才给 look frame）；
-- 死区是 **1pt**（Codex 的 `uuo = 1`：`Math.hypot(r, i) <= 1` 才算"没有方向"），所以屏幕上有光标时宠物基本一直在看着它——这是原版行为，不是 bug；
+- **`running` 摘掉（2026-09-17，用户实测）**：顶掉 idle 和 running 用的是**同一个格子**，所以在有 look 行的宠物（V2）身上，干活时和发呆时画出来的**是同一张图**，唯一表示"在干活"的状态恰好成了唯一看不见的那个。现在照播 row 7。
+- **`waving` 摘掉（同日，用户点名）**：`waving` 是本项目的手势层——点击问候、以及**初次登场的那次挥手**。被注视顶掉时，宠物的"你好"被画成一次凝视，连菜单里的 `Preview Animation → waving` 也看不到挥手。现在两处都真播 row 3（自检在**钉住方向**的情况下断言这件事，因为真实使用中指针从不在宠物中心）。
+- 剩下的只有 **idle 兜底**：没有任何东西要表达的宠物，才交给指针。`waiting` / `failed` / `review`、跳跃、拖拽 locomotion 本来就不在 Codex 的集合里，该播什么播什么（所以"等待你输入"的宠物不会被光标带走）；
+- 一个 moment（`completed`/`failed`）播完沉入 idle 尾段时，Codex 的状态仍是 `review`/`failed`，因此**不**接受注视——本项目照此实现；
+- 死区是 **1pt**（Codex 的 `uuo = 1`：`Math.hypot(r, i) <= 1` 才算"没有方向"），所以屏幕上有光标时空闲的宠物基本一直在看着它——这是原版行为，不是 bug；
 - 注视只对 V2 有（V1 没有 look 行）：Codex 用 `if (n !== r4.version) return null` 挡住，本项目用 `hasLookDirections`。
+
+与 idle 时长（§3.1a）同一类取舍：**照抄 Codex 输给"宠物读得出状态"**。两处都是用户实测报回来的，别在不看一整轮活儿、不看一次开场的情况下改回去。
 
 **第 3 层是照抄 Codex 的**（2026-09-14 补，同日修正）。Codex 的 mascot 组件是 `state: hovered ? "jumping" : state`；至于这一行怎么播，真正的出处是它构造轨道的 `Ulo(state, hasLookFrame)`：
 
@@ -867,7 +870,15 @@ Pets 页原本为**每个已装 pet** 保有一份解码后的 `SpriteFrames`（
 
 **V2 是完整支持，不是"部分兼容"**：row 0–10 全部播放，row 9–10 是十六个注视姿态（§3.4、§3.5 第 5 行）。
 
-**拒绝必须说出来。** 发现过程拆成了两半：哪些目录该扫是 App 的事（`PetLibrary`），扫出来什么、为什么跳过是 Core 的事（`PetLibraryScanner`），因为后者要能被无头测试。`scan()` 返回 `entries` + `skipped(name / root / reason)`，`--diagnose` 打印后者——**以前是 `try? ... else continue`，一个包被拒后在管理器里没有行、日志里没有字、`--diagnose` 里没有名，用户看到的只有"我的宠物不见了"**；矛盾版本、类型写错、不是图像的 spritesheet 全都落在这一格里。没有 manifest 的目录不算 pet（构建产物、随手解压的目录），依旧静默跳过。`PetPackageError` / `PetManifestError` / `ImageDecodingError` 都带 `message`，把 case 拼成一句话——诊断文本住在 Core，和 `SessionContext` 的标签同一个理由：不依赖屏幕也能测。
+**拒绝必须说出来。** 发现过程拆成了两半：哪些目录该扫是 App 的事（`PetLibrary`），扫出来什么、为什么跳过是 Core 的事（`PetLibraryScanner`），因为后者要能被无头测试。`scan()` 返回 `entries` + `skipped(name / root / reason)`——**以前是 `try? ... else continue`，一个包被拒后在管理器里没有行、日志里没有字、`--diagnose` 里没有名，用户看到的只有"我的宠物不见了"**；矛盾版本、类型写错、不是图像的 spritesheet 全都落在这一格里。没有 manifest 的目录不算 pet（构建产物、随手解压的目录），依旧静默跳过。`PetPackageError` / `PetManifestError` / `ImageDecodingError` 都带 `message`，把 case 拼成一句话——诊断文本住在 Core，和 `SessionContext` 的标签同一个理由：不依赖屏幕也能测。
+
+理由有三个出口，同一份数据：
+
+| 出口 | 何时被看到 |
+|---|---|
+| `--diagnose` 的 `Skipped N folder(s)…` | 交 bug 报告时；干净库不打印这一节 |
+| 管理器的 "Not listed" 一栏（`PetsView.skippedRow`） | 用户自己翻宠物列表时 |
+| 启动时"没有可用宠物"的提示（`presentNoPets`） | 最可能的时刻：一只都加载不出来。**以前它说的是"那个目录里什么都没有"——而用户的文件夹就在里面**，现在改成点名每个被拒的文件夹和原因；`--selftest` 等无头路径打印同一段文字（`HeadlessMode` 挡住 modal，否则 CI 会挂死） |
 
 ---
 
