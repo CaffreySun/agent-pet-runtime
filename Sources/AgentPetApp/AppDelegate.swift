@@ -27,6 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// repeat it sixty times a second.
     private var lastLoggedPanel: MessagePanel?
 
+    /// Last atlas cell written to the verbose log, for the same reason.
+    private var lastLoggedFrame: AnimationFrame?
+
     /// Set when a check finds a newer release, so both menus can say so.
     private var availableUpdate: UpdateCheck.Release?
     private var model: AgentPetModel?
@@ -80,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.agentNames = { agentNames }
 
         var firstFrame = true
-        controller.onFrame = { [weak self] image, panel in
+        controller.onFrame = { [weak self] image, frame, panel in
             if firstFrame, CommandLine.arguments.contains("--verbose") {
                 firstFrame = false
                 FileHandle.standardError.write(Data(
@@ -98,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.petView.show(panel, config: panelConfig())
             self.resizeWindow(for: panel, config: panelConfig())
             self.logPanelChange(panel)
+            self.logFrameChange(frame)
         }
 
         library = PetLibrary.discover()
@@ -464,6 +468,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func defaultOrigin(for size: NSSize) -> NSPoint {
         guard let screen = NSScreen.screens.first else { return NSPoint(x: 100, y: 100) }
         return PetWindow.defaultOrigin(on: screen)
+    }
+
+    /// Logs which cell the pet is drawing, once per change.
+    ///
+    /// The state rides along because the two are not the same question: a
+    /// state can be `running` while the pet draws something else (an idle
+    /// gaze, a hover, a drag), and "the pet isn't running while the agent
+    /// works" is exactly the gap between the two columns. Without this line
+    /// nothing on this machine can see what is on screen.
+    private func logFrameChange(_ frame: AnimationFrame?) {
+        guard frame != lastLoggedFrame else { return }
+        lastLoggedFrame = frame
+        guard CommandLine.arguments.contains("--verbose") else { return }
+        let state = controller.focusedActivity?.state.rawValue ?? "idle"
+        let drawn = frame.map { "\($0.trackName) r\($0.row)c\($0.column)" } ?? "nothing"
+        FileHandle.standardError.write(Data(
+            "[pet] frame: state=\(state) drawing=\(drawn)\n".utf8
+        ))
     }
 
     /// Logs what the panel says, once per change, for the frame loop's sake.

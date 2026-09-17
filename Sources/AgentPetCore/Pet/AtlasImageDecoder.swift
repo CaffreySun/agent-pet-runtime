@@ -7,6 +7,17 @@ public enum ImageDecodingError: Error, Equatable, Sendable {
     case notAnImage(String)
     case unreadable(String)
     case rasterisationFailed(String)
+
+    /// The same facts, in a sentence — what `--diagnose` prints when a pet
+    /// package's spritesheet is the reason it cannot be listed.
+    public var message: String {
+        switch self {
+        case .cannotOpen(let file):           return "\(file) could not be opened"
+        case .notAnImage(let file):           return "\(file) is not an image"
+        case .unreadable(let file):           return "\(file) could not be decoded"
+        case .rasterisationFailed(let file):  return "\(file) could not be drawn into a bitmap"
+        }
+    }
 }
 
 /// Cheap facts about an image file, obtainable without decoding its pixels.

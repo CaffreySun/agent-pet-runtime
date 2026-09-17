@@ -28,7 +28,8 @@ enum Diagnose {
         }
         print("")
 
-        let entries = PetLibrary.discover()
+        let scan = PetLibrary.scan()
+        let entries = scan.entries
         print("Discovered \(entries.count) pet package(s):")
         let loader = PetPackageLoader()
 
@@ -59,6 +60,21 @@ enum Diagnose {
             }
         }
         print("")
+
+        // Folders that hold a manifest and still cannot be listed. This is the
+        // only place the reason is ever said out loud: the manager has no row
+        // for a pet it will not load, and the log has nothing to log. A
+        // declared version that contradicts the sheet, a manifest of the wrong
+        // shape, a spritesheet that is not an image — all of them look from
+        // outside like "my pet is missing".
+        if !scan.skipped.isEmpty {
+            print("Skipped \(scan.skipped.count) folder(s) that look like pets:")
+            for skip in scan.skipped {
+                print("  ✗ \(skip.name)  (\(skip.root.path))")
+                print("      \(skip.reason)")
+            }
+            print("")
+        }
 
         // Reporting a missing pet or a missing display *is* the diagnosis.
         // A non-zero exit here would say "the command failed" when it in fact

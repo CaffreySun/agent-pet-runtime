@@ -139,13 +139,12 @@ public struct AnimationResolver: Sendable {
     ///    way Codex plays it: three passes, then the idle row, which is where
     ///    the loop restarts. The pet keeps breathing while the work continues;
     ///    the message beside it is what says the work is still happening.
-    /// 5. **Gaze** — folded into the rows above rather than sitting under
-    ///    them, because that is how Codex folds it: its sprite draws the look
-    ///    frame *instead of* the animation, and only for the three rows whose
-    ///    state it passes a look frame for (`idle`, `running`, `waving`). So a
-    ///    working pet turns to watch the pointer just as an idle one does, and
-    ///    a waiting one does not; with no direction vector everything falls
-    ///    back to the row it would have played.
+    /// 5. **Gaze** — folded into `waving` and the idle fallback rather than
+    ///    sitting under them, because that is how Codex folds it: its sprite
+    ///    draws the look frame *instead of* the animation for the rows it
+    ///    hands a look frame to. Codex's set is `idle`, `running` and
+    ///    `waving`; **`running` is deliberately excluded here** — see
+    ///    `gazeRows`.
     /// 6. **Idle**.
     ///
     /// Under reduced motion every animation collapses to the first frame of
@@ -164,14 +163,24 @@ public struct AnimationResolver: Sendable {
         )
     }
 
-    /// Rows Codex shows the look frame *instead of*.
+    /// Rows the look frame replaces.
     ///
-    /// Its mascot component passes `lookFrame` only when the animation it
-    /// would play is one of these — `state: hovered ? "jumping" : state`, then
-    /// `lookFrame: animates ? lookFrame : null` — and the sprite element draws
-    /// the look frame rather than starting the row's timer. Every other row
-    /// plays: `waiting`, `failed`, `review`, the jump, and locomotion.
-    private static let gazeRows: Set<String> = ["idle", "running", "waving"]
+    /// Codex hands a look frame to three: `idle`, `running` and `waving`
+    /// (`state: hovered ? "jumping" : state`, then `lookFrame: animates ?
+    /// lookFrame : null`), and its sprite element draws that frame rather than
+    /// starting the row's timer. Every other row always plays: `waiting`,
+    /// `failed`, `review`, the jump, and locomotion.
+    ///
+    /// **`running` is dropped from that set on purpose** (2026-09-17, from
+    /// use). A look pose is a single static frame, and it replaced `idle` and
+    /// `running` with the *same* cell — so on a pet with look rows, a working
+    /// pet and a resting one were pixel-identical for as long as the pointer
+    /// was anywhere on screen, which is always. The pet's whole job is to say
+    /// what the agent is doing, and the one state that says "it is working"
+    /// was the one that could not be seen. Same trade as the idle timings in
+    /// `CompatibilityProfile`: fidelity to Codex loses to the pet reading
+    /// correctly. Don't put it back without watching a long turn.
+    private static let gazeRows: Set<String> = ["idle", "waving"]
 
     /// Plays a row as Codex plays it: a moment runs its passes and then hands
     /// over to the idle segment, which loops for as long as the occasion
@@ -264,19 +273,13 @@ public struct AnimationResolver: Sendable {
         // here would end the decision before gaze ever got a chance, which is
         // why the pet would stare straight ahead no matter where the pointer
         // went.
+        //
+        // No gaze is folded in here, unlike Codex: a state's own row is what
+        // this layer means, and `running` is not a row the look frame may
+        // replace (see `gazeRows`).
         if situation.agentState.priorityClass != .inactive,
            let track = profile.track(named: situation.agentState.animationTrackName) {
-            let elapsed = situation.agentStateElapsed
-            let passes = track.duration * Double(track.repeats)
-
-            // `running` is the row this layer shares with the gaze; a moment
-            // that has settled into its idle tail is not (Codex's state is
-            // still `review` or `failed` there, and those are not gaze rows).
-            let settledIntoIdle = track.repeats > 1 && elapsed >= passes
-            if !settledIntoIdle, let look = gaze(overriding: track, situation, profile) {
-                return look
-            }
-            return moment(track, elapsed: elapsed, profile)
+            return moment(track, elapsed: situation.agentStateElapsed, profile)
         }
 
         // 6. Idle — which is also where the gaze lives for a pet with nothing
