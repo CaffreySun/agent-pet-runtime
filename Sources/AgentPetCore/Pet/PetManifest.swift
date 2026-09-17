@@ -5,6 +5,18 @@ public enum PetManifestError: Error, Equatable, Sendable {
     case missingField(String)
     case invalidID(String)
     case emptySpritesheetPath
+
+    /// The same facts, as a sentence. `--diagnose` and the manager print this:
+    /// "malformedJSON("…")" is not something a user can act on, and a package
+    /// that cannot be listed has no other way of saying why.
+    public var message: String {
+        switch self {
+        case .malformedJSON(let detail): return detail
+        case .missingField(let field):   return "the manifest has no \(field)"
+        case .invalidID(let id):         return "“\(id)” is not a usable id"
+        case .emptySpritesheetPath:      return "spritesheetPath is empty"
+        }
+    }
 }
 
 /// The `pet.json` shipped inside a pet package.
@@ -152,11 +164,19 @@ public struct PetManifest: Sendable, Hashable {
 
     private static func describe(_ error: DecodingError) -> String {
         switch error {
-        case .dataCorrupted(let ctx):        return "data corrupted: \(ctx.debugDescription)"
-        case .keyNotFound(let key, _):       return "missing field: \(key.stringValue)"
-        case .typeMismatch(let type, let ctx): return "type mismatch for \(type): \(ctx.debugDescription)"
-        case .valueNotFound(let type, _):    return "null value for \(type)"
+        case .dataCorrupted(let ctx):        return "the manifest is not valid JSON (\(ctx.debugDescription))"
+        case .keyNotFound(let key, _):       return "the manifest has no \(key.stringValue)"
+        case .typeMismatch(let type, let ctx): return "\(location(ctx)) is not the right type (expected \(type))"
+        case .valueNotFound(let type, let ctx): return "\(location(ctx)) is null (expected \(type))"
         @unknown default:                    return String(describing: error)
         }
+    }
+
+    /// Which field a decode failure happened at, as a phrase for `describe`.
+    /// A manifest is edited by hand, so "expected to decode Int" is only half
+    /// an answer — the field is the half the user needs.
+    private static func location(_ context: DecodingError.Context) -> String {
+        let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+        return path.isEmpty ? "the manifest" : "“\(path)”"
     }
 }

@@ -96,9 +96,9 @@ enum RenderSelfTest {
                                     .completed, .failed, .paused, .unknown]
 
         // Pinned to no direction for everything compared here: with a pointer
-        // on screen the look frame replaces the idle and running rows — Codex's
-        // rule, checked on its own further down — and two rows that render the
-        // same pose would compare as one track.
+        // on screen the look frame replaces the idle row — checked on its own
+        // further down — and two states that render the same pose would
+        // compare as one track.
         controller.aimGaze(at: nil)
 
         // Two states sharing a track must look identical; two states on
@@ -313,17 +313,20 @@ enum RenderSelfTest {
             failures += 1
         }
 
-        // The gaze is folded into the rows Codex folds it into: with a
-        // direction to look in, a working pet shows the look pose rather than
-        // its running row — the same picture an idle one shows.
-        controller.aimGaze(at: 90)
+        // The gaze is folded into the idle fallback and a wave, but *not* into
+        // the running row: a look pose is one static frame, and while it
+        // replaced running as well, a working pet was drawn exactly like a
+        // resting one — the state that says "it is working" was invisible
+        // (2026-09-17, from use). A working pet keeps its row with the pointer
+        // anywhere.
         controller.previewState(.running)
+        controller.aimGaze(at: 90)
         let workingGazing = view.currentImage
-        controller.previewState(.idle)
+        controller.aimGaze(at: nil)
         if workingGazing != nil, workingGazing === view.currentImage {
-            print("  ✓ a working pet looks wherever the pointer is, like an idle one")
+            print("  ✓ a working pet keeps running, wherever the pointer is")
         } else {
-            print("  ✗ the gaze did not replace the running row")
+            print("  ✗ the gaze took the running row away")
             failures += 1
         }
 

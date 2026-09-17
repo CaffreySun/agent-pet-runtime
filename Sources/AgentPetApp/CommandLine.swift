@@ -32,7 +32,7 @@ enum CommandLineTool {
     OTHER
       --pet <id>                      Start with a specific pet
       --open-manager                  Open the manager window at launch
-      --verbose                       Log each event as it arrives
+      --verbose                       Log events, frames, and panel changes
       --verbose-draw                  Log every redraw (very noisy)
       --help                          Show this
       --version                       Show the version

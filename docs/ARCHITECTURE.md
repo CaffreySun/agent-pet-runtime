@@ -238,11 +238,11 @@ column = sector mod 8
 6. idle
 ```
 
-**注视不是独立一层，而是折进上面几行里的**（2026-09-14 照抄 Codex）：Codex 的 mascot 只在将要播放的行是 `idle`/`running`/`waving` 时才把 look frame 传下去（`lookFrame: animates ? lookFrame : null`），而 sprite 元素**用 look frame 直接顶掉那一行的播放**（`if (n != null) { backgroundPosition = Glo(n, rows); return }`，定时器根本不启动）。所以：
+**注视不是独立一层，而是折进别的行里的**（2026-09-14 照抄 Codex；2026-09-17 摘掉 running）：Codex 的 mascot 只在将要播放的行是 `idle`/`running`/`waving` 时才把 look frame 传下去（`lookFrame: animates ? lookFrame : null`），而 sprite 元素**用 look frame 直接顶掉那一行的播放**（`if (n != null) { backgroundPosition = Glo(n, rows); return }`，定时器根本不启动）。本项目照此实现，**只把 `running` 从集合里摘掉**：
 
-- **工作中的宠物会转头看光标**（running 也在集合里），而不是继续跑 running——这与本项目此前的实现相反，照抄后改了；
+- **工作中的宠物不再被注视顶掉（2026-09-17 偏离，用户实测）**。注视姿态是**单帧静态**，顶掉 idle 和 running 时用的又是**同一个格子**——所以在有 look 行的宠物（V2）身上，干活时和发呆时画出来的**是同一张图**，只要屏幕上有指针（也就是一直）就分不出来。宠物存在的意义是说清 agent 在干什么，而唯一表示"在干活"的状态恰好成了唯一看不见的那个。现在 running 照播 row 7，注视只折进 `waving` 和 idle 兜底。与 idle 时长（§3.1a）同一类取舍：照抄 Codex 输给宠物读数正确。**别不看一整轮活儿就把它改回去**；
 - `waiting` / `failed` / `review`、跳跃、拖拽 locomotion 都不在集合里，该播什么播什么（所以"等待你输入"的宠物不会被光标带走）；
-- 一个 moment（`completed`/`failed`）播完沉入 idle 尾段时，Codex 的状态仍是 `review`/`failed`，因此**不**接受注视——本项目照此实现（只有状态本身是 idle/running/waving 才给 look frame）；
+- 一个 moment（`completed`/`failed`）播完沉入 idle 尾段时，Codex 的状态仍是 `review`/`failed`，因此**不**接受注视——本项目照此实现（只有状态本身是 idle/waving 才给 look frame）；
 - 死区是 **1pt**（Codex 的 `uuo = 1`：`Math.hypot(r, i) <= 1` 才算"没有方向"），所以屏幕上有光标时宠物基本一直在看着它——这是原版行为，不是 bug；
 - 注视只对 V2 有（V1 没有 look 行）：Codex 用 `if (n !== r4.version) return null` 挡住，本项目用 `hasLookDirections`。
 
@@ -654,7 +654,7 @@ v0.1 实现过一份自有存储（`Application Support/AgentPetRuntime/pets/`�
 - **两套列表必然漂移**：用户用 Codex 的标准工具装了一只 pet，本 app 要等一次 Import 才看得到；两个"已安装"列表给出不同答案，是设计缺陷。
 - **来源不可复制**：Import 把 `~/.codex/pets/<id>` 复制一份，Codex 侧一更新副本就过期，同一只 pet 出现两个内容哈希。
 - **选择入口在 Codex**：终端里跑哪只由 Codex 的 picker 决定，桌面这只由本 app 决定；但"有没有这只 pet"两边读同一份目录，才不会出现两个答案。
-- 删除的代价只是一套安装事务、一份元数据格式和 20 个测试。加载与校验（§7）不变——非法包与 Codex 一样被跳过，不做兜底。
+- 删除的代价只是一套安装事务、一份元数据格式和 20 个测试。加载与校验（§7）不变——非法包与 Codex 一样**不加载**，不做兜底；但 2026-09-17 起会被**列出来并说明原因**（§7.4），"不兜底"不等于"不吭声"。
 
 `docs/SPEC-REVIEW.md` §2.5 / §3.5 保留了当时的 store 结论，已在该文标注反转。
 
@@ -821,6 +821,8 @@ Pets 页原本为**每个已装 pet** 保有一份解码后的 `SpriteFrames`（
    ├─ 必需字段存在: id, displayName, spritesheetPath
    │   (description 缺失时用 displayName 兜底，不报错)
    ├─ id 非空、匹配 ^[a-z0-9][a-z0-9._-]{0,63}$
+   ├─ spriteVersionNumber 可选：1/2 与实测尺寸互为校验，矛盾即拒绝；
+   │   缺失或为其它值（3、0…）→ 忽略，按尺寸判定（§7.4）
    └─ 未知字段 → 忽略（不报错）
 
 2. PathSafetyValidator
@@ -850,16 +852,22 @@ Pets 页原本为**每个已装 pet** 保有一份解码后的 `SpriteFrames`（
 
 `1536 × 1872` 解码后约 11 MB RGBA。校验必须**逐行采样 + 分块解码**，不整张载入后再遍历。§20 的 "Pet Manager 安装/预览过程不阻塞主 Pet Renderer" 隐含此要求。
 
-### 7.4 降级兼容（修正 §9.4）
+### 7.4 版本判定（2026-09-17 重写；§9.4 的"降级兼容"已作废）
+
+**判定的权威是实测尺寸，manifest 里的 `spriteVersionNumber` 只是交叉校验**（`PetManifest.resolveProfile`）：
 
 | 情况 | 行为 |
 |---|---|
-| V1 尺寸 + 无 `spriteVersionNumber` | 完整兼容 |
-| V2 尺寸 + `spriteVersionNumber: 2` | **加载并播放 row 0–8**，row 9–10 标记 experimental 不播放，UI 显示"部分兼容" |
-| 尺寸不匹配任何 profile | 拒绝，显示实际尺寸与期望尺寸 |
-| V2 尺寸但 `spriteVersionNumber` 缺失 | 按尺寸推断为 V2，走上一行逻辑 |
+| 无 `spriteVersionNumber`（生态常态——本机 8 只里 7 只没有，Codex TUI 的 loader 连这个字段都不读） | 按尺寸判定：1536×1872 → V1，1536×2288 → V2 |
+| `spriteVersionNumber` 为 1 或 2，且与尺寸一致 | 同上，声明只作确认 |
+| `spriteVersionNumber` 与尺寸**矛盾** | **拒绝**，不猜；拒绝原因里同时给出声明的版本与实测尺寸 |
+| `spriteVersionNumber` 为其它值（3、0…） | 忽略，按尺寸判定 |
+| `spriteVersionNumber` 类型写错（`"2"` 字符串） | manifest 解码失败 → 拒绝；`PetManifestError.describe` 会点名是哪个字段（`“spriteVersionNumber” is not the right type (expected Int)`），手写 manifest 的人需要的正是这一半 |
+| 尺寸不匹配任何 profile | 拒绝 |
 
-**V2 不得被拒绝**——用户本机已有 V2 资产（`~/.codex/pets/some-v2-pet/`）。
+**V2 是完整支持，不是"部分兼容"**：row 0–10 全部播放，row 9–10 是十六个注视姿态（§3.4、§3.5 第 5 行）。
+
+**拒绝必须说出来。** 发现过程拆成了两半：哪些目录该扫是 App 的事（`PetLibrary`），扫出来什么、为什么跳过是 Core 的事（`PetLibraryScanner`），因为后者要能被无头测试。`scan()` 返回 `entries` + `skipped(name / root / reason)`，`--diagnose` 打印后者——**以前是 `try? ... else continue`，一个包被拒后在管理器里没有行、日志里没有字、`--diagnose` 里没有名，用户看到的只有"我的宠物不见了"**；矛盾版本、类型写错、不是图像的 spritesheet 全都落在这一格里。没有 manifest 的目录不算 pet（构建产物、随手解压的目录），依旧静默跳过。`PetPackageError` / `PetManifestError` / `ImageDecodingError` 都带 `message`，把 case 拼成一句话——诊断文本住在 Core，和 `SessionContext` 的标签同一个理由：不依赖屏幕也能测。
 
 ---
 

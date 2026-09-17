@@ -166,12 +166,12 @@ Oh My Pi 没有 hook 表，所以上面那张表是 Claude Code 的。运行时�
 | 1. 拖动中 | 你拖的方向——`running-left` / `running-right` |
 | 2. 手势播放中 | one-shot：`jumping`、`waving` |
 | 3. Agent 状态 | 上面那张表 |
-| 4. 注视 | 折进 `idle`/`running`/`waving` 三行里——十六个姿态，间隔 22.5° |
+| 4. 注视 | 折进 `idle`/`waving` 两行里——十六个姿态，间隔 22.5° |
 | 5. 发呆 | 兜底 |
 
 拖动压倒一切：**你手上拿着它**；指针落到宠物身上也一样——Codex 的 hover 是跳**三遍**然后接着呼吸，光标不移开就一直动（"三遍 + idle 段无限循环"是它每个状态共用的形状）。
 
-注视不是独立一层，而是**折进上面几行里的**——这正是 Codex 自己 sprite 的写法：look frame 直接顶掉那一行的播放，而且只对 `idle`/`running`/`waving` 三行生效。所以工作中的宠物会转头看你的指针（而不是继续跑），等待输入的宠物继续等你；死区只有一个点：只要屏幕上有指针它就在看，只有指针正压在它中心时才回到自己的行。
+注视不是独立一层，而是**折进上面几行里的**——这正是 Codex 自己 sprite 的写法：look frame 直接顶掉那一行的播放。Codex 给三行发 look frame（`idle`/`running`/`waving`），本项目只留 `idle` 和 `waving`：注视姿态是**单帧静态**，顶掉 `running` 时用的又是同一个格子，于是有 look 行的宠物干活时和发呆时画出来一模一样——"正在干活"这个状态反而看不见，所以这一处不跟 Codex。等待输入的宠物继续等你，工作中的宠物继续跑；死区只有一个点：只要屏幕上有指针它就在看，只有指针正压在它中心时才回到自己的行。
 
 ## 宠物会说什么
 
@@ -232,7 +232,7 @@ App 没运行时（重启，或 `brew upgrade` 替换 bundle 的那几秒），h
 ## 开发
 
 ```bash
-swift build && swift test        # 547 个测试
+swift build && swift test        # 571 个测试
 swift run AgentPet               # 跑起来
 
 swift run AgentPet --diagnose                      # 发现了哪些宠物，以及为什么

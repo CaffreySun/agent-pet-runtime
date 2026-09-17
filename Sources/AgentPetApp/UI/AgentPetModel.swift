@@ -536,6 +536,11 @@ final class AgentPetModel: ObservableObject {
             return "“\(name)” has an unusable pet.json: \(detail)"
         case let PetPackageError.manifestNotFound(name):
             return "“\(name)” has no pet.json."
+        // The rest of the package errors — a version that contradicts the
+        // sheet, an unreadable atlas — carry their own sentence. Printing the
+        // enum would hide the one fact the user needs.
+        case let error as PetPackageError:
+            return error.message
         default:
             return "\(error)"
         }

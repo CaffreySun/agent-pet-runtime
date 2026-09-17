@@ -74,8 +74,14 @@ final class PetController {
     /// Display names for agents, by id.
     var agentNames: () -> [String: String] = { [:] }
 
-    /// Every rendered frame, with the panel that belongs beside it.
-    var onFrame: ((CGImage?, MessagePanel) -> Void)?
+    /// Every rendered frame, with the atlas cell it came from and the panel
+    /// that belongs beside it.
+    ///
+    /// The cell rides along because what the pet is *drawing* has no other
+    /// observer: `--verbose` logs the events that arrive and the panel they
+    /// produce, and the third leg — which row is on screen — is the one a
+    /// "why is it not running?" report is about.
+    var onFrame: ((CGImage?, AnimationFrame?, MessagePanel) -> Void)?
 
     /// Where the pet is on screen, so gaze can be aimed at the pointer.
     var petCenterProvider: (() -> CGPoint?)?
@@ -325,7 +331,7 @@ final class PetController {
         )
 
         let frame = resolver.resolve(situation, profile: frames.profile)
-        onFrame?(frame.flatMap { frames.image(for: $0) }, panel)
+        onFrame?(frame.flatMap { frames.image(for: $0) }, frame, panel)
     }
 
     /// Rebuilds the rows from the engine's current view of the world.

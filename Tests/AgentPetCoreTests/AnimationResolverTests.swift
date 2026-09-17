@@ -420,18 +420,20 @@ struct PresentationLayerTests {
         #expect(gazing?.column == 4)
     }
 
-    @Test("the gaze replaces the running row too, which is what Codex does")
-    func gazeReplacesRunning() {
-        // Its mascot passes a look frame exactly when the row it would play is
-        // `idle`, `running` or `waving`, and the sprite draws the look frame
-        // instead of the animation. A working pet therefore watches the
-        // pointer just as an idle one does.
+    @Test("a working pet keeps its own row, unlike Codex")
+    func gazeSparesRunning() {
+        // Codex folds the look frame into `idle`, `running` and `waving`.
+        // `running` is dropped from that set deliberately (2026-09-17, from
+        // use): a look pose is a single static frame, and it replaced idle and
+        // running with the *same* cell — so a working pet was drawn exactly
+        // like a resting one for as long as the pointer was anywhere on
+        // screen. The one state that says "it is working" has to be visible.
         for elapsed in [0.5, 60.0] {
             let frame = resolver.resolve(
                 situation(state: .running, stateElapsed: elapsed, look: 90), profile: v2
             )
-            #expect(frame?.row == 9, "a working pet looks where the pointer is")
-            #expect(frame?.column == 4)
+            #expect(frame?.trackName == "running", "still working at \(elapsed)s")
+            #expect(frame?.row == 7)
         }
     }
 

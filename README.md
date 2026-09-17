@@ -260,11 +260,15 @@ Dragging outranks everything: you are holding it, and so does the pointer
 landing on the pet.
 
 Gaze is folded into the rows rather than layered under them, which is how
-Codex's own sprite works: the look frame *replaces* the animation, and only for
-the three rows whose state it offers one to — `idle`, `running` and `waving`. So
-a working pet watches your pointer instead of running, a waiting one keeps
-asking, and the deadzone is a single point: the pet looks at your cursor
-wherever it is, and only stops when it is exactly on its centre.
+Codex's own sprite works: the look frame *replaces* the animation for the rows
+whose state offers one — `idle` and `waving` here. Codex offers one to `running`
+as well, and that one is dropped on purpose: a look pose is a single static
+frame, and it replaced `idle` and `running` with the *same* cell, so a working
+pet was drawn exactly like a resting one whenever the pointer was anywhere on
+screen. The state that says "it is working" has to be visible. A waiting pet
+keeps asking, a working one keeps running, and the deadzone is a single point:
+the pet looks at your cursor wherever it is, and only stops when it is exactly
+on its centre.
 
 ## What the pet says
 
@@ -398,7 +402,7 @@ whole of the network surface — nothing else here talks to anything.
 ## Development
 
 ```bash
-swift build && swift test        # 547 tests
+swift build && swift test        # 571 tests
 swift run AgentPet               # run it
 
 swift run AgentPet --diagnose                      # what pets are discoverable, and why
