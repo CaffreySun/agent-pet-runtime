@@ -455,14 +455,18 @@ struct PresentationLayerTests {
         #expect(settled?.row == 0)
     }
 
-    @Test("a wave gives way to the gaze, a jump does not")
+    @Test("a wave plays, and so does a jump — neither is a gaze row here")
     func gesturesAndGaze() {
-        // Both are one-shots, and only one of them is a row Codex replaces:
-        // `waving` is in its gaze set, `jumping` is not.
+        // Both one-shots play. Codex folds the look frame into `waving` (the
+        // greeting it plays when the pet introduces itself), which drew the
+        // pet's hello as a stare and made `Preview Animation → waving` show a
+        // pose instead of a wave; `jumping` was never in that set. See
+        // `AnimationResolver.resolve` for why the set is empty here.
         let waving = resolver.resolve(
             situation(gesture: .init(trackName: "waving", elapsed: 0.05), look: 90), profile: v2
         )
-        #expect(waving?.row == 9)
+        #expect(waving?.trackName == "waving")
+        #expect(waving?.row == 3)
 
         let jumping = resolver.resolve(
             situation(gesture: .init(trackName: "jumping", elapsed: 0.05), look: 90), profile: v2

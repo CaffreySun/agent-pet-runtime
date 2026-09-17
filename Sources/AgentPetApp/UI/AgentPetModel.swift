@@ -11,6 +11,12 @@ import Foundation
 final class AgentPetModel: ObservableObject {
 
     @Published private(set) var pets: [PetLibrary.Entry] = []
+
+    /// Folders in the pets directory that carry a manifest and still cannot be
+    /// listed, with the reason. Shown beside the list because the alternative
+    /// is what a user actually experiences today: a pet they can see in the
+    /// Finder and not in here, with nothing anywhere saying why.
+    @Published private(set) var skippedPets: [PetLibraryScanner.Skipped] = []
     @Published private(set) var agentStatuses: [AgentStatus] = []
     @Published private(set) var activities: [AgentActivity] = []
     @Published private(set) var focusedActivityID: String?
@@ -124,7 +130,9 @@ final class AgentPetModel: ObservableObject {
     }
 
     func refreshPets() {
-        pets = PetLibrary.discover()
+        let scan = PetLibrary.scan()
+        pets = scan.entries
+        skippedPets = scan.skipped
         onPetsChanged?(pets)
     }
 

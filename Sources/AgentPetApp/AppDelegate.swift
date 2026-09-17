@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the app stays in the menu bar either way, which is the only way back.
     private var isPetVisible = true
     private var library: [PetLibrary.Entry] = []
+
+    /// Folders that look like pets and were refused, from the launch scan.
+    /// Kept beside the library so the no-pets alert can say why it is empty.
+    private var skippedPets: [PetLibraryScanner.Skipped] = []
     private var selectedPetID: String?
     /// Last panel written to the verbose log, so the frame loop does not
     /// repeat it sixty times a second.
@@ -104,7 +108,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.logFrameChange(frame)
         }
 
-        library = PetLibrary.discover()
+        let scan = PetLibrary.scan()
+        library = scan.entries
+        skippedPets = scan.skipped
 
         // `--pet <id>` picks a specific one, which is how the self-test can be
         // pointed at a V2 pet to exercise the gaze rows. It is an override for
@@ -571,9 +577,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Modal only when there is somebody to dismiss it. A `runModal` on a
     /// machine with no user — a CI runner, most obviously — blocks forever, and
     /// the app appears to hang rather than to report a missing pet.
+    ///
+    /// "Nothing in <that directory>" is the wrong thing to say when the user's
+    /// pet folder is sitting in it: anything the scan refused is listed here
+    /// with its reason, which for many users is the only place they will ever
+    /// see it.
     private func presentNoPets() {
         let directory = PetLibrary.petsDirectory.path
-        let explanation = """
+        var explanation = """
             Nothing in \(directory).
 
             Install one with:
@@ -581,6 +592,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             …or drop any package folder in there.
             """
+        if !skippedPets.isEmpty {
+            let lines = skippedPets.map { "    \($0.name) — \($0.reason)" }.joined(separator: "\n")
+            explanation = """
+                \(skippedPets.count) folder(s) in \(directory) look like pets but cannot be played:
+
+                \(lines)
+
+                Install one with:
+                    npx codex-pets add <pet-id>
+
+                …or drop any package folder in there.
+                """
+        }
 
         guard !HeadlessMode.isActive else {
             FileHandle.standardError.write(Data("[pet] no pet packages found.\n\n\(explanation)\n\n".utf8))
@@ -588,7 +612,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let alert = NSAlert()
-        alert.messageText = "No pet packages found"
+        alert.messageText = skippedPets.isEmpty
+            ? "No pet packages found"
+            : "No playable pet packages found"
         alert.informativeText = explanation
         alert.alertStyle = .informational
         alert.runModal()

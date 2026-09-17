@@ -244,6 +244,11 @@ enum RenderSelfTest {
 
         // The introduction: the pet waves and the panel carries the words.
         // Codex shows its own for eight seconds, once per pet.
+        //
+        // With a direction pinned: the wave is not a row the look frame may
+        // replace (2026-09-17), so the hello is a wave even with the pointer
+        // on screen — which is the only way an introduction is ever seen.
+        controller.aimGaze(at: 90)
         let beforeGreeting = view.currentImage
         controller.introduce(petName: "Clippy")
         let greetingRow = view.currentPanel.rows.first
@@ -258,6 +263,7 @@ enum RenderSelfTest {
                   + "\(greetingLabel ?? "no row") / \(greetingBody ?? "-")")
             failures += 1
         }
+        controller.aimGaze(at: nil)
 
         // A row that belongs to no session must not invent the columns a
         // session row has: a blank agent name or session id reads as a bug,
@@ -313,12 +319,11 @@ enum RenderSelfTest {
             failures += 1
         }
 
-        // The gaze is folded into the idle fallback and a wave, but *not* into
-        // the running row: a look pose is one static frame, and while it
-        // replaced running as well, a working pet was drawn exactly like a
-        // resting one — the state that says "it is working" was invisible
-        // (2026-09-17, from use). A working pet keeps its row with the pointer
-        // anywhere.
+        // The gaze is folded into the idle fallback alone: a look pose is one
+        // static frame, and while it also replaced `running` and `waving`, a
+        // working pet was drawn exactly like a resting one and the pet's hello
+        // was drawn as a stare (2026-09-17, from use). Rows with something of
+        // their own to show keep their row with the pointer anywhere.
         controller.previewState(.running)
         controller.aimGaze(at: 90)
         let workingGazing = view.currentImage
