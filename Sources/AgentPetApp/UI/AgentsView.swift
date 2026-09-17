@@ -131,7 +131,12 @@ struct AgentsView: View {
         case .disconnected:
             switch status.profile.mechanism {
             case .hookTable:
-                return "The hooks the runtime wrote are no longer in the config file."
+                // Two ways here, and both are fixed by configuring again: the
+                // lines are gone, or the file still holds one this version
+                // stopped writing (an older launch's, which the automatic
+                // migration could not remove because the entry was edited).
+                return "The hooks in the config file are not the ones this version writes "
+                    + "— configure again to update them."
             case .extensionFile:
                 return "The extension the runtime wrote is missing, or no longer matches what it recorded."
             }

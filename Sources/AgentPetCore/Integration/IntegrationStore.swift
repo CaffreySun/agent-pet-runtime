@@ -227,6 +227,47 @@ public final class AgentIntegrationService: @unchecked Sendable {
         return outcome
     }
 
+    /// Repairs configs written by an earlier launch whose hook lines this
+    /// version no longer installs.
+    ///
+    /// This is the safe direction for the runtime to move in on its own: an
+    /// entry that was inert when it was written can start gating the agent when
+    /// the agent's own contract changes underneath it, and the user has no
+    /// reason to suspect a config an older version set up for them. Only lines
+    /// the runtime recorded are dropped, and a configurator refuses when a
+    /// human has edited inside the entry — the card's drift report is the
+    /// honest answer for that case.
+    ///
+    /// Runs at launch, best effort, and returns one line per repaired agent for
+    /// the bottom bar. `profiles` is for tests: the registry resolves against
+    /// the real home directory, which is not a thing a test may write to.
+    @discardableResult
+    public func removeObsoleteEntries(
+        transaction: ConfigTransaction,
+        profiles: [AgentIntegrationProfile]? = nil,
+        now: Date = Date()
+    ) -> [String] {
+        var notes: [String] = []
+
+        for profile in profiles ?? AgentIntegrationRegistry.all(transaction: transaction) {
+            guard let configurator = profile.configurator else { continue }
+            let record = store.record(for: profile.agentID)
+            guard record.isConfigured else { continue }
+            guard let outcome = try? configurator.removeObsoleteEntries(record, now: now),
+                  outcome.didChange
+            else { continue }
+
+            try? store.save(outcome.record)
+            let dropped = Set(record.entries.map(\.event))
+                .subtracting(outcome.record.entries.map(\.event))
+            notes.append(
+                "\(profile.displayName): removed an outdated hook line "
+                + "(\(dropped.sorted().joined(separator: ", "))) — this version no longer installs it."
+            )
+        }
+        return notes
+    }
+
     public func recordEvent(agentID: String, at date: Date = Date()) {
         lastEventAt[agentID] = date
         persistLastEvent(agentID: agentID, at: date)

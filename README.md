@@ -353,6 +353,13 @@ be debugged with `nc -U`.
 meaningful and will change agent behaviour in response — a pet that alters your
 agents would be a far worse bug than a pet that misses an event.
 
+The same rule applies to what the shim *says*, which is the subtler half:
+Antigravity's `PreToolUse` hook requires its result to carry a `decision`, so an
+observing hook cannot answer it at all, and the empty object the shim printed
+there was read as a denial of every tool call (fixed 2026-09-17 — the event is
+no longer installed). A hook whose result can gate the agent is not a hook this
+runtime registers, however harmless an empty answer looked in testing.
+
 ---
 
 ## Privacy

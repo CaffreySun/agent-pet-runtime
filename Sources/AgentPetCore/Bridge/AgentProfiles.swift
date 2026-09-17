@@ -470,11 +470,17 @@ public enum AgentProfiles {
     /// What the capture settled, against the docs: payloads are protojson
     /// camelCase; `SessionStart` fires although the published event table
     /// does not list it; `PostToolUse` is registered but never fired in any
-    /// captured turn, so the working signal leans on `PreToolUse` and the
-    /// per-model-call `Pre/PostInvocation`; `Stop` carries `terminationReason`
-    /// (observed `NO_TOOL_CALL`, not the docs' `model_stop`), `fullyIdle`, and
-    /// an `error` string that is present but empty on a clean stop. There is
-    /// no waiting-for-input event to map.
+    /// captured turn, so the working signal leans on the per-model-call
+    /// `Pre/PostInvocation`; `Stop` carries `terminationReason` (observed
+    /// `NO_TOOL_CALL`, not the docs' `model_stop`), `fullyIdle`, and an `error`
+    /// string that is present but empty on a clean stop. There is no
+    /// waiting-for-input event to map.
+    ///
+    /// `PreToolUse` is mapped but no longer installed: its result must carry a
+    /// `decision`, the shim's `{}` is read as a denial, and that denied every
+    /// tool call until 2026-09-17 — see `AntigravityConfigurator`. The rule
+    /// stays so a tool name still shows up for a session reported through a
+    /// config an earlier version wrote, or one a user added themselves.
     public static let antigravity = AgentProfile(
         agentID: "antigravity",
         displayName: "Antigravity",
