@@ -121,11 +121,14 @@ if !deliver(envelope, to: socketURL) {
 }
 
 // Antigravity's hook contract requires the hook's result as a JSON object on
-// stdout, and an empty object is the one answer with no opinion about tool
-// calls or stops. This is the single exception to "never write to stdout":
-// there, the agent is parsing it because its own contract says to. Verified
-// on 1.2.3 — `{}` neither gates a tool call nor blocks a stop, and a hook
-// that fails outright is fail-open anyway.
+// stdout, so this is the single exception to "never write to stdout". An empty
+// object is the right answer for the events the runtime registers — PostToolUse
+// expects exactly `{}`, and Stop treats any value but "continue" as leave the
+// agent alone — but it is *not* a safe answer everywhere: PreToolUse's
+// `decision` is required, and a decision-less result is read as a denial, which
+// denied every tool call until the runtime stopped registering that event (see
+// AntigravityConfigurator). Do not "simplify" this into a decision value: the
+// pet has no business answering a question about permissions.
 if agentID == "antigravity" {
     print("{}")
 }

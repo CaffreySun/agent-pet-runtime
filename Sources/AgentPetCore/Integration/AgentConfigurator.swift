@@ -39,6 +39,31 @@ public protocol AgentConfigurator: Sendable {
 
     /// Removes exactly the entries in the record, leaving everything else.
     func uninstall(_ record: IntegrationRecord, now: Date) throws -> ConfigurationOutcome
+
+    /// Drops hook entries an earlier version wrote that this one no longer
+    /// installs, and returns nil when there is nothing to drop.
+    ///
+    /// A migration rather than a cleanup. A line the runtime itself wrote stops
+    /// being merely useless and starts being harmful when the agent's contract
+    /// changes underneath it — Antigravity's `PreToolUse`, whose result must
+    /// carry a decision, denied every tool call once the runtime's observer
+    /// answer was read as one. Nobody would suspect a config they set up weeks
+    /// ago, so the runtime repairs it itself, touching only lines it recorded
+    /// and only while the file still holds exactly what was recorded.
+    func removeObsoleteEntries(
+        _ record: IntegrationRecord,
+        now: Date
+    ) throws -> ConfigurationOutcome?
+}
+
+public extension AgentConfigurator {
+    /// Nothing to migrate unless a configurator says otherwise: entries an
+    /// agent's `events` no longer list are, for everyone but Antigravity so
+    /// far, inert.
+    func removeObsoleteEntries(
+        _ record: IntegrationRecord,
+        now: Date
+    ) throws -> ConfigurationOutcome? { nil }
 }
 
 /// Shared implementation for agents whose hook configuration is a JSON object

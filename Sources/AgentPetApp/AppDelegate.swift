@@ -144,6 +144,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !HeadlessMode.isActive {
             startBridge()
             replaySpooledEvents()
+            // Before anything reads health: a config written by an older
+            // version can hold a hook line this one no longer installs, and
+            // that line can be gating the agent right now.
+            model?.removeObsoleteEntries()
         }
         rebuildMenu()
         checkForUpdatesInBackground()

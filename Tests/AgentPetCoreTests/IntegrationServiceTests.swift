@@ -284,4 +284,73 @@ struct IntegrationServiceTests {
             atPath: harness.store.url(for: "grok").path
         ), "there is no card to keep accurate, and no file to leave behind")
     }
+
+    /// The launch path, end to end for Antigravity: the profile is built by
+    /// hand because the registry's own points at the real home directory, and
+    /// this test writes a config file.
+    @Test("a launch drops a hook line an older version wrote that gates tool calls")
+    func launchDropsObsoleteAntigravityEntry() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agentpet-migrate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let hooks = root.appendingPathComponent(".gemini/config/hooks.json")
+        try FileManager.default.createDirectory(
+            at: hooks.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        let shim = "/opt/agentpet/agentpet-hook"
+        try Data("""
+        { "agentpet": {
+            "PreToolUse": [ { "matcher": "*", "hooks": [
+              { "type": "command", "command": "\(shim) --agent antigravity --event PreToolUse" } ] } ],
+            "Stop": [ { "type": "command", "command": "\(shim) --agent antigravity --event Stop" } ] } }
+        """.utf8).write(to: hooks)
+
+        let transaction = ConfigTransaction(backupDirectory: root.appendingPathComponent("backups"))
+        let store = IntegrationStore(directory: root.appendingPathComponent("integrations"))
+        let configurator = AntigravityConfigurator(home: root, transaction: transaction)
+        try store.save(IntegrationRecord(
+            agentID: "antigravity",
+            status: .configured,
+            configuredAt: Date(timeIntervalSince1970: 1_700_000_000),
+            shimPath: shim,
+            entries: [
+                WrittenEntry(file: hooks.path, event: "PreToolUse",
+                             command: "\(shim) --agent antigravity --event PreToolUse"),
+                WrittenEntry(file: hooks.path, event: "Stop",
+                             command: "\(shim) --agent antigravity --event Stop"),
+            ]
+        ))
+
+        let service = AgentIntegrationService(
+            store: store,
+            detector: AgentDetector(specifications: [], readVersions: false)
+        )
+        let profile = AgentIntegrationProfile(
+            agentID: "antigravity",
+            displayName: "Antigravity",
+            detection: .init(agentID: "antigravity", displayName: "Antigravity",
+                             executableNames: ["agy"], configFiles: [hooks]),
+            configurator: configurator,
+            capabilities: [.detect, .configure, .uninstall, .liveEvents]
+        )
+
+        let notes = service.removeObsoleteEntries(transaction: transaction, profiles: [profile])
+
+        #expect(notes == [
+            "Antigravity: removed an outdated hook line (PreToolUse) — "
+            + "this version no longer installs it."
+        ])
+        let object = (try? JSONSerialization.jsonObject(with: Data(contentsOf: hooks)))
+            as? [String: Any]
+        let named = object?["agentpet"] as? [String: Any]
+        #expect(named?["PreToolUse"] == nil)
+        #expect(named?["Stop"] != nil, "the events this version does write are left alone")
+        #expect(store.record(for: "antigravity").entries.map(\.event) == ["Stop"],
+                "the record follows the file, so nothing is left to migrate twice")
+        #expect(configurator.entriesPresent(in: store.record(for: "antigravity")))
+
+        // And the second launch of the same app finds nothing to do.
+        #expect(service.removeObsoleteEntries(transaction: transaction, profiles: [profile]).isEmpty)
+    }
 }

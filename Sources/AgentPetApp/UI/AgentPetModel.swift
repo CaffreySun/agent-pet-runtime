@@ -401,6 +401,22 @@ final class AgentPetModel: ObservableObject {
         }
     }
 
+    /// Repairs hook configs an earlier version wrote, once, at launch.
+    ///
+    /// The runtime's one unasked-for write to an agent's configuration, and it
+    /// exists because a hook entry can change meaning without changing shape:
+    /// Antigravity's `PreToolUse` result must carry a decision, the shim's
+    /// observer answer does not, and a config installed before that was known
+    /// denied every tool call in the agent. Only lines this runtime recorded
+    /// are dropped, and the configurator refuses outright if a human has edited
+    /// inside the entry. Does not refresh the agent list: detection is what
+    /// that costs, and it belongs to the manager opening.
+    func removeObsoleteEntries() {
+        let notes = integrationService.removeObsoleteEntries(transaction: transaction)
+        guard !notes.isEmpty else { return }
+        statusMessage = notes.joined(separator: " ")
+    }
+
     /// The session id every test event uses, so the UI can tell a test apart
     /// from a real session and offer to stop exactly that one.
     static let testSessionID = "test-session"
