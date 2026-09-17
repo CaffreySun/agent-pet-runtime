@@ -30,11 +30,23 @@ Claude Code 弹权限请求，它抬爪子。任务做完，它庆祝一下再�
 
 ```bash
 brew tap dncore/agent-pet-runtime
-brew install --cask agent-pet-runtime
+brew install --cask dncore/agent-pet-runtime/agent-pet-runtime
 ```
 
-应用是 ad-hoc 签名、未公证，所以 cask 会在安装时移除 macOS 的 quarantine 属性。
-如果仍被 Gatekeeper 拦截：
+第二行必须写全名。Homebrew 把第三方 tap 一律当作**未受信任**,拒绝从里面加载 cask,于是
+`brew install --cask agent-pet-runtime` 会停在:
+
+```
+Error: Refusing to load cask dncore/agent-pet-runtime/agent-pet-runtime from untrusted tap dncore/agent-pet-runtime.
+```
+
+写全名是 Homebrew 自己给的出路——点名要哪个 cask,它就信任那一个,并把这件事打印出来;
+`brew trust dncore/agent-pet-runtime` 则是整个 tap 一次性信任(`brew trust --help`,
+以及 https://docs.brew.sh/Tap-Trust)。
+
+应用是 ad-hoc 签名、未公证。**被 macOS 打过 quarantine 标记的副本**——浏览器下载的、或
+从 zip 里拖出来的——会被 Gatekeeper 报成"已损坏";`brew install` 装的那份从一开始就没有
+这个标记。万一还是被拦:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/AgentPet.app"
