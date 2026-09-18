@@ -124,6 +124,36 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     private var ticker: Timer?
 
+    /// Where the window opens the first time, and how small it may be made.
+    ///
+    /// 900x680 rather than something tighter because the Pets page is the tall
+    /// one: a 240pt preview, a picker, the pet's description and its grid come
+    /// to more than 580pt, so "Use on Desktop" and "Reveal in Finder" sat
+    /// below the fold in a window that looked complete (user report,
+    /// 2026-09-18). The minimum keeps the preview and its controls on screen;
+    /// below that the page is a scroll through one thing at a time.
+    private static let defaultContentSize = NSSize(width: 900, height: 680)
+    private static let minimumContentSize = NSSize(width: 760, height: 520)
+
+    /// The size the user last left the window at, so making it your own is a
+    /// one-time thing. Stored in points in the defaults, like the pet's own
+    /// position, and clamped to the minimum in case a later version raises it.
+    private static let sizeKey = "manager.window.size"
+
+    private static var openingContentSize: NSSize {
+        guard let stored = UserDefaults.standard.string(forKey: sizeKey) else {
+            return defaultContentSize
+        }
+        let parts = stored.split(separator: ",").compactMap { Double($0) }
+        guard parts.count == 2, parts[0] > 0, parts[1] > 0 else { return defaultContentSize }
+        return NSSize(width: max(parts[0], minimumContentSize.width),
+                      height: max(parts[1], minimumContentSize.height))
+    }
+
+    private static func rememberContentSize(_ size: NSSize) {
+        UserDefaults.standard.set("\(size.width),\(size.height)", forKey: sizeKey)
+    }
+
     init(model: AgentPetModel) {
         self.model = model
     }
@@ -171,7 +201,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         // The style a window with a sidebar uses: title and toolbar on one
         // line, the traffic lights inline with them.
         window.toolbarStyle = .unified
-        window.setContentSize(NSSize(width: 860, height: 580))
+        window.contentMinSize = Self.minimumContentSize
+        window.setContentSize(Self.openingContentSize)
         window.center()
         window.isReleasedWhenClosed = false
         // Bring the manager forward on whatever the user is actually looking
@@ -190,7 +221,17 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         NSHostingController(rootView: MainWindowView(model: model))
     }
 
+    /// Remembered as the user drags rather than only at close: the manager is
+    /// often open when the app is quit, and `windowWillClose` never runs then.
+    func windowDidResize(_ notification: Notification) {
+        guard let window else { return }
+        Self.rememberContentSize(window.contentRect(forFrameRect: window.frame).size)
+    }
+
     func windowWillClose(_ notification: Notification) {
+        if let window {
+            Self.rememberContentSize(window.contentRect(forFrameRect: window.frame).size)
+        }
         stopTicking()
         NSApp.setActivationPolicy(.accessory)
         if CommandLine.arguments.contains("--verbose") {
