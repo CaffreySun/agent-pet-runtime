@@ -380,7 +380,7 @@ enum RenderSelfTest {
 
         func send(
             _ kind: AgentEventKind, agent: String, session: String, at offset: TimeInterval,
-            tool: String? = nil, context: SessionContext? = nil
+            tool: String? = nil, summary: String? = nil, context: SessionContext? = nil
         ) {
             controller.ingest(AgentEvent(
                 agentID: agent,
@@ -388,6 +388,7 @@ enum RenderSelfTest {
                 kind: kind,
                 at: now.addingTimeInterval(offset),
                 confidence: confidence,
+                summary: summary,
                 toolName: tool,
                 focusTarget: .openingDirectory(URL(fileURLWithPath: "/tmp/project")),
                 context: context
@@ -400,6 +401,7 @@ enum RenderSelfTest {
         // three seconds long and not something a test should sleep through.
         send(.waitingApproval, agent: "claude-code", session: "cafebabe-2222", at: 0,
              tool: "Write",
+             summary: "Claude wants to run git push origin main",
              context: SessionContext(usedPercent: 72, totalTokens: 144_000,
                                      windowSize: 200_000, modelName: "Opus 4.6",
                                      effortLevel: "high", costUSD: 3.42,
@@ -549,8 +551,12 @@ enum RenderSelfTest {
         }
 
         // Temporary: a PNG of what is actually drawn, for looking at.
+        //
+        // Dumped with the app's own config rather than the one this test last
+        // handed the view, which is not what the user has on screen.
         if let path = ProcessInfo.processInfo.environment["AGENTPET_DUMP_PANEL"],
            let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.show(panel, config: controller.panelConfig())
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?
                 .write(to: URL(fileURLWithPath: path))
@@ -620,6 +626,48 @@ enum RenderSelfTest {
             print("  ✗ the message does not follow the pet: "
                   + "\(bigType.messageFont.pointSize)pt in a \(bigType.rowHeight)pt row, "
                   + "and the width became \(largeWidth)")
+            failures += 1
+        }
+
+        // The status wording survives the largest text size the settings
+        // allow. The message is squeezed like any other flexible item, and it
+        // was the one that lost: at 20pt on a 112pt pet, in a row that also
+        // carried a task and a context bar, it came back "Needs inpu…" —
+        // *less* of the status wording than the same row drew at 10.5pt. A
+        // wording cut mid-word says no more than the label it cut, so the row
+        // keeps the message the width of its own label, plus the ellipsis
+        // that marks the detail as cut, and takes the room out of the items
+        // that only name things.
+        var wordingConfig = fullConfig
+        wordingConfig.messageFontSize = MessagePanelConfig.maximumFontSize
+        wordingConfig.widthPercent = 255
+        wordingConfig.items = [.agent, .task, .tool, .context, .message]
+            .map { MessagePanelConfig.Item($0) }
+        let wordingType = MessagePanelLayout.typography(for: wordingConfig, petWidth: pet.width)
+        let wordingWidth = MessagePanelLayout.panelWidth(for: wordingConfig, petWidth: pet.width)
+        let choppedWording = MessagePanelLayout.plan(for: panel, config: wordingConfig, petWidth: pet.width)
+            .rows.compactMap { row -> String? in
+                let drawn = MessagePanelLayout.frames(for: row, in: wordingWidth, typography: wordingType)
+                guard let message = drawn.first(where: { $0.item.kind == .message }) else {
+                    return "\(row.id) drew no status message at all"
+                }
+                // A message with a detail is drawn as "label — detail" and is
+                // cut at the end, so the label needs its own width plus the
+                // ellipsis; one with nothing but its wording is drawn as it
+                // is, and needs only the width it actually has.
+                let wording = message.item.secondary == nil
+                    ? message.item.primary
+                    : message.item.primary + "…"
+                let needed = MessagePanelLayout.width(of: wording, font: wordingType.messageFont)
+                guard message.frame.width + 0.5 < needed else { return nil }
+                return "\(row.id) got \(Int(message.frame.width))pt "
+                    + "for a \(Int(needed))pt wording"
+            }
+        if choppedWording.isEmpty {
+            print("  ✓ at the largest text size the status wording is drawn whole")
+        } else {
+            print("  ✗ the status wording is cut mid-word at the largest text size: "
+                  + choppedWording.joined(separator: "; "))
             failures += 1
         }
 
