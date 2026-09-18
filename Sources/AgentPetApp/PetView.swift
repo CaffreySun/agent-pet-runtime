@@ -28,14 +28,22 @@ final class PetView: NSView {
         MessagePanelLayout.plan(for: panel, config: config, petWidth: petWidth).height
     }
 
-    /// The part of the view the sprite occupies. The panel, when present,
-    /// takes the strip above it, so the pet itself never moves — the window
-    /// grows upward (and, for a wide panel, sideways) instead.
+    /// The part of the view the sprite occupies.
+    ///
+    /// The panel takes the strip above the pet, so the pet itself never moves
+    /// — the window grows upward instead. Sideways, the panel is anchored to
+    /// the pet: with `.left` its left edge is the pet's, so the pet sits at
+    /// the window's left and the panel extends to its right; `.center` keeps
+    /// the pet in the middle of the window, which is what it has always done;
+    /// `.right` puts the pet at the window's right edge.
     var spriteRect: CGRect {
         let inset = Self.panelHeight(for: panel, config: panelConfig, petWidth: petWidth)
+        let originX = panelConfig.alignment.spriteOriginX(
+            inWindowWidth: bounds.width, petWidth: petWidth
+        )
         return CGRect(
-            x: bounds.minX, y: bounds.minY,
-            width: bounds.width, height: max(0, bounds.height - inset)
+            x: bounds.minX + originX, y: bounds.minY,
+            width: min(bounds.width, petWidth), height: max(0, bounds.height - inset)
         )
     }
 
@@ -183,7 +191,7 @@ final class PetView: NSView {
 
     /// Draws the session rows in the strip above the pet.
     private func drawPanel(_ plan: MessagePanelLayout.Plan, spriteRect: CGRect) {
-        let type = plan.typography
+        let metrics = plan.metrics
         let height = plan.height
         let area = CGRect(
             x: bounds.minX, y: bounds.maxY - height, width: bounds.width, height: height
@@ -191,24 +199,25 @@ final class PetView: NSView {
         let bubble = area.insetBy(dx: 2, dy: 0)
         let bodyRect = CGRect(
             x: bubble.minX, y: bubble.minY,
-            width: bubble.width, height: bubble.height - MessagePanelLayout.tailHeight
+            width: bubble.width, height: bubble.height - metrics.tailHeight
         )
 
         // A tail centred on the pet, pointing down at it.
-        let tailWidth: CGFloat = 10
+        let tailWidth = 10 * metrics.scale
         let tail = CGMutablePath()
         tail.move(to: CGPoint(
             x: spriteRect.midX - tailWidth / 2,
-            y: bubble.minY + MessagePanelLayout.tailHeight
+            y: bubble.minY + metrics.tailHeight
         ))
         tail.addLine(to: CGPoint(x: spriteRect.midX, y: bubble.minY))
         tail.addLine(to: CGPoint(
             x: spriteRect.midX + tailWidth / 2,
-            y: bubble.minY + MessagePanelLayout.tailHeight
+            y: bubble.minY + metrics.tailHeight
         ))
 
         let shape = CGMutablePath()
-        shape.addRoundedRect(in: bodyRect, cornerWidth: 6, cornerHeight: 6)
+        shape.addRoundedRect(in: bodyRect, cornerWidth: 6 * metrics.scale,
+                             cornerHeight: 6 * metrics.scale)
         shape.addPath(tail)
 
         guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -223,51 +232,52 @@ final class PetView: NSView {
         context.restoreGState()
 
         // Rows run downward from the top of the bubble.
-        var rowTop = bodyRect.maxY - MessagePanelLayout.padding
+        var rowTop = bodyRect.maxY - metrics.padding
         for row in plan.rows {
             let rowRect = CGRect(
                 x: bodyRect.minX,
-                y: rowTop - type.rowHeight,
+                y: rowTop - metrics.rowHeight,
                 width: bodyRect.width,
-                height: type.rowHeight
+                height: metrics.rowHeight
             )
-            drawRow(row, in: rowRect, typography: type)
-            rowTop = rowRect.minY - MessagePanelLayout.rowSpacing
+            drawRow(row, in: rowRect, columns: plan.columns, metrics: metrics)
+            rowTop = rowRect.minY - metrics.rowSpacing
         }
     }
 
     private func drawRow(
         _ row: MessagePanelLayout.Row,
         in rowRect: CGRect,
-        typography type: MessagePanelLayout.Typography
+        columns: [MessagePanelLayout.Column],
+        metrics: MessagePanelLayout.Metrics
     ) {
         for (item, frame) in MessagePanelLayout.frames(
-            for: row, in: rowRect.width, typography: type
+            for: row, columns: columns, metrics: metrics
         ) {
             let rect = CGRect(
                 x: rowRect.minX + frame.minX,
                 y: rowRect.minY,
                 width: frame.width,
-                height: type.rowHeight
+                height: metrics.rowHeight
             )
             switch item.kind {
             case .context:
-                drawContext(item, in: rect)
+                drawContext(item, in: rect, metrics: metrics)
             case .message:
-                drawMessage(item, in: rect, isFocused: row.isFocused, font: type.messageFont)
+                drawMessage(item, in: rect, isFocused: row.isFocused, metrics: metrics)
             case .agent:
-                if !drawSymbol(item, in: rect) {
-                    Self.text(item.primary, font: MessagePanelLayout.agentFont)
-                        .draw(in: rect.insetBy(dx: 0, dy: 2.5))
+                if !drawSymbol(item, in: rect, metrics: metrics) {
+                    Self.text(item.primary, font: metrics.agentFont)
+                        .draw(in: rect.insetBy(dx: 0, dy: 2.5 * metrics.scale))
                 }
             case .session:
-                Self.text(item.primary, font: MessagePanelLayout.sessionFont,
+                Self.text(item.primary, font: metrics.sessionFont,
                           color: .secondaryLabelColor)
-                    .draw(in: rect.insetBy(dx: 0, dy: 3))
+                    .draw(in: rect.insetBy(dx: 0, dy: 3 * metrics.scale))
             default:
-                Self.text(item.primary, font: MessagePanelLayout.itemFont,
+                Self.text(item.primary, font: metrics.itemFont,
                           color: .secondaryLabelColor)
-                    .draw(in: rect.insetBy(dx: 0, dy: 3))
+                    .draw(in: rect.insetBy(dx: 0, dy: 3 * metrics.scale))
             }
         }
     }
@@ -278,10 +288,15 @@ final class PetView: NSView {
     /// colour using `.sourceAtop`, which paints only where the symbol is. SF
     /// Symbols arrive as template images, and a template drawn directly takes
     /// the context's fill colour only inside a control.
-    private func drawSymbol(_ item: MessagePanelLayout.Item, in rect: CGRect) -> Bool {
+    private func drawSymbol(
+        _ item: MessagePanelLayout.Item,
+        in rect: CGRect,
+        metrics: MessagePanelLayout.Metrics
+    ) -> Bool {
         guard let name = item.symbolName,
               let symbol = NSImage(systemSymbolName: name, accessibilityDescription: item.primary)?
-                  .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+                  .withSymbolConfiguration(NSImage.SymbolConfiguration(
+                      pointSize: 11 * metrics.scale, weight: .semibold))
         else { return false }
 
         let size = symbol.size
@@ -307,34 +322,40 @@ final class PetView: NSView {
     /// reads as a dot. The filled part is fluorescent green on purpose — it is
     /// the one number here that changes on its own and is worth noticing from
     /// across the room.
-    private func drawContext(_ item: MessagePanelLayout.Item, in rect: CGRect) {
+    private func drawContext(
+        _ item: MessagePanelLayout.Item,
+        in rect: CGRect,
+        metrics: MessagePanelLayout.Metrics
+    ) {
         var textOrigin = rect.minX
         if let context = item.context, let fraction = MessagePanelLayout.usageFraction(context) {
             let bar = CGRect(
                 x: rect.minX,
-                y: rect.midY - MessagePanelLayout.contextBarSize.height / 2,
-                width: MessagePanelLayout.contextBarSize.width,
-                height: MessagePanelLayout.contextBarSize.height
+                y: rect.midY - metrics.contextBarSize.height / 2,
+                width: metrics.contextBarSize.width,
+                height: metrics.contextBarSize.height
             )
             NSColor.separatorColor.withAlphaComponent(0.6).setFill()
-            NSBezierPath(roundedRect: bar, xRadius: 3, yRadius: 3).fill()
+            NSBezierPath(roundedRect: bar, xRadius: 3 * metrics.scale,
+                         yRadius: 3 * metrics.scale).fill()
 
             let filled = CGRect(
                 x: bar.minX, y: bar.minY,
                 width: max(2, bar.width * CGFloat(fraction)), height: bar.height
             )
             MessagePanelLayout.usageColor.setFill()
-            NSBezierPath(roundedRect: filled, xRadius: 3, yRadius: 3).fill()
-            textOrigin = bar.maxX + 5
+            NSBezierPath(roundedRect: filled, xRadius: 3 * metrics.scale,
+                         yRadius: 3 * metrics.scale).fill()
+            textOrigin = bar.maxX + 5 * metrics.scale
         }
 
         let textRect = CGRect(
             x: textOrigin, y: rect.minY,
             width: max(0, rect.maxX - textOrigin), height: rect.height
         )
-        Self.text(item.primary, font: MessagePanelLayout.itemFont,
+        Self.text(item.primary, font: metrics.itemFont,
                   color: .secondaryLabelColor)
-            .draw(in: textRect.insetBy(dx: 0, dy: 3))
+            .draw(in: textRect.insetBy(dx: 0, dy: 3 * metrics.scale))
     }
 
     /// The wording the pet has always used, now one row among several.
@@ -342,8 +363,9 @@ final class PetView: NSView {
         _ item: MessagePanelLayout.Item,
         in rect: CGRect,
         isFocused: Bool,
-        font: NSFont
+        metrics: MessagePanelLayout.Metrics
     ) {
+        let font = metrics.messageFont
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         let string = NSMutableAttributedString(
@@ -364,7 +386,7 @@ final class PetView: NSView {
                 ]
             ))
         }
-        string.draw(in: rect.insetBy(dx: 0, dy: 2.5))
+        string.draw(in: rect.insetBy(dx: 0, dy: 2.5 * metrics.scale))
     }
 
     private static func text(

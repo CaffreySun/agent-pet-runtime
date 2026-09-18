@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// it is already the one thing that runs every frame.
     private var petWidth: CGFloat = CGFloat(AppConfig.PetConfig.defaultWidth)
 
+    /// Keeps the panel's width from twitching as sessions come and go: the
+    /// panel fits itself to its content now, and content changes with every
+    /// event. Grows at once, shrinks once the content has stayed small.
+    private var widthGovernor = PanelWidthGovernor()
+
     /// Whether the pet is on screen. Codex calls putting it away "tuck away";
     /// the app stays in the menu bar either way, which is the only way back.
     private var isPetVisible = true
@@ -363,7 +368,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setPetVisible(_ visible: Bool, persist: Bool) {
         isPetVisible = visible
         if visible {
-            window.orderFrontRegardless()
+            // A panel should not come back at the width it had before it was
+            // put away, and the governor's whole job is remembering widths.
+            widthGovernor.reset()
+            presentPetWindow()
             // Frames are only worth choosing while somebody can see them.
             controller.start()
         } else {
@@ -454,7 +462,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return window.convertPoint(toScreen: petView.convert(centre, to: nil))
         }
         window.contentView = petView
-        window.orderFrontRegardless()
+        presentPetWindow()
 
         // Draw logging is its own flag: it fires sixty times a second and
         // would bury every other diagnostic.
@@ -469,6 +477,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 """.utf8))
         }
+    }
+
+    /// Puts the pet's window on screen — unless this is a diagnostic run.
+    ///
+    /// The window still exists either way: `--selftest` draws through the
+    /// view's own backing store, which needs a window but not a visible one,
+    /// and CI has no screen at all. What the guard buys is that a dozen
+    /// self-test runs in a row do not strobe a pet on and off somebody's
+    /// desktop while they are working on the code that runs them.
+    private func presentPetWindow() {
+        guard !HeadlessMode.isActive else { return }
+        window.orderFrontRegardless()
     }
 
     private func defaultOrigin(for size: NSSize) -> NSPoint {
@@ -517,25 +537,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Grows the window upward when the panel appears, and sideways to the
     /// width the settings ask for.
     ///
-    /// The pet does not move: the window is re-centred on the sprite, so the
-    /// pet keeps its place on screen and the panel takes space *above* it,
-    /// exactly as Codex reserves rows above its sprite rather than drawing
-    /// over the transcript. The bottom edge is what stays put — growing
-    /// downward would move the pet every time a session went to work.
+    /// The pet does not move: the window is placed so that the sprite stays
+    /// exactly where it is, and the panel takes space *above* it, exactly as
+    /// Codex reserves rows above its sprite rather than drawing over the
+    /// transcript. The bottom edge is what stays put — growing downward would
+    /// move the pet every time a session went to work.
+    ///
+    /// The width is the plan's own: the content's, when the panel is fitting
+    /// itself to it, or the settings' maximum. It goes through the governor,
+    /// because content changes with events and a bubble that flinched on every
+    /// one of them would be worse than one that is occasionally too wide.
     private func resizeWindow(for panel: MessagePanel, config: MessagePanelConfig) {
         guard let window else { return }
         let plan = MessagePanelLayout.plan(for: panel, config: config, petWidth: petWidth)
         let pet = PetWindow.size(forWidth: petWidth)
-        let width = plan.rows.isEmpty
-            ? pet.width
-            : MessagePanelLayout.panelWidth(for: config, petWidth: petWidth)
+        let wanted = plan.rows.isEmpty ? pet.width : plan.width
+        let width = widthGovernor.width(wanted: wanted, at: Date())
         let height = pet.height + plan.height
 
         let frame = window.frame
         guard abs(frame.width - width) > 0.5 || abs(frame.height - height) > 0.5 else { return }
+        // Where the sprite is now, and the window origin that leaves it there
+        // — whichever edge of it the panel is anchored to.
+        let spriteX = frame.minX + config.alignment.spriteOriginX(
+            inWindowWidth: frame.width, petWidth: petWidth
+        )
         window.setFrame(
             NSRect(
-                x: frame.midX - width / 2,
+                x: config.alignment.windowOriginX(
+                    forSpriteX: spriteX, windowWidth: width, petWidth: petWidth
+                ),
                 y: frame.minY,
                 width: width,
                 height: height
@@ -565,10 +596,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func savePosition() {
         guard let frame = window?.frame else { return }
         // Stored as the origin the window would have at its resting width, so
-        // the saved point is the sprite's anchor rather than the frame's
-        // corner. Otherwise a wide panel at one quit and a narrow one at the
-        // next would walk the pet sideways a little on every relaunch.
-        let anchorX = frame.minX + (frame.width - petWidth) / 2
+        // the saved point is the sprite's own left edge rather than the
+        // frame's corner — which depends on how wide the panel happened to be,
+        // and on which edge of the pet it is anchored to. Otherwise a wide
+        // panel at one quit and a narrow one at the next would walk the pet
+        // sideways a little on every relaunch.
+        let alignment = model?.config.messagePanel.alignment ?? MessagePanelConfig().alignment
+        let anchorX = frame.minX + alignment.spriteOriginX(
+            inWindowWidth: frame.width, petWidth: petWidth
+        )
         UserDefaults.standard.set("\(anchorX),\(frame.minY)", forKey: Self.positionKey)
     }
 
