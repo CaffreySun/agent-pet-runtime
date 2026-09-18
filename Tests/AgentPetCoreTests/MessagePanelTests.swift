@@ -286,6 +286,50 @@ struct MessagePanelConfigTests {
         let config = try JSONDecoder().decode(AppConfig.self, from: stored)
         #expect(config.messagePanel.messageFontSize == 20)
     }
+
+    @Test("a config written before the new switches existed gets today's behaviour")
+    func scalingSwitchesBackwardCompatible() throws {
+        // No `autoScale` / `fitsText`: the panel keeps the manual size a user
+        // chose, and fits itself to its content — which is what a fresh
+        // install gets, since `fitsText` is on by default.
+        let stored = Data(#"{"schemaVersion":1,"messagePanel":{"widthPercent":150}}"#.utf8)
+        let config = try JSONDecoder().decode(AppConfig.self, from: stored)
+        #expect(config.messagePanel.autoScale == false)
+        #expect(config.messagePanel.fitsText == true)
+
+        var manual = MessagePanelConfig()
+        manual.autoScale = true
+        manual.fitsText = false
+        let roundTripped = try JSONDecoder().decode(
+            AppConfig.self, from: JSONEncoder().encode(AppConfig(messagePanel: manual))
+        )
+        #expect(roundTripped.messagePanel.autoScale == true)
+        #expect(roundTripped.messagePanel.fitsText == false)
+    }
+
+    @Test("the alignment anchors the panel's edge to the pet's, not the text inside")
+    func alignmentAnchorsThePanelToThePet() {
+        // A 112pt pet with a 286pt panel: the pet sits at the panel's left
+        // edge, its centre, or its right edge.
+        let pet: CGFloat = 112
+        let panel: CGFloat = 286
+        #expect(MessagePanelConfig.Alignment.left.spriteOriginX(inWindowWidth: panel, petWidth: pet) == 0)
+        #expect(MessagePanelConfig.Alignment.center.spriteOriginX(inWindowWidth: panel, petWidth: pet) == 87)
+        #expect(MessagePanelConfig.Alignment.right.spriteOriginX(inWindowWidth: panel, petWidth: pet) == 174)
+
+        // And the inverse keeps the pet where it is when the window is
+        // resized for a different panel width.
+        for alignment in MessagePanelConfig.Alignment.allCases {
+            let spriteX: CGFloat = 900
+            let origin = alignment.windowOriginX(forSpriteX: spriteX, windowWidth: 500, petWidth: pet)
+            let back = origin + alignment.spriteOriginX(inWindowWidth: 500, petWidth: pet)
+            #expect(back == spriteX)
+        }
+
+        // A panel narrower than the pet (which the settings do not allow, but
+        // a resting window is exactly the pet) never pushes the pet outside it.
+        #expect(MessagePanelConfig.Alignment.right.spriteOriginX(inWindowWidth: 80, petWidth: 112) == 0)
+    }
 }
 
 @Suite("Pet introduction")

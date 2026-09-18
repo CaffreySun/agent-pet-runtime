@@ -135,7 +135,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// and closing the window hands the menu bar back to whatever the user was
     /// actually working in.
     func show() {
-        NSApp.setActivationPolicy(.regular)
+        // A diagnostic run builds the window but never puts it in front, and
+        // never takes the Dock icon or the focus: `--selftest` opens the
+        // manager to check its toolbar, and doing that visibly would take the
+        // user out of whatever they were typing in.
+        let presents = !HeadlessMode.isActive
+        if presents { NSApp.setActivationPolicy(.regular) }
         if CommandLine.arguments.contains("--verbose") {
             FileHandle.standardError.write(Data(
                 "[pet] manager open: activation policy regular, menu bar visible\n".utf8
@@ -153,8 +158,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             // the pet thumbnails and buys a window that is alive again; the
             // chosen section lives in the model so it survives the rebuild.
             window.contentViewController = Self.makeContent(model: model)
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            if presents {
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
             return
         }
 
@@ -171,8 +178,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         // at, rather than on the pet's screen.
         window.collectionBehavior = [.moveToActiveSpace]
         window.delegate = self
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if presents {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
 
         self.window = window
     }

@@ -96,6 +96,12 @@ struct SettingsView: View {
                 .help("On: the panel is there whenever a session is known. "
                       + "Off: it appears only while something is actually happening.")
 
+            Toggle("Scale the panel with the pet", isOn: binding(\.messagePanel.autoScale))
+                .help("On: the panel draws itself at the default text size for whatever "
+                      + "pet size is set, and asks for the default width, so text, rows, "
+                      + "glyph and bar keep their proportions as the pet grows. The width "
+                      + "and text size below are then set for you and do not apply.")
+
             LabeledContent("Width") {
                 HStack(spacing: 8) {
                     Slider(value: widthPercentBinding,
@@ -112,9 +118,17 @@ struct SettingsView: View {
                         .labelsHidden()
                 }
             }
-            .help("Panel width as a percentage of the pet's own width. 200% is twice "
-                  + "the pet, 300% three times it. The message's text size does not "
-                  + "come into it — only the pet does.")
+            .disabled(model.config.messagePanel.autoScale)
+            .help("The panel's maximum width, as a percentage of the pet's own width: "
+                  + "200% is twice the pet at the default text size, 300% three times "
+                  + "it — and the text size scales the whole panel on top of that. With "
+                  + "\"Fit the panel to its content\" on, the panel is only drawn this "
+                  + "wide when a row actually needs it.")
+
+            Toggle("Fit the panel to its content", isOn: binding(\.messagePanel.fitsText))
+                .help("On: the panel is as wide as its widest row needs and no wider — "
+                      + "sharing one set of columns, never wider than the maximum above, "
+                      + "never narrower than the pet. Off: it is always the maximum.")
 
             LabeledContent("Text size") {
                 HStack(spacing: 8) {
@@ -133,13 +147,15 @@ struct SettingsView: View {
                         .labelsHidden()
                 }
             }
-            .help("The status message's text — the line that says what the pet is "
-                  + "doing — in points at the default 112pt pet. It grows with the pet "
-                  + "so it keeps its place beside one, and the panel's width stays a "
-                  + "percentage of the pet rather than following the text.")
+            .disabled(model.config.messagePanel.autoScale)
+            .help("The panel's text, in points at the default 112pt pet. Everything "
+                  + "the panel draws with scales together — the status wording, the "
+                  + "session's names, the agent's glyph, the usage bar, the row, the "
+                  + "padding — and the panel and its window grow with it, so a bigger "
+                  + "text size zooms the panel rather than squeezing a bigger message "
+                  + "into the same box.")
 
-            Text("The message draws at \(effectiveMessageSize) pt with a "
-                 + "\(Int(model.config.pet.width))pt pet.")
+            Text(effectiveSizeSummary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -149,7 +165,10 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .help("Where the rows sit inside the panel. The pet itself does not move.")
+            .help("Where the panel sits relative to the pet: Left puts the panel's left "
+                  + "edge on the pet's left edge, Right its right edge on the pet's right "
+                  + "edge, Centre centres it over the pet. The text inside is always "
+                  + "left-aligned, and the pet itself does not move.")
 
             ForEach(Array(model.config.messagePanel.items.enumerated()), id: \.element.kind) { index, item in
                 HStack(spacing: 8) {
@@ -311,12 +330,23 @@ struct SettingsView: View {
         )
     }
 
-    /// What the text-size setting means at the pet size on screen now — the
-    /// number the slider alone cannot tell you.
-    private var effectiveMessageSize: String {
-        let points = MessagePanelConfig.clampFontSize(model.config.messagePanel.messageFontSize)
+    /// What the size settings mean at the pet size on screen now — the
+    /// numbers the sliders alone cannot tell you, and the size every label,
+    /// glyph and bar in the panel is drawn at.
+    private var effectiveSizeSummary: String {
+        let petWidth = CGFloat(model.config.pet.width)
+        let points = MessagePanelLayout.effectiveFontSize(for: model.config.messagePanel)
             * model.config.pet.width / AppConfig.PetConfig.defaultWidth
-        return points.formatted(.number.precision(.fractionLength(1)))
+        let drawn = points.formatted(.number.precision(.fractionLength(1)))
+        let widest = Int(MessagePanelLayout.maximumPanelWidth(
+            for: model.config.messagePanel, petWidth: petWidth
+        ))
+        let pet = Int(model.config.pet.width)
+        return model.config.messagePanel.autoScale
+            ? "Scaled with the pet: the text draws at \(drawn) pt with a \(pet)pt pet, "
+                + "and the panel may be up to \(widest)pt wide."
+            : "The panel's text draws at \(drawn) pt with a \(pet)pt pet, "
+                + "up to \(widest)pt wide."
     }
 
     private func itemEnabledBinding(_ index: Int) -> Binding<Bool> {

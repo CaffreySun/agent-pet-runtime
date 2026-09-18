@@ -10,20 +10,22 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
     /// How wide the panel may be, as a percentage of the pet's own width.
     ///
     /// A percentage rather than points because the pet is what it sits beside:
-    /// 200% is "twice the pet", whatever size that pet draws at.
+    /// 200% is "twice the pet", whatever size that pet draws at. This is the
+    /// panel's **maximum**: with `fitsText` on it is only drawn this wide when
+    /// its content actually needs it.
     public static let minimumWidthPercent: Double = 100
     public static let maximumWidthPercent: Double = 300
 
     /// Unchanged from when 200 was also the ceiling: raising it must not
-    /// quietly widen a panel nobody asked to widen.
+    /// quietly widen a panel nobody asked to widen. It is also the width
+    /// `autoScale` asks for, since the manual value does not apply there.
     public static let defaultWidthPercent: Double = 200
 
-    /// The status message's text size, in points **at the default pet size**.
+    /// The panel's text size, in points **at the default pet size**.
     ///
-    /// The message is the line the user reads, so it grows with the pet: at a
-    /// 224pt pet the 10.5pt default would be a fifth of the pet's own height.
-    /// The panel's *width* does not follow the font — it stays a percentage of
-    /// the pet, which the pet size already scales.
+    /// Every number the panel draws with is this multiple of its baseline —
+    /// the fonts, the row, the padding, the glyph, the usage bar — so a bigger
+    /// setting zooms the whole panel and widens it by the same factor.
     public static let minimumFontSize: Double = 8
     public static let maximumFontSize: Double = 20
     public static let defaultFontSize: Double = 10.5
@@ -35,27 +37,42 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
     /// Whether the panel stays up while sessions are idle, or only appears
     /// when something is actually happening.
     public var alwaysVisible: Bool
-    /// Display order, left to right within a row.
+    /// Display order, left to right within a row — and the column order, since
+    /// every row is laid out on the same columns.
     public var items: [Item]
     /// Panel width as a percentage of the pet's width, 100–300.
     public var widthPercent: Double
-    /// The message line's text size, in points at the default pet size.
+    /// The panel's text size, in points at the default pet size.
     public var messageFontSize: Double
-    /// Where the rows sit inside the panel.
+    /// Where the panel sits relative to the pet — not how the text inside it
+    /// is aligned, which is always left.
     public var alignment: Alignment
+    /// Let the pet's size govern the panel: the text draws at the default
+    /// ratio (`defaultFontSize` at the default pet, so it follows the pet),
+    /// and the width asks for the default percentage. The manual text size and
+    /// width are kept but do not apply while this is on.
+    public var autoScale: Bool
+    /// Draw the panel only as wide as its content needs — the widest column
+    /// set of any row — instead of always at `widthPercent`. Still bounded:
+    /// never narrower than the pet, never wider than the maximum above.
+    public var fitsText: Bool
 
     public init(
         alwaysVisible: Bool = true,
         items: [Item] = Kind.allCases.map { Item($0) },
         widthPercent: Double = MessagePanelConfig.defaultWidthPercent,
         messageFontSize: Double = MessagePanelConfig.defaultFontSize,
-        alignment: Alignment = .left
+        alignment: Alignment = .left,
+        autoScale: Bool = false,
+        fitsText: Bool = true
     ) {
         self.alwaysVisible = alwaysVisible
         self.items = items
         self.widthPercent = widthPercent
         self.messageFontSize = messageFontSize
         self.alignment = alignment
+        self.autoScale = autoScale
+        self.fitsText = fitsText
     }
 
     /// Decoded field by field, for the same reason `AppConfig` is: a config
@@ -76,6 +93,12 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
         )
         alignment = try container.decodeIfPresent(Alignment.self, forKey: .alignment)
             ?? defaults.alignment
+        // Absent means an older file: the panel keeps its manual size, and
+        // fits itself to its content, which is what a fresh install gets.
+        autoScale = try container.decodeIfPresent(Bool.self, forKey: .autoScale)
+            ?? defaults.autoScale
+        fitsText = try container.decodeIfPresent(Bool.self, forKey: .fitsText)
+            ?? defaults.fitsText
 
         var decoded = try container.decodeIfPresent([Item].self, forKey: .items) ?? defaults.items
         // A kind this config has never heard of — one added since it was
@@ -92,6 +115,11 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
         min(max(percent, minimumWidthPercent), maximumWidthPercent)
     }
 
+    /// Where the panel sits relative to the pet, **not** how the text inside
+    /// it is aligned — that is always left. `.left` puts the panel's left edge
+    /// on the pet's left edge, so the panel grows to the right of the pet;
+    /// `.right` puts its right edge on the pet's right edge; `.center` centres
+    /// it over the pet, which is what the window has always done.
     public enum Alignment: String, Codable, Sendable, CaseIterable, Identifiable {
         case left
         case center
@@ -105,6 +133,29 @@ public struct MessagePanelConfig: Codable, Sendable, Equatable {
             case .center: return "Centre"
             case .right:  return "Right"
             }
+        }
+
+        /// Where the pet sits inside a window as wide as the panel.
+        ///
+        /// The window is the panel: its width is the panel's width, and the
+        /// pet is drawn inside it. This is the pet's left edge in window
+        /// coordinates, and it is what keeps the pet on the same pixel from
+        /// one panel width to the next.
+        public func spriteOriginX(inWindowWidth windowWidth: CGFloat, petWidth: CGFloat) -> CGFloat {
+            switch self {
+            case .left:   return 0
+            case .center: return max(0, (windowWidth - petWidth) / 2)
+            case .right:  return max(0, windowWidth - petWidth)
+            }
+        }
+
+        /// The window origin that leaves the pet's left edge where it is.
+        public func windowOriginX(
+            forSpriteX spriteX: CGFloat,
+            windowWidth: CGFloat,
+            petWidth: CGFloat
+        ) -> CGFloat {
+            spriteX - spriteOriginX(inWindowWidth: windowWidth, petWidth: petWidth)
         }
     }
 

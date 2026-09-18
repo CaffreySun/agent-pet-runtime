@@ -445,12 +445,13 @@ enum RenderSelfTest {
             failures += 1
         }
 
-        // Positions and sizes, as the window sees them.
-        let plan = MessagePanelLayout.plan(for: panel, config: view.currentPanelConfig, petWidth: petWidth)
+        // Positions and sizes, as the window sees them. The app's own config,
+        // not the view's: the view's copy is whatever this test last handed it,
+        // and the restore lines below would restore to a mutated config.
+        let appPanelConfig = controller.panelConfig()
+        let plan = MessagePanelLayout.plan(for: panel, config: appPanelConfig, petWidth: petWidth)
         let pet = PetWindow.size(forWidth: petWidth)
-        let configuredWidth = MessagePanelLayout.panelWidth(
-            for: view.currentPanelConfig, petWidth: pet.width
-        )
+        let configuredWidth = plan.width
         let withPanel = contentHash(view)
         if plan.height > 0, view.spriteRect.height < view.bounds.height {
             print("  ✓ the pet keeps its place: \(Int(plan.height))pt reserved above it")
@@ -463,7 +464,7 @@ enum RenderSelfTest {
            abs(window.frame.height - (pet.height + plan.height)) < 1,
            abs(window.frame.width - configuredWidth) < 1 {
             print("  ✓ the window is \(Int(window.frame.width))x\(Int(window.frame.height)) "
-                  + "— the width the settings asked for")
+                  + "— the width the panel's content asks for, or the settings' maximum")
         } else {
             print("  ✗ the window is wrong: "
                   + "\(view.window.map { "\($0.frame.width)x\($0.frame.height)" } ?? "no window") "
@@ -499,51 +500,180 @@ enum RenderSelfTest {
             failures += 1
         }
 
-        // The width and alignment settings have to reach the picture. Width is
-        // checked as arithmetic — the window-level check above already went
-        // through the real resize path — and alignment by what is drawn.
-        var narrow = view.currentPanelConfig
+        // The width setting is a percentage of the pet — and the *maximum*
+        // the panel may be drawn at, not necessarily its width.
+        var narrow = MessagePanelConfig()   // the panel's own defaults, not the app's config
         narrow.widthPercent = 110
-        let narrowWidth = MessagePanelLayout.panelWidth(for: narrow, petWidth: pet.width)
+        narrow.autoScale = false
+        narrow.fitsText = false
+        var narrowAtDefaultText = narrow
+        narrowAtDefaultText.messageFontSize = MessagePanelConfig.defaultFontSize
+        let narrowWidth = MessagePanelLayout.maximumPanelWidth(
+            for: narrowAtDefaultText, petWidth: pet.width
+        )
+        let narrowedZoom = MessagePanelLayout.maximumPanelWidth(for: narrow, petWidth: pet.width)
+        let zoom = CGFloat(MessagePanelConfig.clampFontSize(narrow.messageFontSize)
+                           / MessagePanelConfig.defaultFontSize)
         if abs(narrowWidth - pet.width * 1.1) <= 1,
-           MessagePanelLayout.panelWidth(for: view.currentPanelConfig, petWidth: pet.width) > narrowWidth {
-            print("  ✓ the width setting is a percentage of the pet: 110% → \(Int(narrowWidth))pt")
+           abs(narrowedZoom - narrowWidth * zoom) <= 1 {
+            print("  ✓ the width setting is a percentage of the pet: 110% → \(Int(narrowWidth))pt "
+                  + "at the default text size, \(Int(narrowedZoom))pt at \(narrow.messageFontSize)pt")
         } else {
             print("  ✗ the width setting does not follow the pet's width")
             failures += 1
         }
 
-        // Alignment needs room to show: with every item switched on the rows
-        // fill the panel edge to edge — which is what a 200%-of-the-pet panel
-        // is at Codex's pet size — and left and right would lay out the same
-        // pixels. One short row is the case the setting is actually for.
-        var roomToSpare = view.currentPanelConfig
-        roomToSpare.items = [MessagePanelConfig.Item(.agent), MessagePanelConfig.Item(.message)]
-        view.show(panel, config: roomToSpare)
-        let leftHash = contentHash(view)
-
-        var rightAligned = roomToSpare
-        rightAligned.alignment = .right
-        view.show(panel, config: rightAligned)
-        let rightHash = contentHash(view)
-        view.show(panel, config: view.currentPanelConfig)
-        if rightHash != leftHash {
-            print("  ✓ the alignment setting moves the rows")
+        // Scaling with the pet overrides both manual settings: the text draws
+        // at the default size for that pet, and the width asks for the default
+        // percentage of it, whatever the sliders happen to say.
+        var auto = narrow
+        auto.autoScale = true
+        auto.messageFontSize = MessagePanelConfig.maximumFontSize
+        auto.widthPercent = MessagePanelConfig.maximumWidthPercent
+        let autoMetrics = MessagePanelLayout.metrics(for: auto, petWidth: 224)
+        let autoMaximum = MessagePanelLayout.maximumPanelWidth(for: auto, petWidth: 224)
+        if abs(autoMetrics.messageFont.pointSize - 21) < 0.01,
+           abs(autoMetrics.itemFont.pointSize - 21) < 0.01,
+           abs(autoMaximum - 448) <= 1 {
+            print("  ✓ scaling with the pet ignores the sliders: a 224pt pet draws 21pt text "
+                  + "in a panel of up to \(Int(autoMaximum))pt")
         } else {
-            print("  ✗ alignment changed nothing")
+            print("  ✗ scaling with the pet did not override the manual settings: "
+                  + "\(autoMetrics.itemFont.pointSize)pt text, \(Int(autoMaximum))pt wide")
+            failures += 1
+        }
+
+        // `alignment` is where the panel sits relative to the pet, not how the
+        // text inside it is set: the pet sits at the window's left edge for
+        // `.left`, at its right edge for `.right`, and the text does not move
+        // at all.
+        var anchoredLeft = appPanelConfig
+        anchoredLeft.alignment = .left
+        view.show(panel, config: anchoredLeft)
+        let leftSprite = view.spriteRect
+        var anchoredRight = anchoredLeft
+        anchoredRight.alignment = .right
+        view.show(panel, config: anchoredRight)
+        let rightSprite = view.spriteRect
+        view.show(panel, config: appPanelConfig)
+
+        func itemOrigins(_ config: MessagePanelConfig) -> [CGFloat] {
+            let plan = MessagePanelLayout.plan(for: panel, config: config, petWidth: petWidth)
+            guard let row = plan.rows.first else { return [] }
+            return MessagePanelLayout.frames(for: row, columns: plan.columns, metrics: plan.metrics)
+                .map(\.frame.minX)
+        }
+        let roomToAnchor = view.bounds.width > petWidth + 0.5
+        if itemOrigins(anchoredLeft) != itemOrigins(anchoredRight) {
+            print("  ✗ the alignment moved the text instead of the panel: "
+                  + "items at \(itemOrigins(anchoredLeft)) then \(itemOrigins(anchoredRight))")
+            failures += 1
+        } else if !roomToAnchor {
+            // A panel no wider than the pet has no anchor to show: the pet
+            // fills the window whatever the setting says.
+            print("  – alignment skipped: this panel is no wider than the pet")
+        } else if leftSprite.minX == view.bounds.minX,
+                  abs(rightSprite.minX - (view.bounds.width - petWidth)) < 0.5,
+                  rightSprite.minX > leftSprite.minX {
+            print("  ✓ the alignment anchors the panel to the pet — the sprite at the window's "
+                  + "left edge for .left, its right edge for .right — and the text inside "
+                  + "does not move")
+        } else {
+            print("  ✗ the panel is not anchored to the pet: sprite at "
+                  + "\(leftSprite.minX)/\(rightSprite.minX) in a \(Int(view.bounds.width))pt window")
+            failures += 1
+        }
+
+        // One set of columns for every row: the same kind is drawn at the same
+        // x in each, whether or not the row before it carried that item.
+        let columnPlan = MessagePanelLayout.plan(for: panel, config: MessagePanelConfig(),
+                                                 petWidth: petWidth)
+        var originsByKind: [MessagePanelConfig.Kind: Set<CGFloat>] = [:]
+        var cells = 0
+        for row in columnPlan.rows {
+            for (item, frame) in MessagePanelLayout.frames(
+                for: row, columns: columnPlan.columns, metrics: columnPlan.metrics
+            ) {
+                originsByKind[item.kind, default: []].insert(frame.minX)
+                cells += 1
+            }
+        }
+        let sharedOrigins = originsByKind.values.allSatisfy { $0.count == 1 }
+            && originsByKind.count >= 4
+        if columnPlan.rows.count >= 2, sharedOrigins {
+            print("  ✓ every row is laid out on the same columns: "
+                  + "\(originsByKind.count) columns, \(cells) cells, each kind at one x")
+        } else {
+            print("  ✗ the rows do not share their columns: "
+                  + originsByKind.map { "\($0.key.rawValue) at \($0.value.sorted())" }.joined(separator: ", "))
+            failures += 1
+        }
+
+        // The message's own column is never narrower than its wording plus the
+        // room for a detail — and a row that has no tool does not shift its
+        // message to the left of a row that has one.
+        if let messageColumn = columnPlan.columns.first(where: { $0.kind == .message }) {
+            let widestWording = columnPlan.rows
+                .compactMap { $0.items.first { $0.kind == .message } }
+                .map { MessagePanelLayout.width(of: $0.primary + "…",
+                                                font: columnPlan.metrics.messageFont) }
+                .max() ?? 0
+            let allowance = columnPlan.metrics.messageDetailAllowance
+            if messageColumn.fitWidth + 0.5 >= widestWording + allowance {
+                print("  ✓ the panel is sized for the wording plus \(Int(allowance))pt of detail "
+                      + "(\(Int(messageColumn.fitWidth))pt), not for a 200-character message")
+            } else {
+                print("  ✗ the message column is sized for \(Int(messageColumn.fitWidth))pt, "
+                      + "wanting \(Int(widestWording + allowance))pt")
+                failures += 1
+            }
+        } else {
+            print("  ✗ the panel has no message column")
+            failures += 1
+        }
+
+        // Fitting itself to the content: a panel with one short item is
+        // narrower than its maximum and never narrower than the pet; one whose
+        // content needs the room stays at the maximum.
+        var sparse = appPanelConfig
+        sparse.items = [MessagePanelConfig.Item(.message)]
+        sparse.fitsText = true
+        let sparsePlan = MessagePanelLayout.plan(for: panel, config: sparse, petWidth: petWidth)
+        var whole = sparse
+        whole.fitsText = false
+        let wholePlan = MessagePanelLayout.plan(for: panel, config: whole, petWidth: petWidth)
+        // One glyph and nothing else is narrower than the pet, and the panel
+        // is not allowed to be: it is the thing the pet is sitting under.
+        var tiny = sparse
+        tiny.items = [MessagePanelConfig.Item(.agent)]
+        let tinyPlan = MessagePanelLayout.plan(for: panel, config: tiny, petWidth: petWidth)
+        let maximum = MessagePanelLayout.maximumPanelWidth(for: sparse, petWidth: petWidth)
+        let fitHasRoom = maximum > petWidth + 0.5
+        if (!fitHasRoom || sparsePlan.width < maximum), wholePlan.width == maximum,
+           tinyPlan.width == petWidth {
+            print("  ✓ the panel fits itself to its content: \(Int(sparsePlan.width))pt for one "
+                  + "message item, \(Int(wholePlan.width))pt (the maximum) with the fit off, and "
+                  + "the pet's own \(Int(petWidth))pt for a single glyph"
+                  + (fitHasRoom ? "" : " — the maximum is the pet, so there is no room to hug"))
+        } else {
+            print("  ✗ the fit did not follow the content: \(Int(sparsePlan.width))pt fitted, "
+                  + "\(Int(wholePlan.width))pt asked, \(Int(tinyPlan.width))pt for one glyph, "
+                  + "maximum \(Int(maximum))pt")
             failures += 1
         }
 
         // The context item is only drawn when a status line has reported one:
         // taking it away must change the picture.
-        var withoutContext = view.currentPanelConfig
+        var withoutContext = appPanelConfig
         if let index = withoutContext.items.firstIndex(where: { $0.kind == .context }) {
             withoutContext.items[index].isEnabled = false
         }
         view.show(panel, config: withoutContext)
         let withoutContextHash = contentHash(view)
-        view.show(panel, config: view.currentPanelConfig)
-        if withoutContextHash != withPanel {
+        view.show(panel, config: appPanelConfig)
+        if !appPanelConfig.items.contains(where: { $0.kind == .context && $0.isEnabled }) {
+            print("  – usage bar skipped: this config has the context item switched off")
+        } else if withoutContextHash != withPanel {
             print("  ✓ the usage bar is actually painted")
         } else {
             print("  ✗ turning the context item off changed nothing")
@@ -565,14 +695,21 @@ enum RenderSelfTest {
 
         // The agent column is a glyph, not a name: "Claude Code" would take
         // most of the panel's width, and the name is what the Agents page is
-        // for. The name stays on the item for the verbose log.
+        // for. The name stays on the item for the verbose log — so the column
+        // is the width of the glyph, whatever the scale, and never the width
+        // of the name.
         let agentItems = MessagePanelLayout.items(
-            for: panel.rows[0], config: view.currentPanelConfig, petWidth: petWidth
+            for: panel.rows[0], config: appPanelConfig, petWidth: petWidth
         ).filter { $0.kind == .agent }
-        if let agent = agentItems.first,
+        let glyphWidth = MessagePanelLayout.metrics(
+            for: appPanelConfig, petWidth: petWidth
+        ).iconItemWidth
+        if agentItems.isEmpty {
+            print("  – agent glyph skipped: this config has the agent item switched off")
+        } else if let agent = agentItems.first,
            let symbol = agent.symbolName,
            NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil,
-           agent.width <= 20,
+           abs(agent.width - glyphWidth) < 0.5,
            !agent.primary.isEmpty {
             print("  ✓ the agent column is the glyph '\(symbol)' — \(Int(agent.width))pt, for '\(agent.primary)'")
         } else {
@@ -586,13 +723,10 @@ enum RenderSelfTest {
         // narrow to say anything", which made the whole column vanish while
         // the item list still looked right.
         let fullConfig = MessagePanelConfig()   // every item on, 200% of the pet
-        let squeezed = MessagePanelLayout.panelWidth(for: fullConfig, petWidth: pet.width)
-        let firstRow = MessagePanelLayout.plan(for: panel, config: fullConfig, petWidth: pet.width).rows.first
-        let drawnKinds = firstRow.map {
-            MessagePanelLayout.frames(
-                for: $0, in: squeezed,
-                typography: MessagePanelLayout.typography(for: fullConfig, petWidth: pet.width)
-            ).map(\.item.kind)
+        let fullPlan = MessagePanelLayout.plan(for: panel, config: fullConfig, petWidth: pet.width)
+        let drawnKinds = fullPlan.rows.first.map {
+            MessagePanelLayout.frames(for: $0, columns: fullPlan.columns, metrics: fullPlan.metrics)
+                .map(\.item.kind)
         } ?? []
         if drawnKinds.contains(.agent) {
             print("  ✓ it survives a row too narrow for everything else (\(drawnKinds.count) of 9 items fit)")
@@ -605,64 +739,94 @@ enum RenderSelfTest {
         // and in particular the width does not. The default has to stay
         // exactly what it has always been — 10.5pt in an 18pt row — or the
         // panel would move for every existing user the moment they upgrade.
-        let baseType = MessagePanelLayout.typography(for: fullConfig, petWidth: 112)
-        let bigType = MessagePanelLayout.typography(for: fullConfig, petWidth: 224)
+        let baseMetrics = MessagePanelLayout.metrics(for: fullConfig, petWidth: 112)
+        let bigMetrics = MessagePanelLayout.metrics(for: fullConfig, petWidth: 224)
         var largeText = fullConfig
         largeText.messageFontSize = 20
-        let wideText = MessagePanelLayout.typography(for: largeText, petWidth: 112)
-        let largeWidth = MessagePanelLayout.panelWidth(for: largeText, petWidth: 224)
-        if abs(baseType.messageFont.pointSize - 10.5) < 0.01, baseType.rowHeight == 18 {
+        let wideMetrics = MessagePanelLayout.metrics(for: largeText, petWidth: 112)
+        if abs(baseMetrics.messageFont.pointSize - 10.5) < 0.01, baseMetrics.rowHeight == 18 {
             print("  ✓ at the default pet the message is still 10.5pt in an 18pt row")
         } else {
             print("  ✗ the default message size moved: "
-                  + "\(baseType.messageFont.pointSize)pt, row \(baseType.rowHeight)")
+                  + "\(baseMetrics.messageFont.pointSize)pt, row \(baseMetrics.rowHeight)")
             failures += 1
         }
-        if abs(bigType.messageFont.pointSize - 21) < 0.01, abs(bigType.rowHeight - 36) <= 1,
-           abs(wideText.messageFont.pointSize - 20) < 0.01,
-           largeWidth == MessagePanelLayout.panelWidth(for: fullConfig, petWidth: 224) {
-            print("  ✓ a 224pt pet draws the message at 21pt — the text size never moves the width")
+        let baseWidth = MessagePanelLayout.maximumPanelWidth(for: fullConfig, petWidth: 112)
+        let wideTextWidth = MessagePanelLayout.maximumPanelWidth(for: largeText, petWidth: 112)
+        if abs(bigMetrics.messageFont.pointSize - 21) < 0.01, abs(bigMetrics.rowHeight - 36) <= 1,
+           abs(wideMetrics.messageFont.pointSize - 20) < 0.01,
+           abs(wideTextWidth - baseWidth * wideMetrics.scale) <= 1 {
+            print("  ✓ a 224pt pet draws the message at 21pt — and the panel is one drawing at any "
+                  + "scale: 200% of the default pet is \(Int(baseWidth))pt, the same 200% at 20pt is "
+                  + "\(Int(wideTextWidth))pt")
         } else {
-            print("  ✗ the message does not follow the pet: "
-                  + "\(bigType.messageFont.pointSize)pt in a \(bigType.rowHeight)pt row, "
-                  + "and the width became \(largeWidth)")
+            print("  ✗ the panel does not scale as one piece: "
+                  + "\(wideMetrics.messageFont.pointSize)pt text in a \(wideTextWidth)pt panel, "
+                  + "wanting \(Int(baseWidth * wideMetrics.scale))pt")
             failures += 1
         }
 
+        // And the whole row is at that scale — not just the message's font.
+        // The message alone used to follow the pet, which left two sizes side
+        // by side in one row: at 20pt the status wording sat beside a 10.5pt
+        // task name, a 13pt glyph and a 7pt bar, and raising the pet made the
+        // rest of the row relatively smaller still. Every number the panel
+        // draws with now moves with the scale, so what a bigger pet buys is a
+        // bigger panel, not a bigger message.
+        let scaledWithThePet: [(String, CGFloat, CGFloat)] = [
+            ("the other labels", baseMetrics.itemFont.pointSize, bigMetrics.itemFont.pointSize),
+            ("the agent's label", baseMetrics.agentFont.pointSize, bigMetrics.agentFont.pointSize),
+            ("the session id", baseMetrics.sessionFont.pointSize, bigMetrics.sessionFont.pointSize),
+            ("the row", baseMetrics.rowHeight, bigMetrics.rowHeight),
+            ("the padding", baseMetrics.padding, bigMetrics.padding),
+            ("the item gap", baseMetrics.spacing, bigMetrics.spacing),
+            ("the agent glyph", baseMetrics.iconItemWidth, bigMetrics.iconItemWidth),
+            ("the usage bar", baseMetrics.contextBarSize.width, bigMetrics.contextBarSize.width),
+            ("the panel", MessagePanelLayout.maximumPanelWidth(for: fullConfig, petWidth: 112),
+             MessagePanelLayout.maximumPanelWidth(for: fullConfig, petWidth: 224)),
+        ]
+        if let (name, one, two) = scaledWithThePet.first(where: { abs($0.2 - 2 * $0.1) > 0.01 }) {
+            print("  ✗ \(name) did not double with the pet: \(one) -> \(two)")
+            failures += 1
+        } else {
+            print("  ✓ at twice the pet the whole row is twice the size — "
+                  + "\(Int(bigMetrics.rowHeight))pt row, \(Int(bigMetrics.itemFont.pointSize))pt labels, "
+                  + "\(Int(bigMetrics.contextBarSize.width))pt bar")
+        }
+
         // The status wording survives the largest text size the settings
-        // allow. The message is squeezed like any other flexible item, and it
+        // allow. The message column is squeezed like any other column, and it
         // was the one that lost: at 20pt on a 112pt pet, in a row that also
         // carried a task and a context bar, it came back "Needs inpu…" —
         // *less* of the status wording than the same row drew at 10.5pt. A
-        // wording cut mid-word says no more than the label it cut, so the row
-        // keeps the message the width of its own label, plus the ellipsis
-        // that marks the detail as cut, and takes the room out of the items
-        // that only name things.
+        // wording cut mid-word says no more than the label it cut, so the
+        // squeeze keeps the message column the width of the widest label, plus
+        // the ellipsis that marks the detail as cut, and takes the room out of
+        // the columns that only name things. Checked with the fit off, so the
+        // maximum always binds and the squeeze is always what is being read.
         var wordingConfig = fullConfig
         wordingConfig.messageFontSize = MessagePanelConfig.maximumFontSize
         wordingConfig.widthPercent = 255
+        wordingConfig.fitsText = false
         wordingConfig.items = [.agent, .task, .tool, .context, .message]
             .map { MessagePanelConfig.Item($0) }
-        let wordingType = MessagePanelLayout.typography(for: wordingConfig, petWidth: pet.width)
-        let wordingWidth = MessagePanelLayout.panelWidth(for: wordingConfig, petWidth: pet.width)
-        let choppedWording = MessagePanelLayout.plan(for: panel, config: wordingConfig, petWidth: pet.width)
-            .rows.compactMap { row -> String? in
-                let drawn = MessagePanelLayout.frames(for: row, in: wordingWidth, typography: wordingType)
-                guard let message = drawn.first(where: { $0.item.kind == .message }) else {
-                    return "\(row.id) drew no status message at all"
-                }
-                // A message with a detail is drawn as "label — detail" and is
-                // cut at the end, so the label needs its own width plus the
-                // ellipsis; one with nothing but its wording is drawn as it
-                // is, and needs only the width it actually has.
-                let wording = message.item.secondary == nil
-                    ? message.item.primary
-                    : message.item.primary + "…"
-                let needed = MessagePanelLayout.width(of: wording, font: wordingType.messageFont)
-                guard message.frame.width + 0.5 < needed else { return nil }
-                return "\(row.id) got \(Int(message.frame.width))pt "
-                    + "for a \(Int(needed))pt wording"
+        let wordingPlan = MessagePanelLayout.plan(for: panel, config: wordingConfig,
+                                                  petWidth: pet.width)
+        let messageColumn = wordingPlan.columns.first { $0.kind == .message }
+        let choppedWording = wordingPlan.rows.compactMap { row -> String? in
+            guard let cell = row.items.first(where: { $0.kind == .message }) else { return nil }
+            guard let column = messageColumn, column.isDrawn else {
+                return "\(row.id)'s message column was dropped entirely"
             }
+            // A message with a detail is drawn as "label — detail" and is cut
+            // at the end, so the label needs its own width plus the ellipsis;
+            // one with nothing but its wording is drawn as it is, and needs
+            // only the width it actually has.
+            let wording = cell.secondary == nil ? cell.primary : cell.primary + "…"
+            let needed = MessagePanelLayout.width(of: wording, font: wordingPlan.metrics.messageFont)
+            guard column.width + 0.5 < needed else { return nil }
+            return "\(row.id)'s column got \(Int(column.width))pt for a \(Int(needed))pt wording"
+        }
         if choppedWording.isEmpty {
             print("  ✓ at the largest text size the status wording is drawn whole")
         } else {
@@ -688,7 +852,7 @@ enum RenderSelfTest {
         }
         view.show(panel, config: withoutStatusItems)
         let withoutModelHash = contentHash(view)
-        view.show(panel, config: view.currentPanelConfig)
+        view.show(panel, config: appPanelConfig)
         if withoutModelHash != withStatusHash {
             print("  ✓ the model, cost, and rate-limit items are painted too")
         } else {
@@ -755,6 +919,15 @@ enum RenderSelfTest {
         print("")
         print("Manager window lifecycle")
         var failures = 0
+
+        // The probe needs a window on screen, and a diagnostic run puts none
+        // there. The answer it was written to get is recorded in
+        // ARCHITECTURE §6.1 — SwiftUI does not bring an off-screen window's
+        // tree back to life — so nothing is lost by skipping it here.
+        guard !HeadlessMode.isActive else {
+            print("  – skipped: a diagnostic run does not put windows on screen")
+            return 0
+        }
 
         let probe = UpdateProbe()
         let window = NSWindow(
@@ -839,13 +1012,35 @@ enum RenderSelfTest {
         }
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 
-        func toggleFrame() -> NSRect? {
+        func toggleView() -> NSView? {
             guard let view = window.toolbar?.items.first?.view, view.window != nil else { return nil }
+            return view
+        }
+
+        // The toggle has to be *in the toolbar* — SwiftUI only installs one
+        // when the view declares toolbar content, and without it the split
+        // view draws its own toggle inside the sidebar pane. That much is
+        // visible to a window nobody can see; where it ends up is not.
+        guard let toggle = toggleView() else {
+            print("  ✗ the window has no toolbar item to toggle the sidebar with")
+            window.close()
+            return failures + 1
+        }
+        guard window.occlusionState.contains(.visible) else {
+            print("  ✓ the toggle lives in the toolbar — position not checked: a diagnostic "
+                  + "run puts no windows on screen, and SwiftUI does not lay out one it "
+                  + "cannot be seen in")
+            window.close()
+            return failures
+        }
+
+        func toggleFrame() -> NSRect? {
+            guard let view = toggleView() else { return nil }
             return view.convert(view.bounds, to: nil)
         }
 
         guard let open = toggleFrame() else {
-            print("  ✗ the window has no toolbar item to toggle the sidebar with")
+            print("  ✗ the toolbar item has no frame")
             window.close()
             return failures + 1
         }

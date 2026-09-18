@@ -287,10 +287,18 @@ its context window is, the session's estimated cost, how much of the 5-hour and
 toggled and reordered in the manager's Settings; the panel can be set to stay
 up or to appear only while something is happening; its width is a percentage of
 the pet's own width (100–300%, slider, number field, and stepper) so it can be
-up to three times the pet; the message's text size is yours to set (8–20pt at
-the default pet, and it grows with the pet, while the width stays a percentage
-of the pet and never follows the text); and the rows can be aligned left,
-centred, or right — the pet itself never moves. The second line of the status message is what the event
+up to three times the pet, and a *maximum*: the panel fits itself to its
+content by default — every row on one shared set of columns, so items line up
+down the panel — never wider than the maximum and never narrower than the pet.
+The panel's text size is yours to set (8–20pt at the default pet — every label,
+glyph and bar in the row draws at that size, and the panel widens with it, so
+the setting zooms the whole panel rather than enlarging one line inside the
+same box), or you can let the pet's size govern both with "Scale the panel with
+the pet", which greys the two sliders out. The alignment picker says where the
+panel is anchored to the pet — left, centred, or right edge — while the text
+inside is always left-aligned. The pet itself never moves: the panel grows
+upward and to whichever side the anchor says, and the width only ever grows at
+once and shrinks after the content has stayed small. The second line of the status message is what the event
 knows: which tool an approval is waiting on, what failed, and — when a turn
 finishes — a preview of the assistant's last message, which Claude Code hands
 to hooks as `last_assistant_message` and Codex shows the same way. It is tidied
