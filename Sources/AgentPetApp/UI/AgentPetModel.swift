@@ -65,6 +65,14 @@ final class AgentPetModel: ObservableObject {
     /// Which pet the desktop is currently showing, so the list can mark it.
     @Published var currentPetID: String?
 
+    /// Which pet the Pets page has highlighted.
+    ///
+    /// Outlives the page: switching tabs and coming back lands on the pet the
+    /// user was looking at rather than on nothing. In memory only — a relaunch
+    /// starts from the pet that is actually on the desktop, which is what a
+    /// fresh look at the page should show.
+    @Published var highlightedPetID: String?
+
     /// Which section the manager window is showing.
     ///
     /// In the model rather than the view because the window rebuilds its view

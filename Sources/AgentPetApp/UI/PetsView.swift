@@ -18,7 +18,6 @@ struct PetsView: View {
     /// the selection moves on — one atlas at a time is the whole cost.
     @State private var detailFrames: SpriteFrames?
     @State private var warnings: [String: [String]] = [:]
-    @State private var selection: String?
     @State private var previewTrack = "idle"
 
     private let previewTracks = ["idle", "running", "waiting", "waving", "failed", "review"]
@@ -31,7 +30,15 @@ struct PetsView: View {
                 .frame(minWidth: 340)
         }
         .task { loadThumbnails() }
-        .onChange(of: selection) { _, _ in loadSelectedPet() }
+        // The highlight lives in the model, so the page can be torn down and
+        // rebuilt by a tab switch without forgetting which pet was on screen.
+        // Nothing highlighted yet means the page is being opened for the first
+        // time in this launch: start from the pet the desktop is showing.
+        .onAppear {
+            if model.highlightedPetID == nil { model.highlightedPetID = model.currentPetID }
+            loadSelectedPet()
+        }
+        .onChange(of: model.highlightedPetID) { _, _ in loadSelectedPet() }
     }
 
     // MARK: - List
@@ -69,7 +76,7 @@ struct PetsView: View {
             if model.pets.isEmpty {
                 emptyState
             } else {
-                List(selection: $selection) {
+                List(selection: $model.highlightedPetID) {
                     ForEach(model.pets, id: \.id) { pet in
                         row(for: pet).tag(pet.id)
                     }
@@ -173,7 +180,7 @@ struct PetsView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let pet = selection.flatMap(selectedPet) {
+        if let pet = model.highlightedPetID.flatMap(selectedPet) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Group {
@@ -310,7 +317,7 @@ struct PetsView: View {
     /// The selected pet's frames, decoded on demand: the detail pane is the one
     /// place a real animation runs, so it is the one place an atlas is kept.
     private func loadSelectedPet() {
-        guard let pet = selection.flatMap(selectedPet) else {
+        guard let pet = model.highlightedPetID.flatMap(selectedPet) else {
             detailFrames = nil
             return
         }

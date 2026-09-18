@@ -460,8 +460,8 @@ enum MessagePanelLayout {
     }
 
     /// Fit the columns into the panel's width, then hand back any room to
-    /// spare — the same two passes a single row used to make, now made once
-    /// for the panel's columns so every row gets the same answer.
+    /// spare — once for the panel's columns, so every row gets the same
+    /// answer, and in the order the row gives things up in.
     private static func squeezed(
         _ columns: [Column],
         into width: CGFloat,
@@ -472,39 +472,7 @@ enum MessagePanelLayout {
             - metrics.spacing * CGFloat(max(0, columns.count - 1)))
         let natural = columns.map(\.width).reduce(0, +)
 
-        if natural > budget {
-            // Take it out of the flexible columns first — a task name squeezed
-            // is a smaller loss than a session id cut in half — and down to
-            // what each one keeps for itself, no further.
-            //
-            // For everything but the message that is the general floor, which
-            // is what this pass has always used. The message keeps the width
-            // of its own wording *when the row can pay for it whole*: what is
-            // left once every other column holds its `minimumWidth`. Paying
-            // part of it buys nothing — the wording is cut anyway — and would
-            // cost the columns beside it their room, so a claim that cannot be
-            // paid in full falls back to the floor the message has always had.
-            let minimums = columns.map(\.minimumWidth).reduce(0, +)
-            var deficit = natural - budget
-            for index in columns.indices where columns[index].isFlexible && deficit > 0 {
-                let column = columns[index]
-                let affordable = budget - (minimums - column.minimumWidth)
-                let floor = column.preferredWidth <= affordable ? column.preferredWidth
-                                                              : metrics.minimumItemWidth
-                let room = max(0, columns[index].width - floor)
-                let take = min(room, deficit)
-                columns[index].width -= take
-                deficit -= take
-            }
-            if deficit > 0 {
-                for index in columns.indices where deficit > 0 {
-                    let room = max(0, columns[index].width - columns[index].minimumWidth)
-                    let take = min(room, deficit)
-                    columns[index].width -= take
-                    deficit -= take
-                }
-            }
-        } else {
+        guard natural > budget else {
             // Room to spare: the flexible columns take it, up to what they
             // would draw with all the space in the world — the rest of a
             // task's name, the detail under a status wording.
@@ -515,15 +483,62 @@ enum MessagePanelLayout {
                 columns[index].width += give
                 slack -= give
             }
+            return columns
+        }
+
+        // The row gives room up in this order, most expendable first:
+        //
+        //   1. the message's detail — the preview under its wording, which is
+        //      the one thing in the panel that is a bonus rather than content;
+        //   2. the columns that only name things — session id, model, tool,
+        //      usage figure, cost, limits;
+        //   3. the task's name;
+        //   4. and last the message's own wording, which the all-or-nothing
+        //      floor refuses to give up until the row truly cannot pay.
+        //
+        // Taking it from the flexible columns in list order is what made
+        // widening the panel useless: the task paid first and stayed "proj…"
+        // while every extra point went to the message's detail (user report,
+        // 2026-09-18).
+        var deficit = natural - budget
+        let minimums = columns.map(\.minimumWidth).reduce(0, +)
+
+        for index in columns.indices where deficit > 0 && columns[index].kind == .message {
+            let column = columns[index]
+            // The wording, when the row can pay for it whole: what is left
+            // once every other column holds its minimum. Paying part of it
+            // buys nothing — the wording is cut anyway — so a claim that
+            // cannot be paid in full falls back to the floor the message has
+            // always had.
+            let affordable = budget - (minimums - column.minimumWidth)
+            let floor = column.preferredWidth <= affordable ? column.preferredWidth
+                                                          : metrics.minimumItemWidth
+            let take = min(max(0, columns[index].width - floor), deficit)
+            columns[index].width -= take
+            deficit -= take
+        }
+        for index in columns.indices where deficit > 0 && !columns[index].isFlexible {
+            let take = min(max(0, columns[index].width - columns[index].minimumWidth), deficit)
+            columns[index].width -= take
+            deficit -= take
+        }
+        for index in columns.indices
+        where deficit > 0 && columns[index].isFlexible && columns[index].kind != .message {
+            let take = min(max(0, columns[index].width - metrics.minimumItemWidth), deficit)
+            columns[index].width -= take
+            deficit -= take
+        }
+        // A row narrow enough that even those floors do not fit: everything
+        // gives down to the width it would be dropped under.
+        for index in columns.indices where deficit > 0 {
+            let take = min(max(0, columns[index].width - columns[index].minimumWidth), deficit)
+            columns[index].width -= take
+            deficit -= take
         }
         return columns
     }
 
-    /// Lay one row out inside `width`, shrinking the flexible items first and
-    /// everything else after that, then aligning the result.
-    ///
-    /// Rectangles are returned in order; nothing is dropped silently except
-    /// items squeezed below the width at which they would say anything.
+
     /// Where each of a row's items is drawn, given the panel's columns.
     ///
     /// The columns are shared, so an item sits in the same place in every row:

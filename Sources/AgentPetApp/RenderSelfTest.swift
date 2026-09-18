@@ -638,6 +638,9 @@ enum RenderSelfTest {
         var sparse = appPanelConfig
         sparse.items = [MessagePanelConfig.Item(.message)]
         sparse.fitsText = true
+        // Wide enough that the content is what decides the width, whatever the
+        // app's own setting happens to be.
+        sparse.widthPercent = MessagePanelConfig.maximumWidthPercent
         let sparsePlan = MessagePanelLayout.plan(for: panel, config: sparse, petWidth: petWidth)
         var whole = sparse
         whole.fitsText = false
@@ -835,6 +838,36 @@ enum RenderSelfTest {
             failures += 1
         }
 
+        // Widening the panel restores the task's whole name before it feeds the
+        // message's detail. The row gives up the preview under a status wording
+        // first, then the columns that only name things, and only then the
+        // task's name: taking it from the flexible columns in list order is
+        // what left the task as "proj…" while every extra point went to the
+        // detail (user report, 2026-09-18).
+        var priorityConfig = MessagePanelConfig()
+        priorityConfig.messageFontSize = 12
+        priorityConfig.widthPercent = 255
+        priorityConfig.fitsText = false
+        priorityConfig.items = [.agent, .task, .tool, .context, .message]
+            .map { MessagePanelConfig.Item($0) }
+        let priorityPlan = MessagePanelLayout.plan(for: panel, config: priorityConfig,
+                                                   petWidth: 112)
+        let cutTasks = priorityPlan.rows.compactMap { row -> String? in
+            guard let cell = row.items.first(where: { $0.kind == .task }),
+                  let column = priorityPlan.columns.first(where: { $0.kind == .task })
+            else { return nil }
+            return column.width + 0.5 >= cell.fitWidth ? nil
+                : "\(row.id)'s task got \(Int(column.width))pt for a \(Int(cell.fitWidth))pt name"
+        }
+        if cutTasks.isEmpty {
+            print("  ✓ a squeezed panel keeps the task's whole name — the message's detail "
+                  + "is what gives way first")
+        } else {
+            print("  ✗ the task was cut while the message kept its detail: "
+                  + cutTasks.joined(separator: "; "))
+            failures += 1
+        }
+
         // The other status-line items draw from the same reading. They get a
         // row with room for them: at Codex's pet size a panel carrying every
         // item is full edge to edge, and an item squeezed out entirely would
@@ -1004,6 +1037,22 @@ enum RenderSelfTest {
             root: BridgeSocketLocation.applicationSupportDirectory,
             shimPath: "/tmp/none"
         )
+        // The size this check is about to prove is remembered is the user's
+        // own on any machine that is not running isolated: read it, clear it
+        // so the opening size below is the real default, and put it back once
+        // the window has closed (closing re-writes it, so the restore has to
+        // come last).
+        let rememberedBefore = UserDefaults.standard.string(forKey: "manager.window.size")
+        UserDefaults.standard.removeObject(forKey: "manager.window.size")
+        defer {
+            // After the window has closed, so its close does not overwrite
+            // this: the answer belongs to the machine's user, not to the test.
+            if let rememberedBefore {
+                UserDefaults.standard.set(rememberedBefore, forKey: "manager.window.size")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "manager.window.size")
+            }
+        }
         let manager = MainWindowController(model: model)
         manager.show()
         guard let window = NSApp.windows.first(where: { $0.title == "Agent Pet Runtime" }) else {
@@ -1011,6 +1060,32 @@ enum RenderSelfTest {
             return failures + 1
         }
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        // The window opens at the size the Pets page needs and cannot be made
+        // smaller than the minimum; a size the user drags out is remembered
+        // rather than only ever written at close, because the manager is often
+        // open when the app quits.
+        let opening = window.contentRect(forFrameRect: window.frame).size
+        if opening.width >= 899, opening.height >= 679,
+           window.contentMinSize.width >= 760, window.contentMinSize.height >= 520 {
+            print("  ✓ the manager opens at \(Int(opening.width))x\(Int(opening.height)) "
+                  + "and will not go below \(Int(window.contentMinSize.width))x"
+                  + "\(Int(window.contentMinSize.height))")
+        } else {
+            print("  ✗ the manager window is \(Int(opening.width))x\(Int(opening.height)), "
+                  + "minimum \(window.contentMinSize)")
+            failures += 1
+        }
+
+        window.setContentSize(NSSize(width: 812, height: 596))
+        NotificationCenter.default.post(name: NSWindow.didResizeNotification, object: window)
+        let remembered = UserDefaults.standard.string(forKey: "manager.window.size")
+        if remembered == "812.0,596.0" {
+            print("  ✓ and a size it is dragged to is remembered (\(remembered ?? "-"))")
+        } else {
+            print("  ✗ the manager's size was not remembered: \(remembered ?? "nothing stored")")
+            failures += 1
+        }
 
         func toggleView() -> NSView? {
             guard let view = window.toolbar?.items.first?.view, view.window != nil else { return nil }
