@@ -95,6 +95,20 @@ enum MessagePanelLayout {
         /// says nothing. A glyph is the exception, and says so here, because a
         /// thirteen-point icon is not a squeezed word.
         var minimumWidth: CGFloat = MessagePanelLayout.minimumItemWidth / 2
+        /// What the squeeze takes this item down to before it starts on
+        /// anything else.
+        ///
+        /// The general floor for every item but the message, which is the one
+        /// item whose content is a sentence rather than a label: at twice the
+        /// text size a row that stops at the floor hands back "Needs inpu…",
+        /// *less* of the status wording than the same row drew at the default
+        /// size. So the message claims the width of its own label, plus the
+        /// ellipsis that marks the detail as cut, and the room comes out of
+        /// the items that only name things.
+        ///
+        /// A claim the row cannot pay is not a claim: `frames` caps this at
+        /// what is left once every other item keeps its `minimumWidth`.
+        var preferredWidth: CGFloat = MessagePanelLayout.minimumItemWidth
 
         init(
             kind: MessagePanelConfig.Kind,
@@ -104,7 +118,8 @@ enum MessagePanelLayout {
             width: CGFloat,
             isFlexible: Bool,
             symbolName: String? = nil,
-            minimumWidth: CGFloat = MessagePanelLayout.minimumItemWidth / 2
+            minimumWidth: CGFloat = MessagePanelLayout.minimumItemWidth / 2,
+            preferredWidth: CGFloat = MessagePanelLayout.minimumItemWidth
         ) {
             self.kind = kind
             self.primary = primary
@@ -114,6 +129,7 @@ enum MessagePanelLayout {
             self.isFlexible = isFlexible
             self.symbolName = symbolName
             self.minimumWidth = minimumWidth
+            self.preferredWidth = preferredWidth
         }
     }
 
@@ -209,7 +225,12 @@ enum MessagePanelLayout {
                             width: min(width(of: full, font: text.messageFont),
                                        messageWidthCap * text.textScale),
                             isFlexible: true,
-                            minimumWidth: minimumItemWidth / 2 * text.textScale)
+                            minimumWidth: minimumItemWidth / 2 * text.textScale,
+                            // The wording never goes under, at any text size:
+                            // the label is what the item is for, and the
+                            // ellipsis is what the cut-off detail costs.
+                            preferredWidth: width(of: message.label + "…",
+                                                  font: text.messageFont))
             }
         }
     }
@@ -306,11 +327,25 @@ enum MessagePanelLayout {
 
         if natural > budget {
             // Take it out of the flexible items first — a task name squeezed
-            // is a smaller loss than a session id cut in half.
+            // is a smaller loss than a session id cut in half — and down to
+            // what each one keeps for itself, no further.
+            //
+            // For everything but the message that is the general floor, which
+            // is what this loop has always used. The message keeps the width
+            // of its own wording *when the row can pay for it whole*: what is
+            // left once every other item holds its `minimumWidth`. Paying part
+            // of it buys nothing — the wording is cut anyway — and would cost
+            // the items beside it their room, so a claim that cannot be paid
+            // in full falls back to the floor the message has always had.
+            let minimums = row.items.map(\.minimumWidth).reduce(0, +)
             var deficit = natural - budget
             let flexibleIndices = row.items.indices.filter { row.items[$0].isFlexible }
             for index in flexibleIndices where deficit > 0 {
-                let room = max(0, widths[index] - minimumItemWidth)
+                let item = row.items[index]
+                let affordable = budget - (minimums - item.minimumWidth)
+                let floor = item.preferredWidth <= affordable ? item.preferredWidth
+                                                              : minimumItemWidth
+                let room = max(0, widths[index] - floor)
                 let take = min(room, deficit)
                 widths[index] -= take
                 deficit -= take
