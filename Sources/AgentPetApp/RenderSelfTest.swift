@@ -1221,8 +1221,25 @@ enum RenderSelfTest {
         // intermediate size was what got remembered, so a window the user had
         // sized came back at the minimum and stayed there for the next launch
         // too (user report, 2026-09-18).
+        //
+        // Closed first, because that is the reopen the swap is for: a window
+        // that was only ever built — which is every window in a diagnostic
+        // run, since none of them go on screen — may be brought forward
+        // without one, and a check that measures that path would go green
+        // without ever reaching the code it is here for.
+        let treeBeforeClosing = window.contentViewController
+        window.close()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         manager.show()
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        // And it has to be a rebuild: the reason the swap exists is that a
+        // window nobody rebuilds stops receiving SwiftUI's updates, so a green
+        // check with the old tree still in place would be a false one.
+        if window.contentViewController === treeBeforeClosing {
+            print("  ✗ reopening a closed manager did not rebuild its view tree")
+            failures += 1
+        }
         let reopened = window.contentRect(forFrameRect: window.frame).size
         let stillStored = UserDefaults.standard.string(forKey: "manager.window.size")
         if abs(reopened.width - 812) < 1, abs(reopened.height - 596) < 1,
