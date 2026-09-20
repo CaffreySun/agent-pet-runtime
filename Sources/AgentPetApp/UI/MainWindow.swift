@@ -117,6 +117,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: AgentPetModel
 
+    /// True while a reopen is rebuilding the window's content: assigning a
+    /// content view controller makes AppKit resize the window to the new one's
+    /// fitting size, and that intermediate size is not the user's.
+    private var isRebuilding = false
+
     /// Called once a second while the window is on screen, so the manager
     /// shows the engine's current view rather than the one it had when the
     /// last event arrived.
@@ -126,13 +131,14 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     /// Where the window opens the first time, and how small it may be made.
     ///
-    /// 900x680 rather than something tighter because the Pets page is the tall
-    /// one: a 240pt preview, a picker, the pet's description and its grid come
-    /// to more than 580pt, so "Use on Desktop" and "Reveal in Finder" sat
-    /// below the fold in a window that looked complete (user report,
-    /// 2026-09-18). The minimum keeps the preview and its controls on screen;
-    /// below that the page is a scroll through one thing at a time.
-    private static let defaultContentSize = NSSize(width: 900, height: 680)
+    /// 1620x1224 is 180% of the 900x680 this opened at until 2026-09-18, on
+    /// the user's word that the default was too small. That 900x680 was itself
+    /// chosen because the Pets page is the tall one: a 240pt preview, a
+    /// picker, the pet's description and its grid come to more than 580pt, so
+    /// "Use on Desktop" and "Reveal in Finder" sat below the fold in a window
+    /// that looked complete (user report, 2026-09-18). The minimum is
+    /// unchanged — what a page fits in did not grow with the default.
+    private static let defaultContentSize = NSSize(width: 1620, height: 1224)
     private static let minimumContentSize = NSSize(width: 760, height: 520)
 
     /// The size the user last left the window at, so making it your own is a
@@ -140,14 +146,32 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// position, and clamped to the minimum in case a later version raises it.
     private static let sizeKey = "manager.window.size"
 
-    private static var openingContentSize: NSSize {
-        guard let stored = UserDefaults.standard.string(forKey: sizeKey) else {
-            return defaultContentSize
+    /// What the window opens at: the remembered size if there is one, the
+    /// default otherwise — never under the minimum, and never larger than the
+    /// screen it is about to be shown on, because a window bigger than the
+    /// display cannot be dragged or resized by the corner that hangs off it.
+    /// A size that has to be cut to fit is what gets remembered at close: one
+    /// size for every display, and the display that cut it was the last word.
+    static func openingContentSize(stored: String?, available: NSSize?) -> NSSize {
+        let parts = stored?.split(separator: ",").compactMap { Double($0) } ?? []
+        let wanted = parts.count == 2 && parts[0] > 0 && parts[1] > 0
+            ? NSSize(width: parts[0], height: parts[1])
+            : defaultContentSize
+        var size = NSSize(width: max(wanted.width, minimumContentSize.width),
+                          height: max(wanted.height, minimumContentSize.height))
+        if let available {
+            size.width = min(size.width, max(available.width, minimumContentSize.width))
+            size.height = min(size.height, max(available.height, minimumContentSize.height))
         }
-        let parts = stored.split(separator: ",").compactMap { Double($0) }
-        guard parts.count == 2, parts[0] > 0, parts[1] > 0 else { return defaultContentSize }
-        return NSSize(width: max(parts[0], minimumContentSize.width),
-                      height: max(parts[1], minimumContentSize.height))
+        return size
+    }
+
+    /// How much of the screen the window may take, its own titlebar and
+    /// toolbar included: measured through the window so the chrome comes off
+    /// the allowance instead of hanging below the display.
+    static func availableContentSize(for window: NSWindow) -> NSSize? {
+        guard let visible = NSScreen.main?.visibleFrame.size else { return nil }
+        return window.contentRect(forFrameRect: NSRect(origin: .zero, size: visible)).size
     }
 
     private static func rememberContentSize(_ size: NSSize) {
@@ -187,7 +211,18 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             // had to learn to stop themselves. Rebuilding costs one decode of
             // the pet thumbnails and buys a window that is alive again; the
             // chosen section lives in the model so it survives the rebuild.
+            //
+            // The swap also makes AppKit resize the window to the new view's
+            // fitting size — SwiftUI's minimum, 760x520 — and `windowDidResize`
+            // duly remembered *that*, so a window the user had sized came back
+            // at the minimum, and the next launch opened at the minimum too
+            // (user report, 2026-09-18). The window keeps the frame it had,
+            // and the flag keeps the intermediate size out of the defaults.
+            let frame = window.frame
+            isRebuilding = true
+            defer { isRebuilding = false }
             window.contentViewController = Self.makeContent(model: model)
+            window.setFrame(frame, display: false)
             if presents {
                 window.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
@@ -202,7 +237,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         // line, the traffic lights inline with them.
         window.toolbarStyle = .unified
         window.contentMinSize = Self.minimumContentSize
-        window.setContentSize(Self.openingContentSize)
+        window.setContentSize(Self.openingContentSize(
+            stored: UserDefaults.standard.string(forKey: Self.sizeKey),
+            available: Self.availableContentSize(for: window)
+        ))
         window.center()
         window.isReleasedWhenClosed = false
         // Bring the manager forward on whatever the user is actually looking
@@ -224,7 +262,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// Remembered as the user drags rather than only at close: the manager is
     /// often open when the app is quit, and `windowWillClose` never runs then.
     func windowDidResize(_ notification: Notification) {
-        guard let window else { return }
+        guard !isRebuilding, let window else { return }
         Self.rememberContentSize(window.contentRect(forFrameRect: window.frame).size)
     }
 

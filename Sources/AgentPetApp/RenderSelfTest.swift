@@ -1151,18 +1151,55 @@ enum RenderSelfTest {
         }
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 
-        // The window opens at the size the Pets page needs and cannot be made
-        // smaller than the minimum; a size the user drags out is remembered
-        // rather than only ever written at close, because the manager is often
-        // open when the app quits.
+        // What the window opens at, on made-up screens: no remembered size
+        // means the default, the default gives way to a screen that cannot
+        // hold it, a remembered size beats the default, and nothing gets under
+        // the minimum.
+        let roomy = NSSize(width: 4000, height: 3000)
+        let laptop = NSSize(width: 1440, height: 875)
+        let defaultSize = NSSize(width: 1620, height: 1224)
+        let openingCases: [(stored: String?, available: NSSize?, want: NSSize)] = [
+            (nil, roomy, defaultSize),
+            (nil, nil, defaultSize),
+            (nil, laptop, laptop),
+            ("812.0,596.0", roomy, NSSize(width: 812, height: 596)),
+            ("812.0,596.0", laptop, NSSize(width: 812, height: 596)),
+            ("10,10", roomy, NSSize(width: 760, height: 520)),
+            ("4000,3000", laptop, laptop),
+            ("junk", roomy, defaultSize),
+        ]
+        var wrongSize: [String] = []
+        for c in openingCases {
+            let got = MainWindowController.openingContentSize(stored: c.stored,
+                                                              available: c.available)
+            if got != c.want {
+                wrongSize.append("\(c.stored ?? "none") in \(Int(c.available?.width ?? -1))x"
+                                 + "\(Int(c.available?.height ?? -1)) -> \(Int(got.width))x"
+                                 + "\(Int(got.height)), want \(Int(c.want.width))x"
+                                 + "\(Int(c.want.height))")
+            }
+        }
+        if wrongSize.isEmpty {
+            print("  ✓ the opening size: the 1620x1224 default, the user's own, the minimum, "
+                  + "the screen")
+        } else {
+            print("  ✗ opening sizes wrong: \(wrongSize.joined(separator: "; "))")
+            failures += 1
+        }
+
+        // And it really opened at what the rule says for this machine — never
+        // under the minimum, so the Pets page stays a page.
         let opening = window.contentRect(forFrameRect: window.frame).size
-        if opening.width >= 899, opening.height >= 679,
+        let expected = MainWindowController.openingContentSize(
+            stored: nil, available: MainWindowController.availableContentSize(for: window))
+        if opening == expected,
            window.contentMinSize.width >= 760, window.contentMinSize.height >= 520 {
             print("  ✓ the manager opens at \(Int(opening.width))x\(Int(opening.height)) "
                   + "and will not go below \(Int(window.contentMinSize.width))x"
                   + "\(Int(window.contentMinSize.height))")
         } else {
             print("  ✗ the manager window is \(Int(opening.width))x\(Int(opening.height)), "
+                  + "the rule says \(Int(expected.width))x\(Int(expected.height)), "
                   + "minimum \(window.contentMinSize)")
             failures += 1
         }
@@ -1174,6 +1211,27 @@ enum RenderSelfTest {
             print("  ✓ and a size it is dragged to is remembered (\(remembered ?? "-"))")
         } else {
             print("  ✗ the manager's size was not remembered: \(remembered ?? "nothing stored")")
+            failures += 1
+        }
+
+        // Reopening must not cost the user that size. Every open swaps in a
+        // fresh content view controller — that is what revives a window
+        // SwiftUI had stopped updating (§6.5c) — and AppKit sizes a window to
+        // its new content view controller the moment it is assigned. That
+        // intermediate size was what got remembered, so a window the user had
+        // sized came back at the minimum and stayed there for the next launch
+        // too (user report, 2026-09-18).
+        manager.show()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        let reopened = window.contentRect(forFrameRect: window.frame).size
+        let stillStored = UserDefaults.standard.string(forKey: "manager.window.size")
+        if abs(reopened.width - 812) < 1, abs(reopened.height - 596) < 1,
+           stillStored == "812.0,596.0" {
+            print("  ✓ reopening it keeps the size it was left at "
+                  + "(\(Int(reopened.width))x\(Int(reopened.height)))")
+        } else {
+            print("  ✗ reopening the manager left it at \(Int(reopened.width))x"
+                  + "\(Int(reopened.height)) and remembered \(stillStored ?? "nothing")")
             failures += 1
         }
 
