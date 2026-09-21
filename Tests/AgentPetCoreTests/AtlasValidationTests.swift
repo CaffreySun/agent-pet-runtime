@@ -2,8 +2,10 @@ import Foundation
 import Testing
 @testable import AgentPetCore
 
-/// Builds a valid V1 atlas: every required cell has content, every unused cell
-/// is clear. Individual tests then break exactly one thing.
+/// Builds a valid atlas: every required cell has content, every unused cell is
+/// clear. That includes the extended atlas's neutral reference frame, which is
+/// required content in the middle of row 0's surplus run. Individual tests then
+/// break exactly one thing.
 private func validAtlas(_ profile: CompatibilityProfile = .openAICodexV1) -> RGBAAtlasBitmap {
     var bitmap = RGBAAtlasBitmap.empty(width: profile.atlasWidth, height: profile.atlasHeight)
     let atlas = SpriteAtlas(profile: profile)
@@ -11,6 +13,10 @@ private func validAtlas(_ profile: CompatibilityProfile = .openAICodexV1) -> RGB
         for rect in atlas.rects(for: track) {
             bitmap.fill(rect)
         }
+    }
+    if let neutral = profile.extendedNeutralCell,
+       let rect = try? atlas.rect(row: neutral.row, column: neutral.column) {
+        bitmap.fill(rect)
     }
     return bitmap
 }
@@ -80,6 +86,23 @@ struct SpriteAtlasTests {
         let atlas = SpriteAtlas(profile: .openAICodexV1)
         let running = atlas.profile.track(named: "running-right")!   // 8 frames
         #expect(atlas.unusedRects(for: running).isEmpty)
+    }
+
+    @Test("the extended atlas's neutral frame is not a surplus cell")
+    func extendedNeutralFrameIsNotSurplus() {
+        // Row 0 is six idle frames, then the neutral reference frame the look
+        // poses are measured against (used, required to have ink), then column
+        // 7, which is surplus like every other stray cell. Reading the neutral
+        // frame as surplus is what made eight installed V2 packages report
+        // "leaves N pixels in unused column 6" while upstream's own validator
+        // called them clean.
+        let v2 = SpriteAtlas(profile: .openAICodexV2)
+        let idle = v2.profile.track(named: "idle")!   // 6 frames, 8 columns
+        #expect(v2.unusedRects(for: idle).map { $0.x / 192 } == [7])
+
+        // V1 has no such cell: its column 6 is surplus, and must stay clear.
+        let v1 = SpriteAtlas(profile: .openAICodexV1)
+        #expect(v1.unusedRects(for: v1.profile.track(named: "idle")!).map { $0.x / 192 } == [6, 7])
     }
 
     @Test("a V2 gaze row contributes eight playable poses")
@@ -200,26 +223,56 @@ struct AtlasValidatorTests {
     @Test("a fully populated V2 atlas is valid with nothing to warn about")
     func v2FullyValid() {
         let profile = CompatibilityProfile.openAICodexV2
-        var bitmap = RGBAAtlasBitmap.empty(width: profile.atlasWidth, height: profile.atlasHeight)
-        let atlas = SpriteAtlas(profile: profile)
-        for track in profile.tracks where track.frameCount > 0 {
-            for rect in atlas.rects(for: track) { bitmap.fill(rect) }
-        }
+        let bitmap = validAtlas(profile)
         let report = validator.validate(bitmap, profile: profile)
         #expect(report.isValid)
         // V2 adds gaze poses, not spare capacity, so there is no partial
-        // support left to warn about.
+        // support left to warn about — and the neutral reference frame in row
+        // 0 is content, so the ink in it is not residue either: the shape every
+        // installed V2 package has, which this used to report as "leaves N
+        // pixels in unused column 6" while upstream's validator called it clean.
         #expect(report.warnings.isEmpty, "unexpected warnings: \(report.warnings.map(\.message))")
     }
 
-    @Test("a V2 atlas missing its gaze poses is reported")
-    func v2MissingGazePoses() {
+    @Test("a V2 atlas whose neutral reference frame is blank is refused")
+    func v2BlankNeutralFrame() throws {
         let profile = CompatibilityProfile.openAICodexV2
-        var bitmap = RGBAAtlasBitmap.empty(width: profile.atlasWidth, height: profile.atlasHeight)
+        var bitmap = validAtlas(profile)
         let atlas = SpriteAtlas(profile: profile)
-        // Fill the nine standard rows but leave the look rows empty.
-        for track in profile.tracks where track.kind != .look && track.frameCount > 0 {
-            for rect in atlas.rects(for: track) { bitmap.fill(rect) }
+        bitmap.fill(try atlas.rect(row: 0, column: 6), rgba: (0, 0, 0, 0))
+
+        let report = validator.validate(bitmap, profile: profile)
+        // The cell the sixteen look poses are normalized against is required
+        // content upstream too (`EXTENDED_NEUTRAL_LOOK_FRAME`, "6 + neutral"),
+        // so a blank one is broken, not a matter of taste.
+        #expect(!report.isValid)
+        #expect(report.errors.contains {
+            $0.message.contains("row 0 (idle) column 6") && $0.message.contains("neutral")
+        })
+    }
+
+    @Test("the cell beside the neutral frame is still surplus")
+    func v2ColumnSevenStillSurplus() throws {
+        let profile = CompatibilityProfile.openAICodexV2
+        var bitmap = validAtlas(profile)
+        let atlas = SpriteAtlas(profile: profile)
+        bitmap.fill(try atlas.rect(row: 0, column: 7))
+
+        let report = validator.validate(bitmap, profile: profile)
+        #expect(report.isValid)
+        #expect(report.warnings.contains { $0.message.contains("unused column 7") })
+    }
+
+    @Test("a V2 atlas missing its gaze poses is reported")
+    func v2MissingGazePoses() throws {
+        let profile = CompatibilityProfile.openAICodexV2
+        var bitmap = validAtlas(profile)
+        let atlas = SpriteAtlas(profile: profile)
+        // Clear the look rows, leaving everything else in place.
+        for track in profile.tracks where track.kind == .look {
+            for rect in atlas.rects(for: track) {
+                bitmap.fill(rect, rgba: (0, 0, 0, 0))
+            }
         }
         let report = validator.validate(bitmap, profile: profile)
         #expect(!report.isValid, "the sixteen gaze poses are required content")

@@ -876,12 +876,19 @@ Pets 页原本为**每个已装 pet** 保有一份解码后的 `SpriteFrames`（
    ├─ 尺寸 == profile 期望 (V1 1536x1872 / V2 1536x2288)
    ├─ 存在 alpha 通道
    ├─ 每行前 N 帧非空 (N = contract 帧数)
-   └─ 每行第 N 帧起完全透明
+   ├─ 扩展图集的中立参考格 (V2 = row 0 / col 6) 非空
+   └─ 每行第 N 帧起完全透明（中立参考格除外，见 §7.2）
 ```
 
-### 7.2 未使用单元格必须透明的原因
+### 7.2 未使用单元格必须透明，以及 row 0 col 6 这个例外
 
 这是官方 validator 的硬要求，也是最容易出的问题。若未使用单元格残留像素，播放器在切换到短行（如 `waving` 只有 4 帧）时会画出第 5、6 帧的残影。**必须在安装时拦截，运行时不做防御。**
+
+**定级的现状（2026-09-20 记）**：本 runtime 只按 `SpriteAtlas.rects(for:)` 采样 `0..<frameCount` 这些精确矩形，surplus 里的像素**不可达**，所以安装门禁把残留定为 **warning**（装得上，且管理器/`--diagnose` 都看得见理由），而官方 `validate_atlas.py` 是**作者向**门禁、同一情况是 error。理由与取舍写在 `AtlasValidator` 的文档注释里，`AtlasResidueDiagnosticTests` 钉住"残留永不为 error"这条。
+
+**例外：扩展图集的中立参考格（2026-09-20 修正，方向曾是反的）**。V2 的 row 0 不是 6 格，而是**"6 帧 + 中立"**——官方的 `make_contact_sheet.py` 就是这么标的（`frame_count_label` 返回 `"6 + neutral"`），`validate_atlas.py` 也把它算作 used（`EXTENDED_NEUTRAL_LOOK_FRAME = (0, 6)`，`used = column < frame_count or (is_extended_atlas and (row, column) == EXTENDED_NEUTRAL_LOOK_FRAME)`，并要求 ≥ `--min-used-pixels`）。它的用途写在 `assemble_extended_atlas.py`：`base_neutral_cell` 第一个就读这一格，16 个 look 姿势全部按从它量出的几何做归一化——空着就等于没有量取基准。
+
+所以这一格**既不是 surplus，也不是本 runtime 播放的帧**（neutral/front 是 pointer 死区，回落到 idle，见 `AnimationTrack`）。从前本 runtime 按 V1 的规则把 row 0 的第 6 格当 surplus：本机 `~/.codex/pets` 的 8 个 V2 宠物**全部**被报 `row 0 (idle) leaves N pixels in unused column 6 … deviates from the published contract`，而官方 validator 对同一批文件判 `errors: []`、`warnings: []`——判反了；同时反向的缺口也在：**空着的中立格没有任何检查**，那样的宠物能装上，却过不了 Codex 自己的门禁。现在：`CompatibilityProfile.extendedNeutralCell` 声明这一格（V1 为 nil）、`SpriteAtlas.unusedRects` 把它从 surplus 里排除、`AtlasValidator` 补上非空检查（空/过稀 → error，与官方 `is empty or too sparse` 同向）。诊断测试（`AtlasResidueDiagnosticTests`）现在 14 个宠物全 CLEAN。
 
 ### 7.3 性能约束
 

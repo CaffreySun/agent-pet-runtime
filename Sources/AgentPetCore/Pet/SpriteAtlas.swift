@@ -64,10 +64,20 @@ public struct SpriteAtlas: Sendable, Equatable {
     /// Cells a track must leave empty: past the frame count, up to the last
     /// column. The published contract requires these to be fully transparent —
     /// otherwise the leftovers of a shorter row bleed into playback.
+    ///
+    /// The extended atlas's neutral reference frame is the one exception: it
+    /// sits in the middle of this run (row 0, column 6 for V2) and is content,
+    /// not surplus — the contract's own gate demands ink there. It is not
+    /// played by any track either, so it belongs to neither list; see
+    /// `CompatibilityProfile.extendedNeutralCell`.
     public func unusedRects(for track: AnimationTrack) -> [CellRect] {
         let first = track.frameCount
         guard first < columns else { return [] }
-        return (first..<columns).compactMap { try? rect(row: track.row, column: $0) }
+        let extended = profile.extendedNeutralCell
+        return (first..<columns).compactMap { column -> CellRect? in
+            if extended?.row == track.row, extended?.column == column { return nil }
+            return try? rect(row: track.row, column: column)
+        }
     }
 
     public func contains(_ rect: CellRect) -> Bool {

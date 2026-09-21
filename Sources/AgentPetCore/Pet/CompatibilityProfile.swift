@@ -38,6 +38,30 @@ public enum CompatibilityProfile: String, Codable, Sendable, CaseIterable {
     /// columns of a short row, which must stay clear.
     public var lookRows: [Int] { hasLookDirections ? [9, 10] : [] }
 
+    /// The extended atlas's neutral reference frame: row 0, column 6 — the one
+    /// cell past a short row's frame count that is *used*. Nil where the
+    /// contract has none (V1).
+    ///
+    /// The toolchain is the authority here, and it says this cell is content:
+    /// `validate_atlas.py` counts it as used (`EXTENDED_NEUTRAL_LOOK_FRAME`,
+    /// `column_index < frame_count or (is_extended_atlas and …)`), and requires
+    /// ≥ its `--min-used-pixels` of ink in it, while `make_contact_sheet.py`
+    /// labels V2 row 0 "6 + neutral" rather than "6 frames". Its *purpose* is
+    /// in `assemble_extended_atlas.py`: `base_neutral_cell` reads it first and
+    /// the sixteen look poses are normalized against the geometry measured from
+    /// it, which is why it must not be blank.
+    ///
+    /// Nothing here samples it: neutral/front is the pointer dead zone and
+    /// falls back to idle, so this runtime has no frame for it (see
+    /// `SpriteAtlas.rects(for:)`). It is used-but-unplayed, which is why it is
+    /// neither a track frame nor a surplus cell.
+    public var extendedNeutralCell: (row: Int, column: Int)? {
+        switch self {
+        case .openAICodexV1: return nil
+        case .openAICodexV2: return (row: 0, column: 6)
+        }
+    }
+
     public static func matching(width: Int, height: Int) -> CompatibilityProfile? {
         allCases.first { $0.atlasWidth == width && $0.atlasHeight == height }
     }

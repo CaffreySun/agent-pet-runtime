@@ -103,6 +103,18 @@ struct AnimationTrackTests {
         #expect(!v2.rowsRequiringCleanSurplus.contains(10))
     }
 
+    @Test("only the extended atlas has a neutral reference frame")
+    func extendedNeutralFrame() {
+        let v2 = CompatibilityProfile.openAICodexV2
+        #expect(v2.extendedNeutralCell?.row == 0)
+        #expect(v2.extendedNeutralCell?.column == 6)
+        // It is not a frame of the idle track: neutral/front is the pointer
+        // dead zone and falls back to idle, so nothing here plays it.
+        #expect(v2.track(atRow: 0)?.frameCount == 6)
+        // V1 is the 8x9 assembly artifact, which has no such cell.
+        #expect(CompatibilityProfile.openAICodexV1.extendedNeutralCell == nil)
+    }
+
     @Test("every V1 row is a required row")
     func allV1RowsRequired() {
         let v1 = CompatibilityProfile.openAICodexV1

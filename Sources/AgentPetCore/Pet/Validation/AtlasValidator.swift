@@ -18,7 +18,9 @@ import Foundation
 ///
 /// So surplus-cell residue is reported as a warning, while genuinely broken
 /// content — an empty frame, a wrong-sized atlas, no alpha channel — stays an
-/// error.
+/// error. The extended atlas's neutral reference frame is content, not surplus
+/// (see `CompatibilityProfile.extendedNeutralCell`), so an empty one is an
+/// error for the same reason an empty playable frame is.
 public struct AtlasValidator: Sendable {
     /// Alpha above this counts as visible. Zero, matching the official tool,
     /// so surplus residue is detected as thoroughly as upstream would.
@@ -69,9 +71,28 @@ public struct AtlasValidator: Sendable {
             }
         }
 
+        // The extended atlas's neutral reference frame is a used cell that no
+        // track plays, so the loop above cannot see it: upstream's gate
+        // requires ink in it (`EXTENDED_NEUTRAL_LOOK_FRAME`, "6 + neutral"),
+        // and the look poses are normalized against the geometry measured from
+        // it. Blank is broken content, exactly as an empty frame is.
+        if let neutral = profile.extendedNeutralCell,
+           let rect = try? atlas.rect(row: neutral.row, column: neutral.column) {
+            let pixels = bitmap.opaquePixelCount(in: rect, alphaThreshold: alphaThreshold)
+            if pixels < minUsedPixels {
+                let name = profile.track(atRow: neutral.row)?.name ?? "row \(neutral.row)"
+                report.add("atlas", .error,
+                           "row \(neutral.row) (\(name)) column \(neutral.column) is the neutral "
+                           + "frame the look poses are measured against, and it is empty or too "
+                           + "sparse (\(pixels) pixels)")
+            }
+        }
+
         // Only rows with surplus columns are checked for residue. The look
         // rows use all eight columns, so they have none — flagging content
-        // there would report a correctly drawn gaze pose as a defect.
+        // there would report a correctly drawn gaze pose as a defect. The
+        // neutral frame is not among `unusedRects` for the same reason it is
+        // checked above: it is used.
         let cleanRows = Set(profile.rowsRequiringCleanSurplus)
         for track in profile.tracks where cleanRows.contains(track.row) {
             for rect in atlas.unusedRects(for: track) {
