@@ -752,6 +752,8 @@ Codex 的悬浮宠物第一次出现时会弹一条 **8 秒**的临时通知（t
 
 Codex 的设置页有 `Tuck Away Pet` / `Wake Pet`（`petVisible`，默认 true）。本项目放在菜单栏（状态菜单与右键菜单同源）：`Tuck Pet Away` / `Wake Pet`，持久化在 `AppConfig.pet.visible`。收纳时窗口 `orderOut` 并 `controller.stop()`（看不见的帧不值得算），唤醒时 `orderFrontRegardless()` 并重新起帧。**应用始终留在菜单栏**——那是唯一的回来的路。
 
+**菜单里不再有"活动会话"那一行**（2026-09-21 移除，用户报告"右键菜单里那行浅灰的运行中 session 一多就把整个菜单拉长"）。它从前是 `makeMenu()` 里一个 disabled 的 `NSMenuItem`，标题由 `activitySummary()` 拼成：`claude-code: running, codex: waitingInput, …`（没有会话时是 `No active sessions`）。**macOS 按最宽的一项决定菜单宽度**，所以会话数就是菜单宽度——这正是要拿掉它的原因。整行删除而不是截断：宠物旁的面板和管理器的 Activity 页都在展示同一批会话，而且有地方说得更多。菜单本身（同一个 `NSMenu`，右键与状态栏共用）实测 13 项，分隔线随之合并成一条。
+
 ### 6.5c 管理器的窗口：关掉之后 SwiftUI 不再更新它（2026-09-14 修正）
 
 管理器窗口从不释放（AppKit 保留已关闭的窗口与整棵 SwiftUI 树，§6.8 已证），于是留下两个问题：详情页的 30 Hz 预览定时器在关窗后继续空转；整棵视图树在窗口重新打开后可能不再收到 `@Published` 更新。

@@ -1015,12 +1015,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridgeItem.submenu = bridgeMenu
         menu.addItem(bridgeItem)
 
-        menu.addItem(.separator())
-
-        let activityItem = NSMenuItem(title: activitySummary(), action: nil, keyEquivalent: "")
-        activityItem.isEnabled = false
-        menu.addItem(activityItem)
-
+        // The live session list used to sit here as one disabled row —
+        // "claude-code: running, codex: waitingInput, …", or "No active
+        // sessions" when empty. Every session made that row longer, and macOS
+        // sizes a menu to its widest item, so a busy machine stretched the
+        // whole menu sideways (user report, 2026-09-21). Removed rather than
+        // shortened: the panel beside the pet and the manager's Activity page
+        // both show the same sessions with room to say more.
         menu.addItem(.separator())
         let about = NSMenuItem(title: "About Agent Pet Runtime", action: #selector(showAbout), keyEquivalent: "")
         about.target = self
@@ -1033,14 +1034,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quit)
 
         return menu
-    }
-
-    private func activitySummary() -> String {
-        let activities = controller.currentActivities
-        guard !activities.isEmpty else { return "No active sessions" }
-        return activities
-            .map { "\($0.agentID): \($0.state.rawValue)" }
-            .joined(separator: ", ")
     }
 
     // MARK: - Actions
