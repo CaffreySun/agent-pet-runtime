@@ -1451,8 +1451,19 @@ enum RenderSelfTest {
             failures += 1
         }
 
+        // The toggle by what it is, not by where it sits. A rebuilt tree's
+        // toolbar opens with a flexible space in front of it — and the toolbar
+        // a window *starts* with, one that was never laid out, holds a single
+        // item that is not the toggle at all (measured: 1 item before the
+        // close, 4 after the reopen, the toggle second). `items.first` was
+        // therefore never guaranteed to be this item, and reading it as one
+        // made the check depend on which build of the tree it happened to be
+        // looking at.
         func toggleView() -> NSView? {
-            guard let view = window.toolbar?.items.first?.view, view.window != nil else { return nil }
+            let toggle = window.toolbar?.items.first {
+                $0.itemIdentifier.rawValue.hasSuffix("toggleSidebar")
+            }
+            guard let view = toggle?.view, view.window != nil else { return nil }
             return view
         }
 
